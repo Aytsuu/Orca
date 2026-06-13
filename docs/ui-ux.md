@@ -541,7 +541,7 @@ Sits below the navbar, full width.
 - Section label: `.section-label`
 - Each agent row: `display: flex; justify-content: space-between; align-items: center; padding: --space-3 0`
 - Agent name: `--text-xs`, `--tracking-widest`, uppercase
-- Status: Agent Status Indicator component (§2.4)
+- Status: Agent Status Indicator component (section 2.4)
 - Separator: `--color-border-subtle`, `margin: --space-5 0`
 
 **AI Suggestion cards (right panel mini-cards):**
@@ -875,7 +875,7 @@ Use `.divider-labeled` with label text in `.section-label` style. `margin: --spa
 | Element | Style |
 |---|---|
 | Row container | `padding: --space-4 0`, `border-bottom: 1px solid --color-border-subtle`, flex, `align-items: center` |
-| Avatar | Same 32px avatar component (§2.2) |
+| Avatar | Same 32px avatar component (section 2.2) |
 | Name | `--text-sm`, `--weight-semibold`, `--color-text-primary` |
 | Role dropdown | `.category-badge` style as dropdown trigger. Badge variants: APPROVER (cyan), EDITOR (warning), VIEWER (muted). `▾` chevron suffix. Click opens inline dropdown with 3 options. Project creator's row shows badge only, no dropdown (they cannot demote themselves) |
 

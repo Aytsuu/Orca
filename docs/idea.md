@@ -14,14 +14,18 @@ It’s exhausting, it wastes valuable energy and resources. When execution fails
 ## AI Thinking
 
 **Why is AI the right approach?**
-AI can monitor team conversations, extract key decisions, detect unclear tasks, identify missing details, and turn scattered discussions into structured action plans. It can also identify weak points in the plan, synthesize context, highlight risks, and suggest improved workflows based on the team’s goals. Manually doing all of these causes the team to jump between apps like notion, trello, etc. It will be tedious and time consuming, and it is likely that they will miss some important details. That is why AI is the right approach for this problem. 
+Tools like Trello and Notion can store tasks and notes, but they require team members to correctly categorize, connect, and surface relevant information up front — and to do so manually, at the right moment. They have no awareness of what a message means in the context of past decisions. The specific gap AI fills is **proactive, unprompted retrieval and reasoning**: recognizing that a current discussion relates to a prior decision or risk without the user knowing to search for it. Relationships between tasks and decisions in real team conversations are often implicit and emerge over time — rule-based tools cannot detect them. AI can monitor conversations, extract key decisions, detect unclear tasks, identify missing details, and turn scattered discussions into structured action plans. It can also identify weak points in the plan, synthesize context across sessions, highlight risks, and suggest improved workflows based on the team's actual goals.
 
 **AI Capabilities**
 - Agentic Workflow
 - Generative AI
 
 **Describe your AI-powered solution**
-Our solution is an AI-powered team messaging platform where development teams can chat while an AI assistant analyzes conversations in real time. It summarizes discussions, organizes plans, detects gaps, and automatically suggests clearer tasks, timelines, priorities, and improved project plans for the team.
+Our solution is an AI-powered team messaging platform where development teams can chat while an AI assistant analyzes conversations in real time. The AI reads new messages and retrieves relevant context from a persistent project memory — a structured store of confirmed decisions, finalized tasks, and past summaries — using semantic search before generating any output. It then suggests clearer tasks, timelines, priorities, and improved project plans.
+
+**What triggers a suggestion vs. a summary:**
+- **Suggestion** — triggered when a new message semantically overlaps with an unresolved item or known risk in project memory (e.g., a team member mentions a person or deadline linked to a prior blocker the AI has flagged).
+- **Summary** — triggered on explicit user request, at the start of a new session, or when the AI detects that the active discussion has drifted significantly from the current sprint goal stored in memory.
 
 ## Responsible AI
 

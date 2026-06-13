@@ -48,7 +48,7 @@ Pin to these versions or newer. All code examples in this document assume them.
 - **Auth** — user management, JWT issuance, session refresh, row-level security (RLS)
 - **Realtime** — WebSocket broadcast for chat and agent status (frontend subscribes directly)
 
-> **Do not add** raw SQLAlchemy sessions, Alembic, PyJWT, or `python-jose` to this project. Schema changes go through Supabase migrations (see §16).
+> **Do not add** raw SQLAlchemy sessions, Alembic, PyJWT, or `python-jose` to this project. Schema changes go through Supabase migrations (see section 16).
 
 ---
 

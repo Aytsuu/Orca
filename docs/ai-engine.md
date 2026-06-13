@@ -26,7 +26,7 @@ Each project runs a pipeline of **4 specialized AI agents** that continuously mo
 
 ### AI Capabilities
 
-From [`idea.md § AI Thinking`](./idea.md):
+From [`idea.md > AI Thinking`](./idea.md):
 
 > *AI can monitor team conversations, extract key decisions, detect unclear tasks, identify missing details, and turn scattered discussions into structured action plans. It can also identify weak points in the plan, synthesize context, highlight risks, and suggest improved workflows based on the team's goals.*
 
@@ -38,7 +38,10 @@ The two capability modes the AI engine employs:
 | **Generative AI** | LLM-driven generation of summaries, structured plans, task lists, timelines, gap reports, and risk flags |
 
 **Solution statement** (from [`idea.md`](./idea.md)):
-> *An AI-powered team messaging platform where development teams can chat while an AI assistant analyzes conversations in real time. It summarizes discussions, organizes plans, detects gaps, and automatically suggests clearer tasks, timelines, priorities, and improved project plans for the team.*
+> *An AI-powered team messaging platform where development teams can chat while an AI assistant analyzes conversations in real time. The AI reads new messages and retrieves relevant context from a persistent project memory — a structured store of confirmed decisions, finalized tasks, and past summaries — using semantic search before generating any output. It then suggests clearer tasks, timelines, priorities, and improved project plans.*
+
+**Why AI, not Trello or Notion** (from [`idea.md > AI Thinking`](./idea.md)):
+> *Tools like Trello and Notion can store tasks and notes, but they require team members to correctly categorize, connect, and surface relevant information up front — and to do so manually, at the right moment. The specific gap AI fills is proactive, unprompted retrieval and reasoning: recognizing that a current discussion relates to a prior decision or risk without the user knowing to search for it. Relationships between tasks and decisions in real team conversations are often implicit and emerge over time — rule-based tools cannot detect them.*
 
 **Core principle:** The AI is a collaborator, not an executor. It analyzes, suggests, and flags — but **never modifies any project data without explicit human approval.**
 
@@ -199,7 +202,7 @@ Mirrors the MVP permission model:
 
 LLM context windows are limited. Long project conversations — especially those with media — will exceed context limits. Agents must never load raw history naively.
 
-### Responsible AI (from [`idea.md § Responsible AI`](./idea.md))
+### Responsible AI (from [`idea.md > Responsible AI`](./idea.md))
 
 **What could go wrong?**
 > *The context window of AI models is limited, which may not be able to keep up with long conversations, especially in chat apps that allow sending media like files, photos, videos, and audio. This will significantly impact AI reliability.*
@@ -207,7 +210,11 @@ LLM context windows are limited. Long project conversations — especially those
 **How we reduce that risk:**
 > *Chunk conversations into summaries, store key decisions in a project memory, index media transcripts, and use retrieval before generating plans. The AI should cite sources and ask confirmation when context is incomplete.*
 
-**Where humans remain involved** (from [`idea.md § Human Role`](./idea.md)):
+**What triggers a suggestion vs. a summary** (from [`idea.md > AI Thinking`](./idea.md)):
+- **Suggestion** — triggered when a new message semantically overlaps with an unresolved item or known risk in project memory (e.g., a team member mentions a person or deadline linked to a prior blocker the AI has flagged).
+- **Summary** — triggered on explicit user request, at the start of a new session, or when the AI detects that the active discussion has drifted significantly from the current sprint goal stored in memory.
+
+**Where humans remain involved** (from [`idea.md > Human Role`](./idea.md)):
 > *Humans should make the final decision before the AI-generated plan becomes official. The AI can suggest summaries, tasks, risks, and timelines, but team members should confirm if the plan is accurate, realistic, and aligned with their actual goals before anyone follows it.*
 
 These principles directly shape the context strategy and approval rules described below.
@@ -296,7 +303,7 @@ class AgentRunInput(BaseModel):
     triggered_by:      str               # "message" | "file_upload" | "manual"
     new_message_ids:   list[UUID]        # messages since last run
     new_file_ids:      list[UUID]        # newly uploaded files
-    context:           AgentContext      # assembled context (see §5)
+    context:           AgentContext      # assembled context (see section 5)
 ```
 
 ### Agent Context

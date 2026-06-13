@@ -1,0 +1,11 @@
+# Environment Variables
+.env
+
+# Agentic Configuration
+.agents
+.codex
+.claude
+.gemini
+contexts
+.mcp.json
+/AGENTS.md

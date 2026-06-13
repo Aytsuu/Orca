@@ -1,4 +1,4 @@
-# USAII Qualifier Submission  - Idea Passed
+# USAII Qualifier Submission - Idea Passed
 
 ## Problem Understanding
 

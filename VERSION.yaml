@@ -1,0 +1,9 @@
+name: "Orca"
+version: "0.1.0"
+description: "An AI-powered team messaging platform where development teams can chat while an AI assistant analyzes conversations in real time to build structured action plans."
+developers:
+  - name: "Paolo Araneta"
+    github: "Aytsuu"
+    role: "Developer"
+  - name: "Kent"
+    role: "Developer"

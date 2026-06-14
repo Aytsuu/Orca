@@ -1,0 +1,23 @@
+---
+// src/layouts/Page.astro
+import Base from './Base.astro';
+import { Navbar } from '../components/islands/ui/Navbar';
+import { Toast } from '../components/islands/ui/Toast';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const { title, description } = Astro.props;
+---
+
+<Base title={title} description={description}>
+  <div class="flex flex-col min-h-screen bg-background text-text-secondary">
+    <Navbar client:load transition:persist />
+    <main class="flex-grow flex flex-col">
+      <slot />
+    </main>
+    <Toast client:load transition:persist />
+  </div>
+</Base>

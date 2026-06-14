@@ -1,0 +1,26 @@
+---
+// src/pages/project/[id]/plan.astro
+import Page from '../../../layouts/Page.astro';
+import { TabBar } from '../../../components/islands/ui/TabBar';
+import PlanView from '../../../components/islands/features/PlanView';
+
+export function getStaticPaths() {
+  return [
+    { params: { id: 'runway-q3' } },
+    { params: { id: 'billing-v2' } }
+  ];
+}
+
+const { id } = Astro.params;
+
+if (!id) {
+  return Astro.redirect('/');
+}
+---
+
+<Page title="Project Plan — Orca Plan">
+  <TabBar currentTab="plan" projectId={id} client:load />
+  <PlanView projectId={id} client:only="react">
+    <div class="flex-grow flex bg-background w-full"></div>
+  </PlanView>
+</Page>

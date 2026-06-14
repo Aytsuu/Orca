@@ -1,0 +1,26 @@
+---
+// src/pages/project/[id]/settings/ai.astro
+import Page from '../../../layouts/Page.astro';
+import { TabBar } from '../../../components/islands/ui/TabBar';
+import SettingsView from '../../../components/islands/features/SettingsView';
+
+export function getStaticPaths() {
+  return [
+    { params: { id: 'runway-q3' } },
+    { params: { id: 'billing-v2' } }
+  ];
+}
+
+const { id } = Astro.params;
+
+if (!id) {
+  return Astro.redirect('/');
+}
+---
+
+<Page title="AI Settings — Orca Plan">
+  <TabBar currentTab="settings" projectId={id} client:load />
+  <SettingsView projectId={id} client:only="react">
+    <div class="flex-grow flex bg-background w-full"></div>
+  </SettingsView>
+</Page>

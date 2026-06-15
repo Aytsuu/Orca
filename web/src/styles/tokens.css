@@ -2,10 +2,10 @@
 :root {
   /* Colors */
   --color-background: #0B0E0C;
-  --color-surface: #111411;
-  --color-surface-raised: #181C18;
-  --color-border: #282B29;
-  --color-border-subtle: #1E211E;
+  --color-surface: #181C19;
+  --color-surface-raised: #222724;
+  --color-border: #353A37;
+  --color-border-subtle: #2A2F2C;
   --color-primary: #1BBFE0;
   --color-primary-hover: #16A8C6;
   --color-primary-muted: rgba(27, 191, 224, 0.12);

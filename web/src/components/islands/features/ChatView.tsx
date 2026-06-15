@@ -103,10 +103,10 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
   };
 
   return (
-    <div className="flex-grow flex flex-col lg:flex-row lg:h-[calc(100vh-104px)] lg:overflow-hidden bg-background select-none relative">
+    <div className="flex-grow flex flex-col lg:flex-row lg:h-[calc(100vh-104px)] lg:overflow-hidden bg-background select-none relative lg:p-4 lg:gap-4">
       {/* 1. Files Panel (Left Column) - Hidden on tablet/mobile unless selected */}
       <aside
-        className={`w-full lg:w-[22%] lg:min-w-[240px] lg:max-w-[300px] border-r border-border bg-surface p-6 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'files' ? 'flex absolute inset-0 z-10' : 'hidden'
+        className={`w-full lg:w-[22%] lg:min-w-[240px] lg:max-w-[300px] border-r border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface p-6 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'files' ? 'flex absolute inset-0 z-10' : 'hidden'
           } ${showTabletFiles ? 'flex absolute inset-y-0 left-0 w-[260px] z-30 shadow-2xl' : ''}`}
       >
         <div className="flex justify-between items-center">
@@ -152,7 +152,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
 
       {/* 2. Team Chat Panel (Center Column) */}
       <section
-        className={`flex-grow min-w-0 flex flex-col border-r border-border bg-background min-h-[50vh] ${mobileTab === 'chat' ? 'flex' : 'hidden lg:flex'
+        className={`flex-grow min-w-0 flex flex-col border-r border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface min-h-[50vh] ${mobileTab === 'chat' ? 'flex' : 'hidden lg:flex'
           }`}
       >
         {/* Chat Header */}
@@ -332,7 +332,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
         {/* Message Input Container */}
         <form
           onSubmit={handleSend}
-          className="p-6 border-t border-border-subtle bg-background flex flex-col shrink-0"
+          className="p-6 border-t border-border-subtle bg-surface flex flex-col shrink-0"
         >
           <div
             style={{ backgroundColor: 'transparent' }}
@@ -368,7 +368,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
 
       {/* 3. AI Activity Panel (Right Column) */}
       <aside
-        className={`w-full lg:w-[28%] lg:min-w-[300px] lg:max-w-[380px] border-l border-border bg-surface p-6 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'ai' ? 'flex absolute inset-0 z-10' : 'hidden'
+        className={`w-full lg:w-[28%] lg:min-w-[300px] lg:max-w-[380px] border-l border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface p-6 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'ai' ? 'flex absolute inset-0 z-10' : 'hidden'
           }`}
       >
         <span className="section-label">AI Activity</span>

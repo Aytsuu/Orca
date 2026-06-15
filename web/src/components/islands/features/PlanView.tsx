@@ -83,83 +83,85 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
   return (
     <div className="flex-grow flex flex-col bg-background select-none h-[calc(100vh-104px)] overflow-hidden">
 
-      {/* Plan Controls Bar */}
-      {isApprover ? (
-        <div className="h-[52px] px-8 bg-surface border-b border-border flex items-center justify-between shrink-0">
-          {/* Version Selector */}
-          <div className="flex items-center gap-3">
-            <button
-              disabled={versionIndex >= totalVersions - 1}
-              onClick={() => setVersionIndex(prev => prev + 1)}
-              className="btn-ghost p-1 h-8 w-8 rounded-sm disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
-              title="Previous Version"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <span className="text-sm text-text-primary font-semibold">
-              Version {versionDisplayNum} of {totalVersions}
-            </span>
-            <button
-              disabled={versionIndex <= 0}
-              onClick={() => setVersionIndex(prev => prev - 1)}
-              className="btn-ghost p-1 h-8 w-8 rounded-sm disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
-              title="Newer Version"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Center Badges / Action Row */}
-          <div className="flex items-center gap-4">
-            {gapCount > 0 && (
-              <span className="category-badge badge--editor text-xs py-1 px-3 flex items-center gap-1.5 font-semibold">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                <span>{gapCount} gaps flagged</span>
-              </span>
-            )}
-
-            <button
-              onClick={() => setIsRevertOpen(true)}
-              disabled={detail.revertsRemaining <= 0 || totalVersions <= 1}
-              className="btn-secondary py-1 px-3.5 text-xs font-semibold flex items-center gap-1.5"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Revert</span>
-            </button>
-
-            <button
-              onClick={() => setIsFinalizeOpen(true)}
-              disabled={hasPending || detail.finalizedAt !== undefined}
-              className="btn-primary py-1 px-3.5 text-xs font-semibold flex items-center gap-1.5"
-            >
-              {detail.finalizedAt ? (
-                <>
-                  <span>Finalized</span>
-                  <Check className="w-3.5 h-3.5 text-success" />
-                </>
-              ) : (
-                <>
-                  <span>Finalize & Sync</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      ) : (
-        /* Read Only view notice for Viewer */
-        <div className="bg-primary-muted border-b border-primary/20 px-8 py-3 flex items-center gap-3 shrink-0">
-          <Info className="w-4 h-4 text-primary shrink-0" />
-          <span className="text-xs font-semibold text-text-primary tracking-wide">
-            This plan was finalized on {detail.finalizedAt || 'Jun 12'}. Comment via chat.
-          </span>
-        </div>
-      )}
-
       {/* Main Content Layout */}
-      <div className="flex-grow flex flex-col md:flex-row relative overflow-hidden">
-        {/* Timeline Area (Center/Left) */}
-        <div className="flex-1 overflow-y-auto px-10 py-12 flex justify-center">
+      <div className="flex-grow flex flex-col md:flex-row relative overflow-hidden md:p-4 md:gap-4">
+        {/* Timeline Column (Center/Left) */}
+        <div className="flex-1 flex flex-col bg-surface md:rounded-xl md:overflow-hidden">
+          {/* Plan Controls Bar */}
+          {isApprover ? (
+            <div className="h-[52px] px-8 border-b border-border-subtle flex items-center justify-between shrink-0">
+              {/* Version Selector */}
+              <div className="flex items-center gap-3">
+                <button
+                  disabled={versionIndex >= totalVersions - 1}
+                  onClick={() => setVersionIndex(prev => prev + 1)}
+                  className="btn-ghost p-1 h-8 w-8 rounded-sm disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
+                  title="Previous Version"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-sm text-text-primary font-semibold">
+                  Version {versionDisplayNum} of {totalVersions}
+                </span>
+                <button
+                  disabled={versionIndex <= 0}
+                  onClick={() => setVersionIndex(prev => prev - 1)}
+                  className="btn-ghost p-1 h-8 w-8 rounded-sm disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
+                  title="Newer Version"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Center Badges / Action Row */}
+              <div className="flex items-center gap-4">
+                {gapCount > 0 && (
+                  <span className="category-badge badge--editor text-xs py-1 px-3 flex items-center gap-1.5 font-semibold">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>{gapCount} gaps flagged</span>
+                  </span>
+                )}
+
+                <button
+                  onClick={() => setIsRevertOpen(true)}
+                  disabled={detail.revertsRemaining <= 0 || totalVersions <= 1}
+                  className="btn-secondary py-1 px-3.5 text-xs font-semibold flex items-center gap-1.5"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Revert</span>
+                </button>
+
+                <button
+                  onClick={() => setIsFinalizeOpen(true)}
+                  disabled={hasPending || detail.finalizedAt !== undefined}
+                  className="btn-primary py-1 px-3.5 text-xs font-semibold flex items-center gap-1.5"
+                >
+                  {detail.finalizedAt ? (
+                    <>
+                      <span>Finalized</span>
+                      <Check className="w-3.5 h-3.5 text-success" />
+                    </>
+                  ) : (
+                    <>
+                      <span>Finalize & Sync</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Read Only view notice for Viewer */
+            <div className="bg-primary-muted border-b border-primary/20 px-8 py-3 flex items-center gap-3 shrink-0">
+              <Info className="w-4 h-4 text-primary shrink-0" />
+              <span className="text-xs font-semibold text-text-primary tracking-wide">
+                This plan was finalized on {detail.finalizedAt || 'Jun 12'}. Comment via chat.
+              </span>
+            </div>
+          )}
+
+          {/* Timeline Scrollable Content */}
+          <div className="flex-1 overflow-y-auto px-10 py-12 flex justify-center">
           <div className="max-w-[760px] w-full flex flex-col gap-8">
             <div>
               <h1 className="text-display-sm text-text-primary font-bold tracking-tight">
@@ -186,7 +188,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
                   </div>
 
                   {/* Tasks in Phase */}
-                  <div className="flex flex-col gap-4 border-l border-border pl-6 ml-3">
+                  <div className="flex flex-col gap-4 pl-6 ml-3">
                     {phase.tasks.map((task, tIdx) => {
                       const stepNum = String(tIdx + 1).padStart(2, '0');
 
@@ -240,10 +242,11 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
             </div>
           </div>
         </div>
+      </div>
 
         {/* 6.3 Review Panel Sidebar (Right, Approver Only) */}
         {isApprover && (
-          <aside className="w-full md:w-[280px] border-t md:border-t-0 md:border-l border-border bg-surface p-6 flex flex-col gap-6 shrink-0 md:h-full overflow-hidden">
+          <aside className="w-full md:w-[280px] border-t md:border-0 md:rounded-xl bg-surface p-6 flex flex-col gap-6 shrink-0 md:h-full overflow-hidden">
             <div className="flex justify-between items-center">
               <span className="section-label">PENDING CHANGES</span>
               <span className="category-badge badge--approver text-xs font-bold py-0.5 px-2">
@@ -273,16 +276,16 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
                   <div className="flex gap-2">
                     <button
                       onClick={() => acceptChange(change.id)}
-                      className="btn-primary py-1 px-3 text-[10px] font-bold rounded-sm flex-grow flex items-center justify-center gap-1"
+                      className="btn-primary py-1.5 px-4 text-xs font-semibold flex-grow flex items-center justify-center gap-1"
                     >
-                      <Check className="w-3 h-3" />
+                      <Check className="w-3.5 h-3.5" />
                       <span>Accept</span>
                     </button>
                     <button
                       onClick={() => rejectChange(change.id)}
-                      className="btn-secondary py-1 px-3 text-[10px] font-bold rounded-sm text-error border-error/20 hover:bg-error/5 flex items-center justify-center gap-1"
+                      className="btn-secondary py-1.5 px-4 text-xs font-semibold text-error border-error/20 hover:bg-error/5 flex items-center justify-center gap-1"
                     >
-                      <X className="w-3 h-3" />
+                      <X className="w-3.5 h-3.5" />
                       <span>Reject</span>
                     </button>
                   </div>
@@ -305,7 +308,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
             {hasPending && (
               <button
                 onClick={acceptAllChanges}
-                className="btn-primary w-full py-1.5 text-xs font-semibold rounded-sm flex items-center justify-center gap-1.5"
+                className="btn-primary w-full py-1.5 text-xs font-semibold flex items-center justify-center gap-1.5"
               >
                 <Check className="w-3.5 h-3.5" />
                 <span>Accept All</span>

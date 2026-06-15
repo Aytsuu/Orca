@@ -39,7 +39,7 @@ export const Navbar: React.FC = () => {
       <div className="flex items-center gap-2">
         <a href="/" className="flex items-center gap-4 hover:opacity-80 transition-opacity">
           <img src={logoSrc} alt="Orca Logo" className="h-6 w-6 object-contain" />
-          <span className="text-md font-bold text-text-primary tracking-tight">
+          <span className="text-md font-medium text-text-primary tracking-tight">
             {currentProjectId && projectName ? projectName : 'Orca'}
           </span>
         </a>

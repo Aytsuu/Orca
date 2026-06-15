@@ -1,0 +1,574 @@
+// src/components/islands/features/ChatView.tsx
+import React, { useState, useEffect, useRef } from 'react';
+import { useStore } from '@nanostores/react';
+import {
+  Plus,
+  FileText,
+  Search,
+  Users2,
+  Paperclip,
+  SendHorizontal,
+  Check,
+  Edit2,
+  X,
+  AlertTriangle,
+  Zap,
+  Info,
+  Sparkles,
+  CheckCircle2,
+  AlertCircle,
+  ArrowRight
+} from 'lucide-react';
+import {
+  activeProjectState,
+  selectProject,
+  sendMessage,
+  uploadFile,
+  acceptChange,
+  rejectChange,
+  addTeammate,
+  toastMessages,
+  addToast
+} from '../../../stores/projectStore';
+import { Modal } from '../ui/Modal';
+
+interface ChatViewProps {
+  projectId: string;
+}
+
+export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
+  const detail = useStore(activeProjectState);
+  const [messageText, setMessageText] = useState('');
+  const [mobileTab, setMobileTab] = useState<'files' | 'chat' | 'ai'>('chat');
+  const [isInviteOpen, setIsInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteName, setInviteName] = useState('');
+  const [inviteRole, setInviteRole] = useState<'APPROVER' | 'EDITOR' | 'VIEWER'>('VIEWER');
+
+  const [showTabletFiles, setShowTabletFiles] = useState(false);
+
+  // Edit suggestion state
+  const [editingSugId, setEditingSugId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
+
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Initialize active project detail
+  useEffect(() => {
+    selectProject(projectId);
+  }, [projectId]);
+
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [detail?.messages]);
+
+  if (!detail || detail.projectId !== projectId) {
+    return (
+      <div className="flex-grow flex items-center justify-center text-text-muted select-none">
+        Loading workspace data...
+      </div>
+    );
+  }
+
+  const handleSend = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!messageText.trim()) return;
+    sendMessage(messageText.trim());
+    setMessageText('');
+  };
+
+  const handleFakeUpload = () => {
+    const filenames = ['pr-specs.pdf', 'db-migration.sql', 'api-endpoints.json', 'assets-pack.zip'];
+    const randomName = filenames[Math.floor(Math.random() * filenames.length)];
+    const randomSize = `${(Math.random() * 5 + 1).toFixed(1)} MB`;
+    uploadFile(randomName, randomSize);
+  };
+
+  const handleInviteSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteName.trim() || !inviteEmail.trim()) return;
+
+    addTeammate(inviteName.trim(), inviteEmail.trim(), inviteRole);
+    setIsInviteOpen(false);
+    setInviteName('');
+    setInviteEmail('');
+    setInviteRole('VIEWER');
+  };
+
+  const roleDescriptions = {
+    APPROVER: 'Can accept, edit, and reject AI-generated plan changes.',
+    EDITOR: 'Can edit and reject AI changes, but cannot accept them.',
+    VIEWER: 'Can read the finalized plan and comment via chat.'
+  };
+
+  return (
+    <div className="flex-grow flex flex-col lg:flex-row lg:h-[calc(100vh-104px)] lg:overflow-hidden bg-background select-none relative lg:p-4 lg:gap-4">
+      {/* 1. Files Panel (Left Column) - Hidden on tablet/mobile unless selected */}
+      <aside
+        className={`w-full lg:w-[22%] lg:min-w-[240px] lg:max-w-[300px] border-r border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface p-6 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'files' ? 'flex absolute inset-0 z-10' : 'hidden'
+          } ${showTabletFiles ? 'flex absolute inset-y-0 left-0 w-[260px] z-30 shadow-2xl' : ''}`}
+      >
+        <div className="flex justify-between items-center">
+          <span className="section-label">Files</span>
+          {showTabletFiles && (
+            <button
+              onClick={() => setShowTabletFiles(false)}
+              className="text-text-muted hover:text-text-primary text-xs lg:hidden flex items-center gap-1"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Close</span>
+            </button>
+          )}
+        </div>
+
+        <div className="flex-grow overflow-y-auto flex flex-col gap-3 pr-1">
+          {detail.files.map((file) => (
+            <div
+              key={file.id}
+              className="flex items-center gap-3 p-2 hover:bg-primary-muted rounded-sm transition-colors cursor-pointer group"
+            >
+              <FileText className="w-4 h-4 text-text-muted group-hover:text-primary transition-colors shrink-0" />
+              <div className="overflow-hidden">
+                <p className="text-sm font-semibold text-text-primary truncate">{file.name}</p>
+                <p className="text-xs text-text-muted mt-0.5">{file.type} · {file.size}</p>
+              </div>
+            </div>
+          ))}
+
+          {detail.files.length === 0 && (
+            <div className="text-xs text-text-muted italic py-4">No files uploaded.</div>
+          )}
+        </div>
+
+        <button
+          onClick={handleFakeUpload}
+          className="btn-ghost border border-dashed border-border flex items-center justify-center gap-1.5 py-2 hover:border-primary hover:text-primary"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span>Add File</span>
+        </button>
+      </aside>
+
+      {/* 2. Team Chat Panel (Center Column) */}
+      <section
+        className={`flex-grow min-w-0 flex flex-col border-r border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface min-h-[50vh] ${mobileTab === 'chat' ? 'flex' : 'hidden lg:flex'
+          }`}
+      >
+        {/* Chat Header */}
+        <header className="h-[56px] px-8 border-b border-border-subtle flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-medium">Team Chat</h3>
+
+            {/* Tablet File Toggle */}
+            <button
+              onClick={() => setShowTabletFiles(!showTabletFiles)}
+              className="text-xs bg-surface border border-border px-2.5 py-1 rounded-sm text-text-muted hover:text-text-primary hover:border-text-muted transition-colors lg:hidden hidden md:inline-block"
+            >
+              ◫ Files
+            </button>
+          </div>
+
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => addToast('info', 'Search is currently in indexing mode.')}
+              className="btn-ghost p-2 h-8 w-8 rounded-md flex items-center justify-center hover:bg-surface-raised"
+              title="Search"
+              aria-label="Search chat"
+            >
+              <Search className="text-text-muted" />
+            </button>
+            <button
+              onClick={() => setIsInviteOpen(true)}
+              className="btn-ghost p-2 h-8 w-8 rounded-md flex items-center justify-center hover:bg-surface-raised"
+              title="Members"
+              aria-label="View project members"
+            >
+              <Users2 className="text-text-muted" />
+            </button>
+          </div>
+        </header>
+
+        {/* Message Feed */}
+        <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-6">
+          <div className="divider-labeled uppercase">TODAY</div>
+
+          {detail.messages.map((msg) => {
+            const isUser = msg.senderName === 'You';
+            const isAI = msg.isAI;
+
+            if (isAI && msg.aiSuggestion) {
+              const sug = msg.aiSuggestion;
+              const isPending = sug.status === 'pending';
+
+              return (
+                <div
+                  key={msg.id}
+                  className="bg-primary-muted border border-primary/20 rounded-sm p-6 flex flex-col gap-4 max-w-[680px] w-full self-end fade-up"
+                >
+                  <div className="flex justify-between items-center text-xs font-semibold">
+                    <div className="flex items-center gap-2 text-primary">
+                      <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <span className="tracking-wide uppercase">AI SUGGESTION</span>
+                    </div>
+                    <span className="text-text-muted">{msg.timestamp}</span>
+                  </div>
+
+                  <p className="text-md text-text-secondary leading-relaxed">
+                    {msg.content}
+                  </p>
+
+                  <div className="border border-border-subtle bg-background p-4 rounded-sm">
+                    <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">Proposed plan change</p>
+
+                    {editingSugId === sug.id ? (
+                      <div className="mt-2 flex flex-col gap-2">
+                        <textarea
+                          value={editingText}
+                          onChange={(e) => setEditingText(e.target.value)}
+                          rows={2}
+                          className="bg-surface border border-border p-2 text-sm text-text-primary focus:outline-none focus:border-primary rounded-sm"
+                        />
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => setEditingSugId(null)}
+                            className="px-2.5 py-1 text-xs btn-secondary"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => {
+                              sug.content = editingText; // direct mutation for local state
+                              setEditingSugId(null);
+                              addToast('success', 'Plan change draft updated.');
+                            }}
+                            className="px-2.5 py-1 text-xs btn-primary"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm font-semibold text-text-primary mt-1 select-text">
+                        {sug.content}
+                      </p>
+                    )}
+                  </div>
+
+                  {isPending && (
+                    <div className="flex gap-3 mt-1">
+                      <button
+                        onClick={() => acceptChange(sug.id)}
+                        className="btn-primary py-1.5 px-4 text-xs font-semibold flex items-center gap-1"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Accept</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingSugId(sug.id);
+                          setEditingText(sug.content);
+                        }}
+                        className="btn-secondary py-1.5 px-4 text-xs font-semibold flex items-center gap-1"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        onClick={() => rejectChange(sug.id)}
+                        className="btn-secondary text-error hover:bg-error/10 hover:border-error/30 py-1.5 px-4 text-xs font-semibold flex items-center gap-1"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>Reject</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {!isPending && (
+                    <div className="text-xs font-semibold flex items-center gap-1.5 mt-1 select-none">
+                      {sug.status === 'accepted' && (
+                        <>
+                          <span className="text-success flex items-center gap-1"><Check className="w-3.5 h-3.5" /> Approved & Synced</span>
+                          <span className="text-text-muted">plan updated</span>
+                        </>
+                      )}
+                      {sug.status === 'rejected' && (
+                        <span className="text-error flex items-center gap-1"><X className="w-3.5 h-3.5" /> Plan change rejected</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            return (
+              <div
+                key={msg.id}
+                className={`flex gap-4 max-w-[680px] w-full fade-up ${isUser ? 'self-end flex-row-reverse' : 'self-start'
+                  }`}
+              >
+                {/* Avatar */}
+                <div className="h-8 w-8 rounded-full bg-surface border border-border flex items-center justify-center text-xs font-semibold text-text-muted select-none shrink-0">
+                  {msg.senderInitials}
+                </div>
+
+                <div className={`flex flex-col gap-1 w-full ${isUser ? 'items-end' : 'items-start'}`}>
+                  <div className={`flex items-baseline gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
+                    <span className="text-xs font-semibold text-text-muted">{msg.senderName}</span>
+                    <span className="text-[10px] text-text-muted font-medium">{msg.timestamp}</span>
+                  </div>
+                  <p className={`text-md text-text-secondary leading-relaxed select-text whitespace-pre-wrap ${isUser ? 'text-right' : 'text-left'
+                    }`}>
+                    {msg.content}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* Message Input Container */}
+        <form
+          onSubmit={handleSend}
+          className="p-6 border-t border-border-subtle bg-surface flex flex-col shrink-0"
+        >
+          <div
+            style={{ backgroundColor: 'transparent' }}
+            className="flex items-center gap-3 bg-transparent border border-border rounded-xl pr-3 pl-5 py-2 w-full focus-within:border-text-muted transition-colors"
+          >
+            <textarea
+              required
+              placeholder="Type your message here..."
+              value={messageText}
+              onChange={(e) => setMessageText(e.target.value)}
+              rows={1}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend(e);
+                }
+              }}
+              style={{ backgroundColor: 'transparent', border: 'none', outline: 'none' }}
+              className="flex-1 bg-transparent border-0 outline-none focus:outline-none focus:ring-0 text-text-primary text-sm placeholder-text-muted resize-none py-1.5 h-[34px] max-h-40"
+            />
+
+            <button
+              type="submit"
+              disabled={!messageText.trim()}
+              className="h-8 w-8 rounded-full flex items-center justify-center transition-colors bg-surface-raised hover:bg-border text-text-secondary hover:text-text-primary disabled:opacity-40 disabled:hover:bg-surface-raised disabled:hover:text-text-secondary shrink-0 cursor-pointer disabled:cursor-not-allowed"
+              title="Send message"
+            >
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {/* 3. AI Activity Panel (Right Column) */}
+      <aside
+        className={`w-full lg:w-[28%] lg:min-w-[300px] lg:max-w-[380px] border-l border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface p-6 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'ai' ? 'flex absolute inset-0 z-10' : 'hidden'
+          }`}
+      >
+        <span className="section-label">AI Activity</span>
+
+        {/* Agents statuses */}
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-bold text-text-primary tracking-wider uppercase">AGENTS</span>
+
+          <div className="flex flex-col border border-border-subtle bg-background/50 rounded-sm divide-y divide-border-subtle/50">
+            {Object.entries(detail.agentStatus).map(([agent, status]) => {
+              const isActive = status === 'active';
+              const isComplete = status === 'complete';
+              const isError = status === 'error';
+
+              let labelColor = 'text-text-muted';
+              let iconNode: React.ReactNode = <span className="h-2 w-2 rounded-full bg-text-muted shrink-0" />;
+
+              if (isActive) {
+                labelColor = 'text-primary font-bold';
+                iconNode = <span className="h-2 w-2 rounded-full agent-pulse-dot shrink-0" />;
+              } else if (isComplete) {
+                labelColor = 'text-success';
+                iconNode = <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />;
+              } else if (isError) {
+                labelColor = 'text-error';
+                iconNode = <AlertCircle className="w-3.5 h-3.5 text-error shrink-0" />;
+              }
+
+              return (
+                <div key={agent} className="flex justify-between items-center px-4 py-2.5 text-xs">
+                  <span className="font-mono text-text-primary tracking-wider font-semibold">{agent}</span>
+                  <div className="flex items-center gap-2">
+                    {iconNode}
+                    <span className={`uppercase tracking-widest text-[10px] ${labelColor}`}>
+                      {status === 'active' ? 'Active' : status}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="border-t border-border-subtle pt-4 flex flex-col gap-3">
+          <span className="text-xs font-bold text-text-primary tracking-wider uppercase">SUGGESTIONS</span>
+
+          <div className="flex-grow overflow-y-auto flex flex-col gap-3 max-h-[350px]">
+            {detail.panelSuggestions.map((sug) => {
+              let iconNode = <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />;
+              let color = 'text-primary';
+
+              if (sug.type === 'GAP') {
+                iconNode = <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />;
+                color = 'text-warning';
+              } else if (sug.type === 'TASK') {
+                iconNode = <Zap className="w-3.5 h-3.5 text-success shrink-0" />;
+                color = 'text-success';
+              } else if (sug.type === 'INSIGHT') {
+                iconNode = <Info className="w-3.5 h-3.5 text-text-muted shrink-0" />;
+                color = 'text-text-muted';
+              }
+
+              return (
+                <div
+                  key={sug.id}
+                  className="bg-background border border-border-subtle rounded-sm p-4 flex flex-col gap-2"
+                >
+                  <div className="flex items-center gap-1.5 text-xs font-bold">
+                    {iconNode}
+                    <span className={`tracking-wider uppercase ${color}`}>{sug.type}</span>
+                  </div>
+                  <p className="text-xs text-text-secondary leading-relaxed line-clamp-2 overflow-hidden text-ellipsis">
+                    {sug.content}
+                  </p>
+                  <div className="flex justify-end">
+                    <a
+                      href={`/project/${projectId}/plan`}
+                      className="btn-ghost p-0 text-[10px] font-bold text-primary hover:bg-transparent flex items-center gap-1"
+                    >
+                      <span>View</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                </div>
+              );
+            })}
+
+            {detail.panelSuggestions.length === 0 && (
+              <div className="text-xs text-text-muted italic py-4">No active warnings or suggestions.</div>
+            )}
+          </div>
+        </div>
+      </aside>
+
+      {/* Mobile Bottom Navigation Bar (replaces sidebar controls on smaller viewports) */}
+      <nav className="fixed bottom-0 left-0 right-0 h-14 bg-surface-raised border-t border-border flex justify-around items-center lg:hidden z-20 select-none">
+        <button
+          onClick={() => setMobileTab('files')}
+          className={`flex flex-col items-center gap-1 text-[11px] font-semibold transition-colors ${mobileTab === 'files' ? 'text-primary' : 'text-text-muted'
+            }`}
+        >
+          <span className="text-lg leading-none">▢</span>
+          <span>Files</span>
+        </button>
+        <button
+          onClick={() => setMobileTab('chat')}
+          className={`flex flex-col items-center gap-1 text-[11px] font-semibold transition-colors ${mobileTab === 'chat' ? 'text-primary' : 'text-text-muted'
+            }`}
+        >
+          <span className="text-lg leading-none">◈</span>
+          <span>Chat</span>
+        </button>
+        <button
+          onClick={() => setMobileTab('ai')}
+          className={`flex flex-col items-center gap-1 text-[11px] font-semibold transition-colors ${mobileTab === 'ai' ? 'text-primary' : 'text-text-muted'
+            }`}
+        >
+          <span className="text-lg leading-none">●</span>
+          <span>AI activity</span>
+        </button>
+      </nav>
+
+      {/* Invite Teammates Modal */}
+      <Modal
+        isOpen={isInviteOpen}
+        onClose={() => setIsInviteOpen(false)}
+        title="INVITE TEAMMATES"
+      >
+        <form onSubmit={handleInviteSubmit} className="flex flex-col gap-5">
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+              Teammate Name
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. Sarah Connor"
+              value={inviteName}
+              onChange={(e) => setInviteName(e.target.value)}
+              className="bg-background border border-border rounded-sm px-4 py-2.5 text-text-primary text-md focus:outline-none focus:border-primary placeholder-text-muted"
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+              Email Address
+            </label>
+            <input
+              type="email"
+              required
+              placeholder="teammate@company.com"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              className="bg-background border border-border rounded-sm px-4 py-2.5 text-text-primary text-md focus:outline-none focus:border-primary placeholder-text-muted"
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+              Permission Level
+            </label>
+            <select
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value as any)}
+              className="bg-background border border-border rounded-sm px-4 py-2.5 text-text-primary text-md focus:outline-none focus:border-primary cursor-pointer"
+            >
+              <option value="VIEWER">VIEWER</option>
+              <option value="EDITOR">EDITOR</option>
+              <option value="APPROVER">APPROVER</option>
+            </select>
+          </div>
+
+          <div className="border border-border-subtle bg-background p-4 rounded-sm">
+            <p className="text-xs font-semibold text-text-primary uppercase tracking-wider">
+              {inviteRole} privileges
+            </p>
+            <p className="text-xs text-text-secondary mt-1">
+              {roleDescriptions[inviteRole]}
+            </p>
+          </div>
+
+          <div className="flex justify-end gap-3 border-t border-border-subtle pt-4 mt-2">
+            <button
+              type="button"
+              onClick={() => setIsInviteOpen(false)}
+              className="btn-secondary py-1.5 px-5 text-xs font-semibold"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn-primary py-1.5 px-5 text-xs font-semibold flex items-center gap-1.5"
+            >
+              <span>Send Invite</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </form>
+      </Modal>
+    </div>
+  );
+};
+export default ChatView;

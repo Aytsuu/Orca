@@ -322,6 +322,58 @@ src/pages/[...path].astro      →  /* (catch-all 404)
 src/pages/api/contact.ts       →  POST /api/contact
 ```
 
+### Navigation from React islands
+
+React islands **cannot** use `<Link>` from React Router — there is no React Router in this architecture. Use `navigate` from `astro:transitions/client` for programmatic navigation.
+
+```tsx
+// ✅ CORRECT — works inside any React island
+import { navigate } from 'astro:transitions/client';
+
+export function GoHomeButton() {
+  return (
+    <button onClick={() => navigate('/')}>← Projects</button>
+  );
+}
+```
+
+For declarative in-page links inside React islands, use a plain `<a>` tag. Astro's View Transitions router intercepts standard anchor clicks automatically.
+
+```tsx
+// ✅ CORRECT — plain anchor, intercepted by Astro
+export function TabLink({ href, label }: { href: string; label: string }) {
+  return <a href={href}>{label}</a>;
+}
+
+// ❌ WRONG — React Router Link has no router to bind to
+import { Link } from 'react-router-dom'; // never add this package
+export function TabLink({ href, label }: { href: string; label: string }) {
+  return <Link to={href}>{label}</Link>; // throws at runtime
+}
+```
+
+### View Transitions and the flicker anti-pattern
+
+Astro's View Transitions (`<ViewTransitions />`) adds animated page transitions. These can cause a **visible flash/flicker** between routes because the outgoing page's state animates out before the incoming page fully mounts.
+
+**Resolution:** Disable or keep the transition duration minimal (or use `transition:name` only on specific elements) for app-like SPA views where instant navigation is preferable.
+
+```astro
+<!-- Base.astro or layout -->
+<!-- Option A: Remove ViewTransitions entirely for app routes -->
+<!-- <ViewTransitions /> ← omit this -->
+
+<!-- Option B: Set instant transition for specific routes -->
+<style is:global>
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0ms; /* kills the flicker */
+  }
+</style>
+```
+
+**Agent rule:** If a page route is inside a persistent-shell layout (Navbar + TabBar always visible), suppress View Transitions for those routes. The shell should not animate out on navigation — only the page content area should change.
+
 ### Layout composition
 
 ```astro
@@ -659,6 +711,11 @@ This section records key architectural decisions and their rationale. Agents sho
 **Decision:** `.astro` components may use `<style>` (scoped). React islands use Tailwind utility classes only.
 **Rationale:** Scoped styles in Astro compile to attribute selectors with zero specificity problems. CSS Modules in React add build complexity without benefit when Tailwind is already in the stack.
 
+### ADR-006: `navigate()` for programmatic navigation; plain `<a>` for declarative links
+**Decision:** React islands use `navigate` from `astro:transitions/client` for programmatic navigation and plain `<a href>` anchors for declarative links. React Router is not installed.
+**Rationale:** The app uses Astro's MPA router, not a client-side router. React Router's `<Link>` requires a `<Router>` context that does not exist in this architecture. Astro's View Transitions intercepts standard anchor clicks automatically, so `<a>` works correctly and ships no extra JS.
+**Corollary:** View Transitions animations on shell-level routes (those inside a persistent Navbar + TabBar layout) must have `animation-duration: 0ms` to prevent a visible flicker as the shell DOM re-animates on every route change.
+
 ---
 
 ## 14. Anti-Patterns
@@ -720,6 +777,28 @@ export function BlogPost({ post }) {
 ```
 Keep the article in `.astro`. Extract only the `<LikeButton />` as a React island.
 
+### ❌ Using React Router `<Link>` inside an island
+```tsx
+// WRONG — no React Router context exists; throws at runtime
+import { Link } from 'react-router-dom'
+export function Tab({ href, label }) {
+  return <Link to={href}>{label}</Link>
+}
+```
+Use a plain `<a href={href}>` or `navigate(href)` from `astro:transitions/client`.
+
+### ❌ Leaving View Transitions enabled on persistent-shell routes
+```astro
+<!-- WRONG — the Navbar + TabBar shell flickers on every route change -->
+<!-- because ViewTransitions animates the entire page document out/in -->
+<ViewTransitions /> <!-- ← causes flicker in shell-based layouts -->
+```
+Either remove `<ViewTransitions />` from shell layouts or suppress the animation:
+```css
+::view-transition-old(root),
+::view-transition-new(root) { animation-duration: 0ms; }
+```
+
 ---
 
 ## Appendix: Quick Reference Card
@@ -733,4 +812,10 @@ New component checklist:
   5. Images?                           Always astro:assets <Image />
   6. API endpoint?                     Parse input with Zod. Thin route, fat lib/.
   7. Styling?                          Tailwind classes + cn() | Astro <style> for layout
+
+Navigation checklist (inside a React island):
+  1. Programmatic navigation?          navigate(href) from 'astro:transitions/client'
+  2. Declarative link?                 Plain <a href={href}> — Astro intercepts it
+  3. Never import react-router-dom     No router context exists in this project
+  4. Shell layout + ViewTransitions?   Set animation-duration: 0ms to kill flicker
 ```

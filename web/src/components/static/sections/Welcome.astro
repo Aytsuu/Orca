@@ -1,0 +1,72 @@
+---
+// src/components/static/sections/Welcome.astro
+---
+
+<div class="relative overflow-hidden bg-slate-900 text-white min-h-[80vh] flex items-center">
+  <!-- Decorative background elements -->
+  <div class="absolute inset-0 z-0 opacity-30">
+    <div class="absolute -top-40 -left-40 w-96 h-96 bg-purple-500 rounded-full filter blur-[128px] animate-pulse"></div>
+    <div class="absolute -bottom-40 -right-40 w-96 h-96 bg-indigo-500 rounded-full filter blur-[128px] animate-pulse delay-1000"></div>
+    <div class="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)]"></div>
+  </div>
+
+  <div class="relative z-10 max-w-5xl mx-auto px-6 py-16 text-center">
+    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-semibold mb-8 backdrop-blur-sm">
+      <span class="w-2 h-2 rounded-full bg-indigo-400 animate-ping"></span>
+      Astro 6.0 + React Architecture Loaded
+    </div>
+
+    <h1 class="text-5xl md:text-7xl font-extrabold tracking-tight mb-6 bg-gradient-to-r from-white via-indigo-200 to-indigo-400 bg-clip-text text-transparent">
+      Plan Projects with <span class="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">Orca Plan</span>
+    </h1>
+
+    <p class="max-w-2xl mx-auto text-lg md:text-xl text-slate-300 mb-10 leading-relaxed">
+      Analyze conversation logs, extract decisions, run AI agent workflows, and generate implementation-ready plans in real-time.
+    </p>
+
+    <div class="flex flex-wrap justify-center gap-4 mb-16">
+      <a href="/project/new" class="px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-medium shadow-lg shadow-indigo-600/30 hover:shadow-indigo-600/50 hover:scale-[1.02] active:scale-[0.98] transition-all">
+        Create a Project
+      </a>
+      <a href="https://docs.astro.build" target="_blank" rel="noopener noreferrer" class="px-6 py-3 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-800 text-slate-200 font-medium hover:border-slate-600 hover:scale-[1.02] active:scale-[0.98] transition-all">
+        Read Architecture Docs
+      </a>
+    </div>
+
+    <!-- Features Bento Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
+      <!-- Card 1 -->
+      <div class="group p-6 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-sm hover:border-indigo-500/30 transition-all duration-300">
+        <div class="w-10 h-10 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+          </svg>
+        </div>
+        <h3 class="text-lg font-bold text-slate-100 mb-2">AI Agent Chat</h3>
+        <p class="text-sm text-slate-400 leading-relaxed">Multi-agent pipelines analyze chat history, extracting key requirements and action items automatically.</p>
+      </div>
+
+      <!-- Card 2 -->
+      <div class="group p-6 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-sm hover:border-purple-500/30 transition-all duration-300">
+        <div class="w-10 h-10 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>
+          </svg>
+        </div>
+        <h3 class="text-lg font-bold text-slate-100 mb-2">Automated Planning</h3>
+        <p class="text-sm text-slate-400 leading-relaxed">Converts decisions into structured implementation plans, tracked version history, and interactive checklists.</p>
+      </div>
+
+      <!-- Card 3 -->
+      <div class="group p-6 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-sm hover:border-pink-500/30 transition-all duration-300">
+        <div class="w-10 h-10 rounded-lg bg-pink-500/10 text-pink-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+          </svg>
+        </div>
+        <h3 class="text-lg font-bold text-slate-100 mb-2">Real-time Updates</h3>
+        <p class="text-sm text-slate-400 leading-relaxed">Powered by Supabase Realtime to stream messages and update plan status instantly as agent runs complete.</p>
+      </div>
+    </div>
+  </div>
+</div>

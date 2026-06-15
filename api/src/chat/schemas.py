@@ -1,0 +1,32 @@
+from __future__ import annotations
+
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import Field
+
+from src.models import ApiModel
+
+
+class MessageCreate(ApiModel):
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class MessageOut(ApiModel):
+    id: UUID
+    project_id: UUID
+    session_id: str
+    content: str
+    created_at: datetime
+
+
+class UploadUrlOut(ApiModel):
+    bucket: str
+    storage_path: str
+    token: str
+    signed_url: str | None = None
+
+
+class UploadUrlRequest(ApiModel):
+    filename: str = Field(min_length=1, max_length=255)
+    mime_type: str = Field(min_length=1, max_length=255)

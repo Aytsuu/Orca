@@ -333,13 +333,20 @@ export function selectProject(projectId: string) {
   activeProjectState.set(detail);
 }
 
-export function createProject(name: string, description: string): string {
+export function createProject(name: string, description: string, skipAtomUpdate = false): string {
   const list = projects.get();
   const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `proj-${Date.now()}`;
   
   // Check duplication
   const exists = list.some(p => p.id === id);
-  const finalId = exists ? `${id}-${Date.now().toString().slice(-4)}` : id;
+  let finalId = id;
+  if (exists) {
+    let counter = 1;
+    while (list.some(p => p.id === `${id}-${counter}`)) {
+      counter++;
+    }
+    finalId = `${id}-${counter}`;
+  }
 
   const newProject: Project = {
     id: finalId,
@@ -352,7 +359,9 @@ export function createProject(name: string, description: string): string {
   };
 
   const updatedList = [newProject, ...list];
-  projects.set(updatedList);
+  if (!skipAtomUpdate) {
+    projects.set(updatedList);
+  }
   saveProjectsToStorage(updatedList);
 
   // Initialize and seed details in localStorage
@@ -835,4 +844,51 @@ export function removeMCPServer(name: string) {
   activeProjectState.set(nextState);
   saveProjectDetailToStorage(detail.projectId, nextState);
   addToast('warning', `Disconnected tool server: ${name}`);
+}
+
+export function renameProject(projectId: string, newName: string) {
+  const list = projects.get();
+  const updatedList = list.map(p => {
+    if (p.id === projectId) {
+      return { ...p, name: newName };
+    }
+    return p;
+  });
+  projects.set(updatedList);
+  saveProjectsToStorage(updatedList);
+
+  const detail = activeProjectState.get();
+  if (detail && detail.projectId === projectId) {
+    const updatedPlan = {
+      ...detail.currentPlan,
+      title: `Project Plan — ${newName}`
+    };
+    const nextState = {
+      ...detail,
+      currentPlan: updatedPlan
+    };
+    activeProjectState.set(nextState);
+    saveProjectDetailToStorage(projectId, nextState);
+  } else {
+    const detailFromStorage = loadProjectDetailFromStorage(projectId);
+    detailFromStorage.currentPlan.title = `Project Plan — ${newName}`;
+    saveProjectDetailToStorage(projectId, detailFromStorage);
+  }
+}
+
+export function deleteProject(projectId: string) {
+  const list = projects.get();
+  const updatedList = list.filter(p => p.id !== projectId);
+  projects.set(updatedList);
+  saveProjectsToStorage(updatedList);
+
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(STORAGE_KEY_DETAILS + projectId);
+  }
+  addToast('warning', 'Project deleted successfully.');
+}
+
+export function getProjectMembers(projectId: string): Teammate[] {
+  const detail = loadProjectDetailFromStorage(projectId);
+  return detail.teammates || [];
 }

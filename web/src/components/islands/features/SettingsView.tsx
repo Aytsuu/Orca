@@ -99,20 +99,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
   };
 
   return (
-    <div className="max-w-[720px] mx-auto px-8 py-12 w-full fade-up flex flex-col gap-8 select-none">
+    <div className="h-[calc(100vh-112px)] overflow-y-auto w-full fade-up">
+      <div className="max-w-[720px] mx-auto px-8 py-12 flex flex-col gap-8">
 
-      {/* Page Header */}
-      <div>
-        <h2 className="text-text-primary text-xl font-bold mt-1">
-          Configure what the AI can do in this project
-        </h2>
-      </div>
+        {/* Page Header */}
+        <div>
+          <h2 className="text-text-primary text-xl font-bold mt-1">
+            Configure what the AI can do in this project
+          </h2>
+        </div>
 
       {/* ── AI PERMISSIONS ── */}
       <div className="flex flex-col gap-4">
         <div className="divider-labeled uppercase">AI PERMISSIONS</div>
 
-        <div className="flex flex-col border border-border-subtle bg-surface/30 rounded-sm divide-y divide-border-subtle">
+        <div className="flex flex-col border border-border-subtle bg-surface rounded-xl divide-y divide-border-subtle overflow-hidden">
 
           {/* Analyze conversations */}
           <div className="flex justify-between items-center p-5">
@@ -255,7 +256,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
             return (
               <div
                 key={server.name}
-                className="bg-surface border border-border-subtle rounded-sm p-5 flex justify-between items-center"
+                className="bg-surface border border-border-subtle rounded-xl p-5 flex justify-between items-center"
               >
                 <div className="flex items-start gap-4">
                   <Server className="w-4 h-4 text-text-muted mt-0.5 shrink-0" />
@@ -286,7 +287,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
           {/* Add MCP server trigger */}
           <button
             onClick={() => setIsMcpOpen(true)}
-            className="btn-ghost border border-dashed border-border py-2 flex items-center justify-center gap-1.5 hover:border-primary hover:text-primary rounded-sm text-xs"
+            className="btn-ghost border border-dashed border-border py-2 flex items-center justify-center gap-1.5 hover:border-primary hover:text-primary rounded-xl text-xs"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Add MCP Server</span>
@@ -298,7 +299,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
       <div className="flex flex-col gap-4">
         <div className="divider-labeled uppercase">TEAM PERMISSIONS</div>
 
-        <div className="flex flex-col border border-border-subtle bg-surface/30 rounded-sm divide-y divide-border-subtle">
+        <div className="flex flex-col border border-border-subtle bg-surface rounded-xl divide-y divide-border-subtle overflow-hidden">
           {detail.teammates.map((member) => {
             const isSelfOrCreator = member.isCreator || member.id === 'creator_id';
             const isApprover = member.role === 'APPROVER';
@@ -431,6 +432,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
         </form>
       </Modal>
 
+      </div>
     </div>
   );
 };

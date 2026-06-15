@@ -1,5 +1,5 @@
 // src/stores/projectStore.ts
-import { atom, map } from 'nanostores';
+import { atom } from 'nanostores';
 
 export interface Project {
   id: string;
@@ -311,7 +311,7 @@ function saveProjectDetailToStorage(projectId: string, state: ProjectDetailState
 // -------------------------------------------------------------
 export const projects = atom<Project[]>(loadProjectsFromStorage());
 export const sessionId = atom<string>(loadSessionId());
-export const activeProjectState = map<ProjectDetailState | null>(null);
+export const activeProjectState = atom<ProjectDetailState | null>(null);
 export const toastMessages = atom<{ id: string; type: 'success' | 'warning' | 'error' | 'info'; text: string }[]>([]);
 
 // -------------------------------------------------------------
@@ -452,13 +452,15 @@ export function triggerAIPipeline(userText?: string) {
     updateAgentStatus('ANALYZER', 'active');
 
     // Add a panel suggestion dynamically
-    const isFile = userText?.includes('[Uploaded File:');
-    const gapText = isFile
+    const isFile = !!userText?.includes('[Uploaded File:');
+    const gapText = (isFile && userText)
       ? `Found new dependencies in file: "${userText.replace('[Uploaded File: ', '').replace(']', '')}"`
       : `Extracted action items related to: "${userText || 'discussion'}"`;
     
+    const changeId = `ch_${Date.now()}`;
+    
     const newPanelSuggestion: AIPanelSuggestion = {
-      id: `ps_${Date.now()}`,
+      id: `ps_${changeId}`,
       type: isFile ? 'INSIGHT' : 'GAP',
       content: gapText
     };
@@ -473,7 +475,6 @@ export function triggerAIPipeline(userText?: string) {
         ? `I've analyzed the document. Recommend adding architectural reviews to Phase 1.`
         : `Based on your request, I propose adding a new deliverable checklist.`;
 
-      const changeId = `ch_${Date.now()}`;
       const newChange: PendingChange = {
         id: changeId,
         type: 'ADD_TASK',

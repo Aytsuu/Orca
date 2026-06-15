@@ -6,8 +6,12 @@ import { useStore } from '@nanostores/react';
 import orcaLogo from '../../../assets/orca_logo.png';
 import { projects, activeProjectState } from '../../../stores/projectStore';
 
-export const Navbar: React.FC = () => {
-  const [isHome, setIsHome] = useState(false);
+interface NavbarProps {
+  isHome?: boolean;
+}
+
+export const Navbar: React.FC<NavbarProps> = ({ isHome: initialIsHome = false }) => {
+  const [isHome, setIsHome] = useState(initialIsHome);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
 
   const projectList = useStore(projects);
@@ -35,7 +39,7 @@ export const Navbar: React.FC = () => {
   const logoSrc = typeof orcaLogo === 'string' ? orcaLogo : orcaLogo.src;
 
   return (
-    <header className="sticky top-0 z-50 h-[56px] border-b border-border-subtle bg-background/80 backdrop-blur-md flex items-center px-8 justify-between select-none">
+    <header className="sticky top-0 z-50 h-[64px] py-3 bg-background/80 backdrop-blur-md flex items-center px-8 justify-between select-none">
       <div className="flex items-center gap-2">
         <a href="/" className="flex items-center gap-4 hover:opacity-80 transition-opacity">
           <img src={logoSrc} alt="Orca Logo" className="h-6 w-6 object-contain" />

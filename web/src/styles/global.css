@@ -2,10 +2,50 @@
 @import url('https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@100..900&display=swap');
 @import './tokens.css';
 @import './typography.css';
+@import "tailwindcss";
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@theme {
+  --color-background: #0B0E0C;
+  --color-surface: #181C19;
+  --color-surface-raised: #222724;
+  --color-border: #353A37;
+  --color-border-subtle: #2A2F2C;
+  --color-primary: #1BBFE0;
+  --color-primary-hover: #16A8C6;
+  --color-primary-muted: rgba(27, 191, 224, 0.12);
+  --color-primary-glow: rgba(27, 191, 224, 0.25);
+  --color-text-primary: #F5F7F5;
+  --color-text-secondary: #A8B5AC;
+  --color-text-muted: #7D8D83;
+  --color-text-inverse: #0B0E0C;
+  --color-success: #2ECC71;
+  --color-warning: #F39C12;
+  --color-error: #E74C3C;
+
+  --font-heading: 'Google Sans Flex', 'Inter', sans-serif;
+  --font-body: 'Google Sans Flex', 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --text-xs: 12px;
+  --text-sm: 15px;
+  --text-md: 18px;
+  --text-lg: 22px;
+  --text-display-sm: 36px;
+  --text-display-md: 48px;
+  --text-mono-sm: 13px;
+
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-pill: 999px;
+
+  --font-weight-semibold: 500;
+  --font-weight-bold: 500;
+  --font-weight-extrabold: 500;
+  --font-weight-black: 500;
+
+  --animate-pulse-glow: pulseGlow 2s infinite;
+  --animate-fade-up: fadeUp 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
 
 /* Base HTML Overrides */
 html,

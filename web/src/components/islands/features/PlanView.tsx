@@ -10,7 +10,7 @@ import {
   X,
   ArrowRight,
   Info,
-  Sparkles
+  Zap
 } from 'lucide-react';
 import {
   activeProjectState,
@@ -81,7 +81,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
   const hasPending = detail.pendingChanges.length > 0;
 
   return (
-    <div className="flex-grow flex flex-col bg-background select-none h-[calc(100vh-104px)] overflow-hidden">
+    <div className="flex-grow flex flex-col bg-background h-[calc(100vh-112px)] overflow-hidden">
 
       {/* Main Content Layout */}
       <div className="flex-grow flex flex-col md:flex-row relative overflow-hidden md:p-4 md:gap-4">
@@ -246,7 +246,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
 
         {/* 6.3 Review Panel Sidebar (Right, Approver Only) */}
         {isApprover && (
-          <aside className="w-full md:w-[280px] border-t md:border-0 md:rounded-xl bg-surface p-6 flex flex-col gap-6 shrink-0 md:h-full overflow-hidden">
+          <aside className="w-full md:w-[28%] md:min-w-[300px] md:max-w-[380px] border-t md:border-0 md:rounded-xl bg-surface p-6 flex flex-col gap-6 shrink-0 md:h-full overflow-hidden">
             <div className="flex justify-between items-center">
               <span className="section-label">PENDING CHANGES</span>
               <span className="category-badge badge--approver text-xs font-bold py-0.5 px-2">
@@ -262,7 +262,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
                 >
                   <div>
                     <span className="text-[10px] font-bold text-primary tracking-widest uppercase flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5" />
+                      <Zap className="w-3.5 h-3.5" />
                       <span>{change.type.replace('_', ' ')}</span>
                     </span>
                     <h4 className="text-sm font-bold text-text-primary mt-1 leading-snug">
@@ -304,17 +304,6 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
                 </div>
               )}
             </div>
-
-            {hasPending && (
-              <button
-                onClick={acceptAllChanges}
-                className="btn-primary w-full py-1.5 text-xs font-semibold flex items-center justify-center gap-1.5"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>Accept All</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            )}
           </aside>
         )}
       </div>

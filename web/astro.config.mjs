@@ -1,6 +1,6 @@
 import { defineConfig } from 'astro/config';
 import react from '@astrojs/react';
-import tailwind from '@astrojs/tailwind';
+import tailwindcss from '@tailwindcss/vite';
 import mdx from '@astrojs/mdx';
 import sitemap from '@astrojs/sitemap';
 
@@ -11,12 +11,12 @@ export default defineConfig({
 
   integrations: [
     react(),
-    tailwind({ applyBaseStyles: false }), // We manage global.css manually
     mdx(),
     sitemap(),
   ],
 
   vite: {
+    plugins: [tailwindcss()],
     resolve: {
       alias: {
         '@': '/src',

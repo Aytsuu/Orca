@@ -38,38 +38,38 @@
 
 ---
 
-## Phase 2 - Backend (FastAPI)
+## [x] Phase 2 - API (FastAPI)
 
 ### Infrastructure
-- [ ] `main.py` - app setup, lifespan, router registration
-- [ ] `supabase_client.py` - async client factory
-- [ ] `config.py` - global settings via pydantic-settings
-- [ ] `exceptions.py` - base exception hierarchy
+- [x] `main.py` - app setup, lifespan, router registration
+- [x] `supabase_client.py` - async client factory
+- [x] `config.py` - global settings via pydantic-settings
+- [x] `exceptions.py` - base exception hierarchy
 
 ### Projects domain
-- [ ] `POST /api/v1/projects` - create project, auto-add creator session as `creator` member
-- [ ] `GET /api/v1/projects` - list projects for current session
-- [ ] `GET /api/v1/projects/{project_id}` - get single project
+- [x] `POST /api/v1/projects` - create project, auto-add creator session as `creator` member
+- [x] `GET /api/v1/projects` - list projects for current session
+- [x] `GET /api/v1/projects/{project_id}` - get single project
 
 ### Chat domain
-- [ ] `POST /api/v1/projects/{project_id}/messages` - persist message; Realtime delivers it
-- [ ] `GET /api/v1/projects/{project_id}/messages` - fetch message history
-- [ ] `GET /api/v1/projects/{project_id}/files/upload-url` - return signed Supabase Storage URL
+- [x] `POST /api/v1/projects/{project_id}/messages` - persist message; Realtime delivers it
+- [x] `GET /api/v1/projects/{project_id}/messages` - fetch message history
+- [x] `GET /api/v1/projects/{project_id}/files/upload-url` - return signed Supabase Storage URL
 
 ### Members domain *(simplified - no real auth, use session_id)*
-- [ ] `POST /api/v1/projects/{project_id}/members` - add a session as a member with a role
-- [ ] `PATCH /api/v1/projects/{project_id}/members/{session_id}/permissions` - update can_approve / can_edit
+- [x] `POST /api/v1/projects/{project_id}/members` - add a session as a member with a role
+- [x] `PATCH /api/v1/projects/{project_id}/members/{session_id}/permissions` - update can_approve / can_edit
 
 ### Plans domain
-- [ ] `GET /api/v1/projects/{project_id}/plan` - return current finalized plan
-- [ ] `GET /api/v1/projects/{project_id}/plan/proposal` - return pending proposal (approvers only)
-- [ ] `POST /api/v1/projects/{project_id}/plan/approve` - approve proposal items; trigger Updater
-- [ ] `POST /api/v1/projects/{project_id}/plan/reject` - reject proposal; mark as rejected
-- [ ] `POST /api/v1/projects/{project_id}/plan/revert` - revert to previous version (max 3)
+- [x] `GET /api/v1/projects/{project_id}/plan` - return current finalized plan
+- [x] `GET /api/v1/projects/{project_id}/plan/proposal` - return pending proposal (approvers only)
+- [x] `POST /api/v1/projects/{project_id}/plan/approve` - approve proposal items; trigger Updater
+- [x] `POST /api/v1/projects/{project_id}/plan/reject` - reject proposal; mark as rejected
+- [x] `POST /api/v1/projects/{project_id}/plan/revert` - revert to previous version (max 3)
 
 ### Agents domain
-- [ ] `GET /api/v1/projects/{project_id}/agents/status` - return agent pipeline status
-- [ ] `POST /api/v1/projects/{project_id}/agents/trigger` - manually trigger pipeline (approvers only)
+- [x] `GET /api/v1/projects/{project_id}/agents/status` - return agent pipeline status
+- [x] `POST /api/v1/projects/{project_id}/agents/trigger` - manually trigger pipeline (approvers only)
 
 ---
 
@@ -86,32 +86,32 @@
 
 ---
 
-## Phase 4 - Frontend
+## [x] Phase 4 - Frontend
 
 ### Layout & Design System
-- [/] Global CSS / Tailwind config - color palette, typography, dark mode
-- [/] Page shell - sidebar nav, tab switching
+- [x] Global CSS / Tailwind config - color palette, typography, dark mode
+- [x] Page shell - sidebar nav, tab switching
 
 ### Homepage
-- [/] Project list - card grid, "Create Project" button
-- [/] Create Project modal - name, description fields
+- [x] Project list - card grid, "Create Project" button
+- [x] Create Project modal - name, description fields
 
 ### Project Interface - Chat Tab
-- [/] 3-column layout: Files (left) | Chat (center) | AI Activity (right)
-- [/] Chat center: message list (Realtime subscription), message input, file attach button
-- [/] Files left panel: uploaded file list, upload trigger
-- [/] AI Activity right panel: agent status indicator, extracted items, gap/risk report, proposal preview
+- [x] 3-column layout: Files (left) | Chat (center) | AI Activity (right)
+- [x] Chat center: message list (Realtime subscription), message input, file attach button
+- [x] Files left panel: uploaded file list, upload trigger
+- [x] AI Activity right panel: agent status indicator, extracted items, gap/risk report, proposal preview
 
 ### Project Interface - Plan Tab
-- [/] Plan viewer - renders current finalized plan content
-- [/] Proposal diff view - shows pending changes with Accept / Reject controls per item (approvers only)
-- [/] Version history - list of past versions with revert button (max 3)
-- [/] "Plan finalized" notification for non-approver members
+- [x] Plan viewer - renders current finalized plan content
+- [x] Proposal diff view - shows pending changes with Accept / Reject controls per item (approvers only)
+- [x] Version history - list of past versions with revert button (max 3)
+- [x] "Plan finalized" notification for non-approver members
 
 ### Session Identity *(replaces auth)*
-- [/] On first load, generate and persist a `session_id` to localStorage
-- [/] Pass `session_id` as a header (`X-Session-Id`) on all API requests
-- [/] Backend reads `X-Session-Id` to identify "current user"
+- [x] On first load, generate and persist a `session_id` to localStorage
+- [x] Pass `session_id` as a header (`X-Session-Id`) on all API requests
+- [x] Backend reads `X-Session-Id` to identify "current user"
 
 ---
 

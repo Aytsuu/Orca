@@ -81,7 +81,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
   const hasPending = detail.pendingChanges.length > 0;
 
   return (
-    <div className="flex-grow flex flex-col bg-background select-none">
+    <div className="flex-grow flex flex-col bg-background select-none h-[calc(100vh-104px)] overflow-hidden">
 
       {/* Plan Controls Bar */}
       {isApprover ? (
@@ -157,7 +157,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
       )}
 
       {/* Main Content Layout */}
-      <div className="flex-grow flex flex-col md:flex-row relative">
+      <div className="flex-grow flex flex-col md:flex-row relative overflow-hidden">
         {/* Timeline Area (Center/Left) */}
         <div className="flex-1 overflow-y-auto px-10 py-12 flex justify-center">
           <div className="max-w-[760px] w-full flex flex-col gap-8">
@@ -190,14 +190,14 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
                     {phase.tasks.map((task, tIdx) => {
                       const stepNum = String(tIdx + 1).padStart(2, '0');
 
-                      let rowStyle = '';
+                      let rowStyle = 'border-l-2 border-transparent hover:bg-surface-raised/40';
                       let badge = null;
 
                       if (task.isNew) {
-                        rowStyle = 'border-l-2 border-primary bg-primary-muted/20 pl-4 py-2 rounded-sm';
+                        rowStyle = 'border-l-2 border-primary bg-primary-muted/10 hover:bg-primary-muted/20';
                         badge = <span className="category-badge badge--approver text-[9px] py-0.5 px-1.5 font-bold">NEW</span>;
                       } else if (task.hasGap) {
-                        rowStyle = 'border-l-2 border-warning bg-warning/5 pl-4 py-2 rounded-sm';
+                        rowStyle = 'border-l-2 border-warning bg-warning/5 hover:bg-warning/10';
                         badge = (
                           <span className="text-warning text-xs font-semibold flex items-center gap-1.5">
                             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
@@ -209,7 +209,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
                       return (
                         <div
                           key={task.id}
-                          className={`flex items-start gap-4 transition-all ${rowStyle}`}
+                          className={`flex items-start gap-4 transition-all p-2 -mx-2 rounded-sm ${rowStyle}`}
                         >
                           <span className="font-mono text-xs text-text-muted mt-1 select-none">
                             {stepNum}
@@ -243,7 +243,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
 
         {/* 6.3 Review Panel Sidebar (Right, Approver Only) */}
         {isApprover && (
-          <aside className="w-full md:w-[280px] border-t md:border-t-0 md:border-l border-border bg-surface p-6 flex flex-col gap-6 shrink-0 md:h-[calc(100vh-160px)] md:sticky md:top-0">
+          <aside className="w-full md:w-[280px] border-t md:border-t-0 md:border-l border-border bg-surface p-6 flex flex-col gap-6 shrink-0 md:h-full overflow-hidden">
             <div className="flex justify-between items-center">
               <span className="section-label">PENDING CHANGES</span>
               <span className="category-badge badge--approver text-xs font-bold py-0.5 px-2">

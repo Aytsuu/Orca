@@ -172,7 +172,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
           <div className="flex gap-1.5">
             <button
               onClick={() => addToast('info', 'Search is currently in indexing mode.')}
-              className="btn-ghost p-2 h-10 w-10 rounded-md flex items-center justify-center hover:bg-surface-raised"
+              className="btn-ghost p-2 h-8 w-8 rounded-md flex items-center justify-center hover:bg-surface-raised"
               title="Search"
               aria-label="Search chat"
             >
@@ -180,7 +180,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
             </button>
             <button
               onClick={() => setIsInviteOpen(true)}
-              className="btn-ghost p-2 h-10 w-10 rounded-md flex items-center justify-center hover:bg-surface-raised"
+              className="btn-ghost p-2 h-8 w-8 rounded-md flex items-center justify-center hover:bg-surface-raised"
               title="Members"
               aria-label="View project members"
             >

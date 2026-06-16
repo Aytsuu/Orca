@@ -12,6 +12,7 @@ from src.plans.schemas import PlanApprove, PlanOut, PlanReject, ProposalOut
 from src.plans.service import (
     approve_proposal,
     get_current_plan,
+    get_latest_proposal,
     get_pending_proposal,
     reject_proposal,
     revert_plan,
@@ -40,6 +41,16 @@ async def get_pending_proposal_endpoint(
 ) -> DataEnvelope[ProposalOut | None]:
     require_approver_membership(project_context["membership"])
     proposal = await get_pending_proposal(supabase, str(project_id))
+    return DataEnvelope(data=ProposalOut.model_validate(proposal) if proposal else None)
+
+
+@router.get("/{project_id}/plan/proposals/latest", response_model=DataEnvelope[ProposalOut | None])
+async def get_latest_proposal_endpoint(
+    project_id: UUID,
+    _: Annotated[dict, Depends(get_project_context)],
+    supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
+) -> DataEnvelope[ProposalOut | None]:
+    proposal = await get_latest_proposal(supabase, str(project_id))
     return DataEnvelope(data=ProposalOut.model_validate(proposal) if proposal else None)
 
 

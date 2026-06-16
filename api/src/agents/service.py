@@ -33,6 +33,30 @@ async def get_agent_statuses(supabase: AsyncClient, project_id: str) -> list[dic
     return initialized
 
 
+async def get_latest_agent_artifacts(supabase: AsyncClient, project_id: str) -> list[dict]:
+    latest_runs = (
+        await supabase.table("agent_run")
+        .select("*")
+        .eq("project_id", project_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    ).data
+    if not latest_runs:
+        return []
+
+    latest_run = latest_runs[0]
+    artifacts = (
+        await supabase.table("agent_artifact")
+        .select("*")
+        .eq("project_id", project_id)
+        .eq("run_id", latest_run["id"])
+        .order("created_at", desc=True)
+        .execute()
+    ).data
+    return artifacts
+
+
 async def set_agent_status(
     supabase: AsyncClient,
     *,

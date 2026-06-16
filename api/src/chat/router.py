@@ -8,8 +8,21 @@ from supabase import AsyncClient
 
 from src.agents.queue import QueueProducer, get_queue_producer
 from src.agents.service import trigger_agents
-from src.chat.schemas import MessageCreate, MessageOut, UploadUrlOut, UploadUrlRequest
-from src.chat.service import create_message, create_signed_upload, list_messages
+from src.chat.schemas import (
+    MessageCreate,
+    MessageOut,
+    UploadedFileCreate,
+    UploadedFileOut,
+    UploadUrlOut,
+    UploadUrlRequest,
+)
+from src.chat.service import (
+    create_message,
+    create_signed_upload,
+    finalize_uploaded_file,
+    list_messages,
+    list_uploaded_files,
+)
 from src.models import DataEnvelope
 from src.projects.dependencies import get_project_context
 from src.supabase_client import get_supabase_admin
@@ -72,3 +85,44 @@ async def get_upload_url_endpoint(
         filename=query.filename,
     )
     return DataEnvelope(data=upload_url)
+
+
+@router.post(
+    "/{project_id}/files",
+    response_model=DataEnvelope[UploadedFileOut],
+    status_code=status.HTTP_201_CREATED,
+)
+async def finalize_uploaded_file_endpoint(
+    project_id: UUID,
+    payload: UploadedFileCreate,
+    project_context: Annotated[dict, Depends(get_project_context)],
+    supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
+    queue_producer: Annotated[QueueProducer, Depends(get_queue_producer)],
+) -> DataEnvelope[UploadedFileOut]:
+    uploaded_file = await finalize_uploaded_file(
+        supabase,
+        project_id=str(project_id),
+        session_id=project_context["session_id"],
+        filename=payload.filename,
+        mime_type=payload.mime_type,
+        storage_path=payload.storage_path,
+        size_bytes=payload.size_bytes,
+    )
+    await trigger_agents(
+        supabase,
+        queue_producer,
+        project_id=str(project_id),
+        triggered_by=project_context["session_id"],
+        file_ids=[uploaded_file["id"]],
+    )
+    return DataEnvelope(data=UploadedFileOut.model_validate(uploaded_file))
+
+
+@router.get("/{project_id}/files", response_model=DataEnvelope[list[UploadedFileOut]])
+async def list_uploaded_files_endpoint(
+    project_id: UUID,
+    _: Annotated[dict, Depends(get_project_context)],
+    supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
+) -> DataEnvelope[list[UploadedFileOut]]:
+    files = await list_uploaded_files(supabase, str(project_id))
+    return DataEnvelope(data=[UploadedFileOut.model_validate(row) for row in files])

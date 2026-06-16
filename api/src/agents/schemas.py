@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from src.models import ApiModel
@@ -23,3 +23,12 @@ class AgentTriggerOut(ApiModel):
     project_id: UUID
     status: str
     reused_active_run: bool = False
+
+
+class AgentArtifactOut(ApiModel):
+    id: UUID
+    run_id: UUID
+    project_id: UUID
+    agent: AgentName
+    payload: dict[str, Any]
+    created_at: datetime

@@ -14,5 +14,17 @@ class RateLimitError(EngineError):
     error_code = "RATE_LIMITED"
 
 
+class QuotaExceededError(EngineError):
+    error_code = "QUOTA_EXCEEDED"
+
+
+class AuthenticationError(EngineError):
+    error_code = "AUTHENTICATION_ERROR"
+
+
+class TransportError(EngineError):
+    error_code = "TRANSPORT_ERROR"
+
+
 class ConfigurationError(EngineError):
     error_code = "CONFIGURATION_ERROR"

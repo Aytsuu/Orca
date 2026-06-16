@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from datetime import datetime, timezone
 
 from src.agents.base import StepResult
@@ -22,6 +23,7 @@ from src.repository import (
 )
 
 
+@lru_cache
 def build_default_llm_client() -> JsonLlmClient:
     settings = get_settings()
     if settings.llm_provider == "fake":

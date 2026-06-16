@@ -3,10 +3,12 @@ import type {
   Project,
   Teammate,
   ProjectMessage,
+  ProjectFile,
   ApiEnvelope,
   ApiProject,
   ApiProjectMember,
   ApiProjectMessage,
+  ApiProjectFile,
   ApiMemberInvitation,
 } from './types';
 
@@ -14,6 +16,8 @@ export interface ProjectRepository {
   fetchProjects(sessionId: string): Promise<Project[]>;
   fetchProjectMessages(projectId: string, sessionId: string): Promise<ProjectMessage[]>;
   createProjectMessage(projectId: string, content: string, sessionId: string): Promise<ProjectMessage>;
+  fetchProjectFiles(projectId: string, sessionId: string): Promise<ProjectFile[]>;
+  uploadProjectFile(projectId: string, file: File, sessionId: string): Promise<ProjectFile>;
   fetchProjectMembers(projectId: string, sessionId: string): Promise<Teammate[]>;
   fetchProjectInvitationLink(projectId: string, sessionId: string): Promise<string>;
   createProjectInvitation(
@@ -63,6 +67,38 @@ export class ApiProjectRepository implements ProjectRepository {
       }
     );
     return mapApiProjectMessage(response.data);
+  }
+
+  async fetchProjectFiles(projectId: string, sessionId: string): Promise<ProjectFile[]> {
+    const response = await apiFetch<ApiEnvelope<ApiProjectFile[]>>(
+      `/api/projects/${projectId}/files`,
+      sessionId
+    );
+    return response.data.map(mapApiProjectFile);
+  }
+
+  async uploadProjectFile(projectId: string, file: File, sessionId: string): Promise<ProjectFile> {
+    const body = new FormData();
+    body.set('file', file);
+
+    const response = await fetch(`/api/projects/${projectId}/files/upload`, {
+      method: 'POST',
+      headers: {
+        'X-Session-Id': sessionId,
+      },
+      body,
+    });
+
+    if (!response.ok) {
+      const fallbackMessage = `Request failed with status ${response.status}`;
+      const errorBody = (await response.json().catch(() => null)) as
+        | { error?: { message?: string }; errorMessage?: string }
+        | null;
+      throw new Error(errorBody?.error?.message || errorBody?.errorMessage || fallbackMessage);
+    }
+
+    const payload = (await response.json()) as ApiEnvelope<ApiProjectFile>;
+    return mapApiProjectFile(payload.data);
   }
 
   async fetchProjectMembers(projectId: string, sessionId: string): Promise<Teammate[]> {
@@ -210,6 +246,19 @@ export function mapApiProjectMessage(message: ApiProjectMessage): ProjectMessage
     sessionId: message.session_id,
     content: message.content,
     createdAt: message.created_at,
+  };
+}
+
+export function mapApiProjectFile(file: ApiProjectFile): ProjectFile {
+  return {
+    id: file.id,
+    projectId: file.project_id,
+    sessionId: file.session_id,
+    filename: file.filename,
+    mimeType: file.mime_type,
+    storagePath: file.storage_path,
+    sizeBytes: file.size_bytes,
+    createdAt: file.created_at,
   };
 }
 

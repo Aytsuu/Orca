@@ -27,6 +27,17 @@ export interface ProjectMessage {
   isOptimistic?: boolean;
 }
 
+export interface ProjectFile {
+  id: string;
+  projectId: string;
+  sessionId: string;
+  filename: string;
+  mimeType: string;
+  storagePath: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
 export interface ApiEnvelope<T> {
   data: T;
 }
@@ -59,6 +70,17 @@ export interface ApiProjectMessage {
   project_id: string;
   session_id: string;
   content: string;
+  created_at: string;
+}
+
+export interface ApiProjectFile {
+  id: string;
+  project_id: string;
+  session_id: string;
+  filename: string;
+  mime_type: string;
+  storage_path: string;
+  size_bytes: number;
   created_at: string;
 }
 

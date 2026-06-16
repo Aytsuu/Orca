@@ -26,6 +26,8 @@ global.localStorage = {
   },
 } as any;
 
+global.fetch = vi.fn();
+
 // Now import the facade exports
 import {
   toastMessages,
@@ -87,6 +89,8 @@ describe('projectStore tests', () => {
       fetchProjects: vi.fn(),
       fetchProjectMessages: vi.fn(),
       createProjectMessage: vi.fn(),
+      fetchProjectFiles: vi.fn(),
+      uploadProjectFile: vi.fn(),
       fetchProjectMembers: vi.fn(),
       fetchProjectInvitationLink: vi.fn(),
       createProjectInvitation: vi.fn(),
@@ -237,6 +241,8 @@ describe('projectStore tests', () => {
       fetchProjects: vi.fn(),
       fetchProjectMessages: vi.fn(),
       createProjectMessage: vi.fn(),
+      fetchProjectFiles: vi.fn(),
+      uploadProjectFile: vi.fn(),
       fetchProjectMembers: vi.fn(),
       fetchProjectInvitationLink: vi.fn(),
       createProjectInvitation: vi.fn(),
@@ -338,6 +344,8 @@ describe('projectStore tests', () => {
       fetchProjects: vi.fn(),
       fetchProjectMessages: vi.fn(),
       createProjectMessage: vi.fn(),
+      fetchProjectFiles: vi.fn(),
+      uploadProjectFile: vi.fn(),
       fetchProjectMembers: vi.fn(),
       fetchProjectInvitationLink: vi.fn(),
       createProjectInvitation: vi.fn(),
@@ -422,6 +430,84 @@ describe('projectStore tests', () => {
         projectId: 'proj_1',
         sessionId: 'beta',
         content: 'Reply from beta',
+        createdAt: '2026-06-17T10:01:00Z',
+      });
+    });
+  });
+
+  describe('Project Repository Files', () => {
+    it('fetches project files from the api', async () => {
+      const repo = new ApiProjectRepository();
+      const { apiFetch } = await import('../lib/api/client');
+      (apiFetch as Mock).mockResolvedValue({
+        data: [
+          {
+            id: 'file_1',
+            project_id: 'proj_1',
+            session_id: 'alpha',
+            filename: 'brief.pdf',
+            mime_type: 'application/pdf',
+            storage_path: 'proj_1/alpha/brief.pdf',
+            size_bytes: 2048,
+            created_at: '2026-06-17T10:00:00Z',
+          },
+        ],
+      });
+
+      const files = await repo.fetchProjectFiles('proj_1', 'alpha');
+
+      expect(apiFetch).toHaveBeenCalledWith('/api/projects/proj_1/files', 'alpha');
+      expect(files).toEqual([
+        {
+          id: 'file_1',
+          projectId: 'proj_1',
+          sessionId: 'alpha',
+          filename: 'brief.pdf',
+          mimeType: 'application/pdf',
+          storagePath: 'proj_1/alpha/brief.pdf',
+          sizeBytes: 2048,
+          createdAt: '2026-06-17T10:00:00Z',
+        },
+      ]);
+    });
+
+    it('uploads a project file through the frontend upload route', async () => {
+      const repo = new ApiProjectRepository();
+      const file = new File(['brief'], 'brief.pdf', { type: 'application/pdf' });
+      (global.fetch as Mock).mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          data: {
+            id: 'file_2',
+            project_id: 'proj_1',
+            session_id: 'alpha',
+            filename: 'brief.pdf',
+            mime_type: 'application/pdf',
+            storage_path: 'proj_1/alpha/brief.pdf',
+            size_bytes: 5,
+            created_at: '2026-06-17T10:01:00Z',
+          },
+        }),
+      });
+
+      const uploaded = await repo.uploadProjectFile('proj_1', file, 'alpha');
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(global.fetch).toHaveBeenCalledWith('/api/projects/proj_1/files/upload', {
+        method: 'POST',
+        headers: {
+          'X-Session-Id': 'alpha',
+        },
+        body: expect.any(FormData),
+      });
+      expect(uploaded).toEqual({
+        id: 'file_2',
+        projectId: 'proj_1',
+        sessionId: 'alpha',
+        filename: 'brief.pdf',
+        mimeType: 'application/pdf',
+        storagePath: 'proj_1/alpha/brief.pdf',
+        sizeBytes: 5,
         createdAt: '2026-06-17T10:01:00Z',
       });
     });

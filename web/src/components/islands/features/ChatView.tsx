@@ -30,10 +30,14 @@ import {
   useProjectMessages,
   useSendProjectMessage,
 } from '../../../lib/query/projectMessages';
+import {
+  useProjectFiles,
+  useUploadProjectFile,
+} from '../../../lib/query/projectFiles';
 import { QueryProvider } from '../providers/QueryProvider';
 import { ShareProjectModal } from './ShareProjectModal';
 import { sessionId } from '../../../stores/project/session';
-import { toInitials } from '../../../stores/project/repository';
+import { formatRelativeTime, toInitials } from '../../../stores/project/repository';
 
 interface ChatViewProps {
   projectId: string;
@@ -46,7 +50,13 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     isLoading: isMessagesLoading,
     error: messagesError,
   } = useProjectMessages(projectId);
+  const {
+    data: projectFiles,
+    isLoading: isFilesLoading,
+    error: filesError,
+  } = useProjectFiles(projectId);
   const sendMessageMutation = useSendProjectMessage(projectId);
+  const uploadFileMutation = useUploadProjectFile(projectId);
   const currentSessionId = sessionId.get();
 
   const projectList = useStore(projects);
@@ -64,7 +74,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const [editingText, setEditingText] = useState('');
 
   const chatEndRef = useRef<HTMLDivElement>(null);
-
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<Array<{
     id: string;
     name: string;
@@ -88,11 +98,6 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
 
   // Initialize non-chat mock state when projectId changes
   useEffect(() => {
-    setFiles([
-      { id: 'file_1', name: 'pr-specs.pdf', size: '2.4 MB', type: 'PDF', uploadedAt: '10m ago' },
-      { id: 'file_2', name: 'api-endpoints.json', size: '1.2 MB', type: 'JSON', uploadedAt: '5m ago' }
-    ]);
-
     setAgentStatus({
       MONITOR: 'idle',
       ANALYZER: 'idle',
@@ -108,6 +113,25 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
       }
     ]);
   }, [projectId]);
+
+  useEffect(() => {
+    if (projectFiles) {
+      setFiles(
+        projectFiles.map((file) => ({
+          id: file.id,
+          name: file.filename,
+          size: formatFileSize(file.sizeBytes),
+          type: file.mimeType.split('/').pop()?.toUpperCase() || 'FILE',
+          uploadedAt: formatRelativeTime(file.createdAt),
+        }))
+      );
+      return;
+    }
+
+    if (!isFilesLoading && !filesError) {
+      setFiles([]);
+    }
+  }, [projectFiles, isFilesLoading, filesError]);
 
   const isInitialLoad = useRef(true);
 
@@ -202,21 +226,20 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     }
   };
 
-  const handleFakeUpload = () => {
-    const filenames = ['db-migration.sql', 'assets-pack.zip', 'architecture.md'];
-    const randomName = filenames[Math.floor(Math.random() * filenames.length)];
-    const fileExt = randomName.split('.').pop()?.toUpperCase() || 'FILE';
-    const randomSize = `${(Math.random() * 5 + 1).toFixed(1)} MB`;
+  const handleUploadSelection = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
 
-    const newFile = {
-      id: `file_${Date.now()}`,
-      name: randomName,
-      size: randomSize,
-      type: fileExt,
-      uploadedAt: 'Just now'
-    };
-    setFiles(prev => [newFile, ...prev]);
-    addToast('success', `${randomName} uploaded successfully!`);
+    try {
+      await uploadFileMutation.mutateAsync(file);
+      addToast('success', `${file.name} uploaded successfully.`);
+    } catch (uploadError) {
+      addToast(
+        'error',
+        uploadError instanceof Error ? uploadError.message : 'Unable to upload file.'
+      );
+    }
   };
 
   const handleApproveProposal = (sugId: string) => {
@@ -298,16 +321,30 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
           ))}
 
           {files.length === 0 && (
-            <div className="text-xs text-text-muted italic py-4">No files uploaded.</div>
+            <div className="text-xs text-text-muted py-4">No files uploaded.</div>
           )}
         </div>
 
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          onChange={(event) => {
+            void handleUploadSelection(event);
+          }}
+        />
+
         <button
-          onClick={handleFakeUpload}
-          className="btn-ghost border border-solid border-border rounded-full flex items-center justify-center gap-1.5 py-2 hover:border-primary hover:text-primary"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploadFileMutation.isPending}
+          className="btn-ghost border border-solid border-border rounded-full flex items-center justify-center gap-1.5 py-2 hover:border-primary hover:text-primary disabled:opacity-60"
         >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Add File</span>
+          {uploadFileMutation.isPending ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Plus className="w-3.5 h-3.5" />
+          )}
+          <span>{uploadFileMutation.isPending ? 'Uploading...' : 'Add File'}</span>
         </button>
       </aside>
 
@@ -628,3 +665,10 @@ export const ChatView: React.FC<ChatViewProps> = (props) => {
 };
 
 export default ChatView;
+
+function formatFileSize(sizeBytes: number): string {
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  if (sizeBytes < 1024 * 1024 * 1024) return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(sizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}

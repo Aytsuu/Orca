@@ -1,74 +1,111 @@
-// src/components/islands/features/ProjectList.tsx
 import React, { useState, useEffect } from 'react';
 import { useStore } from '@nanostores/react';
 import { navigate } from 'astro:transitions/client';
-import { Plus, FolderKanban, ArrowRight } from 'lucide-react';
-import { projects, createProject } from '../../../stores/projectStore';
+import { Plus, FolderKanban, Users, MoreVertical, Trash2, Search, X } from 'lucide-react';
+import { projects, createProject, deleteProject, getProjectMembers, type Teammate } from '../../../stores/projectStore';
 import { Modal } from '../ui/Modal';
 
 export const ProjectList: React.FC = () => {
   const projectList = useStore(projects);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [projectName, setProjectName] = useState('');
-  const [projectDesc, setProjectDesc] = useState('');
+  const [activeMenuProjectId, setActiveMenuProjectId] = useState<string | null>(null);
+  const [membersModalProject, setMembersModalProject] = useState<{ id: string; name: string } | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
-  // Handle URL query parameters to open modal from Navbar
+  // Close dropdown on document click
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('new') === 'true') {
-        setIsModalOpen(true);
-        // Clear param to avoid re-opening
-        window.history.replaceState({}, document.title, window.location.pathname);
-      }
-    }
+    const handleClose = () => setActiveMenuProjectId(null);
+    document.addEventListener('click', handleClose);
+    return () => document.removeEventListener('click', handleClose);
   }, []);
 
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!projectName.trim()) return;
-
-    const newId = createProject(projectName.trim(), projectDesc.trim());
-    setIsModalOpen(false);
-    setProjectName('');
-    setProjectDesc('');
-
-    // Redirect to the chat page of the new project
-    setTimeout(() => {
-      navigate(`/project/${newId}/chat`);
-    }, 300);
+  const handleCreateProject = () => {
+    const newId = createProject('Untitled', '', true);
+    window.location.href = `/project/${newId}/chat`;
   };
 
+  const filteredProjects = projectList.filter((project) =>
+    project.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
-    <div className="max-w-[1200px] mx-auto px-6 py-12 w-full fade-up flex flex-col gap-8 flex-grow">
+    <div className="max-w-[1400px] mx-auto px-6 py-12 w-full fade-up flex flex-col gap-4 flex-grow">
       {/* Section Header */}
-      <div className="flex justify-between items-end border-b border-border-subtle pb-5">
+      <div className="flex justify-between items-center pb-5">
         <div>
-          <span className="section-label">PROJECTS</span>
-          <h2 className="text-text-primary text-lg mt-1 font-bold">Your workspaces</h2>
+          <h2 className="text-text-primary text-lg font-medium">Your workspaces</h2>
         </div>
         {projectList.length > 0 && (
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="btn-primary flex items-center gap-3"
-          >
-            <Plus className="w-4 h-4" />
-            <span className='font-medium text-sm'>Create project</span>
-          </button>
+          <div className="flex items-center gap-3">
+            <div
+              className={`flex items-center bg-surface border border-border-subtle rounded-full transition-all duration-300 h-10 ${isSearchOpen ? 'w-64 px-4 border-border' : 'w-10 justify-center cursor-pointer hover:bg-surface-raised hover:border-border'
+                }`}
+              onClick={() => {
+                if (!isSearchOpen) setIsSearchOpen(true);
+              }}
+            >
+              <Search className={`w-4 h-4 text-text-muted shrink-0 ${isSearchOpen ? 'mr-2 text-primary' : ''}`} />
+
+              {isSearchOpen ? (
+                <input
+                  type="text"
+                  placeholder="Search projects..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="bg-transparent border-0 outline-none text-sm text-text-primary placeholder-text-muted w-full p-0 focus:outline-none"
+                  autoFocus
+                  onBlur={() => {
+                    if (searchQuery === '') {
+                      setIsSearchOpen(false);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.currentTarget.blur();
+                    } else if (e.key === 'Escape') {
+                      setSearchQuery('');
+                      setIsSearchOpen(false);
+                    }
+                  }}
+                />
+              ) : null}
+
+              {isSearchOpen && searchQuery ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSearchQuery('');
+                  }}
+                  className="text-text-muted hover:text-text-primary shrink-0 ml-1 p-0.5 rounded-full hover:bg-background transition-colors cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              ) : null}
+            </div>
+
+            <button
+              onClick={handleCreateProject}
+              className="btn-primary flex items-center gap-3 shrink-0 h-10"
+            >
+              <Plus className="w-4 h-4" />
+              <span className='font-medium text-sm'>Create project</span>
+            </button>
+          </div>
         )}
       </div>
 
+      <span className="section-label">Recent Projects</span>
       {/* Grid or Empty State */}
       {projectList.length === 0 ? (
         <div className="flex-grow flex items-center justify-center py-16">
-          <div className="border border-dashed border-border rounded-sm p-10 max-w-md w-full text-center flex flex-col items-center gap-5">
+          <div className="border border-dashed border-border rounded-xl p-10 max-w-md w-full text-center flex flex-col items-center gap-5">
             <FolderKanban className="w-10 h-10 text-text-muted" />
             <div>
-              <h3 className="text-text-primary text-lg font-bold">No projects yet</h3>
+              <h3 className="text-text-primary text-lg font-medium">No projects yet</h3>
               <p className="text-text-secondary text-sm mt-1">Start by creating one</p>
             </div>
             <button
-              onClick={() => setIsModalOpen(true)}
+              onClick={handleCreateProject}
               className="btn-primary flex items-center gap-1.5"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -76,12 +113,29 @@ export const ProjectList: React.FC = () => {
             </button>
           </div>
         </div>
+      ) : filteredProjects.length === 0 ? (
+        <div className="flex-grow flex items-center justify-center py-16">
+          <div className="border border-border bg-surface rounded-xl p-10 max-w-md w-full text-center flex flex-col items-center gap-5">
+            <Search className="w-10 h-10 text-text-muted" />
+            <div>
+              <h3 className="text-text-primary text-lg font-medium">No projects found</h3>
+              <p className="text-text-secondary text-sm mt-1">No workspaces match your query "{searchQuery}"</p>
+            </div>
+            <button
+              onClick={() => setSearchQuery('')}
+              className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 px-4"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Clear search</span>
+            </button>
+          </div>
+        </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
           {/* New Project Ghost Card — always first */}
           <div
-            onClick={() => setIsModalOpen(true)}
-            className="group border border-dashed border-border hover:border-primary rounded-sm p-6 flex flex-col items-center justify-center text-center gap-3 cursor-pointer transition-colors duration-200 select-none min-h-[170px]"
+            onClick={handleCreateProject}
+            className="group border border-dashed border-border hover:border-primary rounded-xl p-6 flex flex-col items-center justify-center text-center gap-3 cursor-pointer transition-colors duration-200 select-none aspect-square"
           >
             <Plus className="w-8 h-8 text-text-muted group-hover:text-primary transition-colors" />
             <span className="text-sm font-semibold text-text-muted group-hover:text-primary transition-colors">
@@ -89,104 +143,111 @@ export const ProjectList: React.FC = () => {
             </span>
           </div>
 
-          {projectList.map((project, index) => {
-            const indexStr = String(index + 1).padStart(2, '0');
-            const isActive = project.status === 'active';
-
+          {filteredProjects.map((project, index) => {
             return (
-              <a
+              <div
                 key={project.id}
-                href={`/project/${project.id}/chat`}
-                className="group bg-surface border border-border-subtle hover:border-border hover:bg-surface-raised rounded-sm p-6 flex flex-col gap-4 transition-all duration-150 cursor-pointer select-none"
-                style={{
-                  transform: 'translateY(0)',
-                  transitionTimingFunction: 'var(--ease-spring)'
+                onClick={() => {
+                  navigate(`/project/${project.id}/chat`);
                 }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
+                className="group bg-surface border border-border-subtle hover:border-border hover:bg-surface-raised rounded-xl p-6 flex flex-col justify-between aspect-square transition-all duration-150 cursor-pointer relative"
               >
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-mono text-text-muted">{indexStr}</span>
-                  <span className={`category-badge text-[10px] py-0.5 px-2 font-bold ${isActive ? 'badge--approver' : 'badge--viewer'
-                    }`}>
-                    {isActive ? 'ACTIVE' : 'DRAFT'}
-                  </span>
-                </div>
-
                 <div>
-                  <h3 className="text-text-primary text-base font-bold group-hover:text-primary transition-colors">
-                    {project.name}
-                  </h3>
-                  <p className="text-text-secondary text-sm mt-1 line-clamp-1 overflow-hidden text-ellipsis">
-                    {project.description}
-                  </p>
+                  <div className="flex justify-between items-start gap-4">
+                    <h3 className="text-text-primary text-lg font-medium group-hover:text-primary transition-colors pr-6 break-words">
+                      {project.name}
+                    </h3>
+
+                    {/* Menu Button */}
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute top-5 right-5 z-20"
+                    >
+                      <button
+                        onClick={() => setActiveMenuProjectId(activeMenuProjectId === project.id ? null : project.id)}
+                        className="p-1 text-text-muted hover:text-text-primary hover:bg-background rounded-full transition-colors cursor-pointer"
+                        title="Project options"
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </button>
+
+                      {activeMenuProjectId === project.id && (
+                        <div
+                          className="absolute right-0 mt-1.5 w-36 bg-surface-raised border border-border rounded shadow-xl flex flex-col p-1 z-30 fade-up"
+                          style={{ boxShadow: '0 8px 24px -6px rgba(0,0,0,0.6)' }}
+                        >
+                          <button
+                            onClick={() => {
+                              setMembersModalProject({ id: project.id, name: project.name });
+                              setActiveMenuProjectId(null);
+                            }}
+                            className="w-full text-left px-3 py-1.5 rounded-sm text-xs font-semibold text-text-secondary hover:bg-primary-muted hover:text-primary transition-colors flex items-center gap-2 cursor-pointer"
+                          >
+                            <Users className="w-3.5 h-3.5" />
+                            <span>View Members</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (confirm(`Are you sure you want to delete "${project.name}"?`)) {
+                                deleteProject(project.id);
+                              }
+                              setActiveMenuProjectId(null);
+                            }}
+                            className="w-full text-left px-3 py-1.5 rounded-sm text-xs font-semibold text-error hover:bg-error/10 transition-colors flex items-center gap-2 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Delete Project</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
-                <div className="border-t border-border-subtle pt-3 mt-1 flex justify-between items-center text-xs text-text-muted">
-                  <span>◎ {project.membersCount} members</span>
-                  <span>🕐 {project.updatedText}</span>
+                <div className="border-t border-border-subtle pt-3 mt-1 flex justify-between items-center text-xs text-text-muted w-full">
+                  <span className="flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5" />
+                    <span>{project.membersCount}</span>
+                  </span>
+                  <span>{project.updatedText}</span>
                 </div>
-              </a>
+              </div>
             );
           })}
         </div>
       )}
 
-      {/* Creation Modal */}
+      {/* Members View Modal */}
       <Modal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title="NEW PROJECT"
+        isOpen={!!membersModalProject}
+        onClose={() => setMembersModalProject(null)}
+        title={`MEMBERS — ${membersModalProject?.name.toUpperCase()}`}
       >
-        <form onSubmit={handleCreate} className="flex flex-col gap-5">
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold text-text-muted uppercase tracking-wider">
-              Project Name
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. Q3 Product Launch"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              className="bg-background border border-border rounded-sm px-4 py-2.5 text-text-primary text-md focus:outline-none focus:border-primary placeholder-text-muted"
-            />
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col border border-border-subtle bg-surface rounded-xl divide-y divide-border-subtle overflow-hidden">
+            {membersModalProject && getProjectMembers(membersModalProject.id).map((member) => (
+              <div key={member.id} className="flex items-center justify-between p-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-8 w-8 rounded-full bg-surface-raised border border-border flex items-center justify-center text-xs font-semibold text-text-muted shrink-0">
+                    {member.initials}
+                  </div>
+                  <span className="text-sm font-bold text-text-primary">{member.name}</span>
+                </div>
+                <span className="category-badge text-[10px] py-0.5 px-2 font-semibold badge--viewer">
+                  {member.role}
+                </span>
+              </div>
+            ))}
           </div>
-
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold text-text-muted uppercase tracking-wider">
-              Description (optional)
-            </label>
-            <textarea
-              placeholder="Describe project details..."
-              value={projectDesc}
-              onChange={(e) => setProjectDesc(e.target.value)}
-              rows={3}
-              className="bg-background border border-border rounded-sm px-4 py-2.5 text-text-primary text-md focus:outline-none focus:border-primary placeholder-text-muted resize-none"
-            />
-          </div>
-
-          <div className="flex justify-end gap-3 border-t border-border-subtle pt-4 mt-2">
+          <div className="flex justify-end pt-2">
             <button
-              type="button"
-              onClick={() => setIsModalOpen(false)}
+              onClick={() => setMembersModalProject(null)}
               className="btn-secondary py-1.5 px-5 text-xs font-semibold"
             >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn-primary py-1.5 px-5 text-xs font-semibold flex items-center gap-1.5"
-            >
-              <span>Create Project</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              Close
             </button>
           </div>
-        </form>
+        </div>
       </Modal>
     </div>
   );

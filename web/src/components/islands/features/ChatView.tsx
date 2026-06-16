@@ -14,10 +14,11 @@ import {
   AlertTriangle,
   Zap,
   Info,
-  Sparkles,
   CheckCircle2,
   AlertCircle,
-  ArrowRight
+  ArrowRight,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import {
   activeProjectState,
@@ -44,6 +45,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [inviteRole, setInviteRole] = useState<'APPROVER' | 'EDITOR' | 'VIEWER'>('VIEWER');
+  const [visibleSuggestionId, setVisibleSuggestionId] = useState<string | null>(null);
 
   const [showTabletFiles, setShowTabletFiles] = useState(false);
 
@@ -103,7 +105,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
   };
 
   return (
-    <div className="flex-grow flex flex-col lg:flex-row lg:h-[calc(100vh-104px)] lg:overflow-hidden bg-background select-none relative lg:p-4 lg:gap-4">
+    <div className="flex-grow flex flex-col lg:flex-row lg:h-[calc(100vh-112px)] lg:overflow-hidden bg-background relative lg:p-4 lg:gap-4">
       {/* 1. Files Panel (Left Column) - Hidden on tablet/mobile unless selected */}
       <aside
         className={`w-full lg:w-[22%] lg:min-w-[240px] lg:max-w-[300px] border-r border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface p-6 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'files' ? 'flex absolute inset-0 z-10' : 'hidden'
@@ -143,7 +145,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
 
         <button
           onClick={handleFakeUpload}
-          className="btn-ghost border border-dashed border-border flex items-center justify-center gap-1.5 py-2 hover:border-primary hover:text-primary"
+          className="btn-ghost border border-solid border-border rounded-full flex items-center justify-center gap-1.5 py-2 hover:border-primary hover:text-primary"
         >
           <Plus className="w-3.5 h-3.5" />
           <span>Add File</span>
@@ -200,21 +202,27 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
             if (isAI && msg.aiSuggestion) {
               const sug = msg.aiSuggestion;
               const isPending = sug.status === 'pending';
+              const isVisibleInChat = visibleSuggestionId === sug.id;
+
+              if (!isVisibleInChat) {
+                return null;
+              }
 
               return (
                 <div
                   key={msg.id}
-                  className="bg-primary-muted border border-primary/20 rounded-sm p-6 flex flex-col gap-4 max-w-[680px] w-full self-end fade-up"
+                  id={`msg-sug-${sug.id}`}
+                  className="bg-primary-muted border border-primary/20 rounded-sm p-6 flex flex-col gap-4 max-w-[680px] w-full self-end fade-up scroll-mt-6"
                 >
                   <div className="flex justify-between items-center text-xs font-semibold">
                     <div className="flex items-center gap-2 text-primary">
-                      <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <Zap className="w-3.5 h-3.5 text-primary shrink-0" />
                       <span className="tracking-wide uppercase">AI SUGGESTION</span>
                     </div>
                     <span className="text-text-muted">{msg.timestamp}</span>
                   </div>
 
-                  <p className="text-md text-text-secondary leading-relaxed">
+                  <p className="text-md text-text-secondary leading-relaxed select-text">
                     {msg.content}
                   </p>
 
@@ -417,7 +425,9 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
 
           <div className="flex-grow overflow-y-auto flex flex-col gap-3 max-h-[350px]">
             {detail.panelSuggestions.map((sug) => {
-              let iconNode = <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />;
+              const chatSugId = sug.id === 'ps_2' ? 'sug_1' : (sug.id.startsWith('ps_ch_') ? sug.id.replace('ps_', '') : sug.id);
+              const isVisible = visibleSuggestionId === chatSugId;
+              let iconNode = <Zap className="w-3.5 h-3.5 text-primary shrink-0" />;
               let color = 'text-primary';
 
               if (sug.type === 'GAP') {
@@ -434,21 +444,44 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
               return (
                 <div
                   key={sug.id}
-                  className="bg-background border border-border-subtle rounded-sm p-4 flex flex-col gap-2"
+                  className="bg-background border border-border-subtle rounded-sm p-4 flex flex-col gap-2 transition-all"
                 >
-                  <div className="flex items-center gap-1.5 text-xs font-bold">
-                    {iconNode}
-                    <span className={`tracking-wider uppercase ${color}`}>{sug.type}</span>
+                  <div className="flex justify-between items-center text-xs font-bold">
+                    <div className="flex items-center gap-1.5">
+                      {iconNode}
+                      <span className={`tracking-wider uppercase ${color}`}>{sug.type}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextId = isVisible ? null : chatSugId;
+                        setVisibleSuggestionId(nextId);
+                        if (nextId) {
+                          setTimeout(() => {
+                            const el = document.getElementById(`msg-sug-${nextId}`);
+                            if (el) {
+                              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }
+                          }, 120);
+                        }
+                      }}
+                      className="text-text-muted hover:text-text-primary p-0.5 hover:bg-surface-raised rounded transition-colors cursor-pointer"
+                      title={isVisible ? "Hide suggestion details" : "View suggestion details"}
+                    >
+                      {isVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
                   </div>
-                  <p className="text-xs text-text-secondary leading-relaxed line-clamp-2 overflow-hidden text-ellipsis">
-                    {sug.content}
-                  </p>
-                  <div className="flex justify-end">
+                  {isVisible && (
+                    <p className="text-xs text-text-secondary leading-relaxed select-text mt-1 fade-up">
+                      {sug.content}
+                    </p>
+                  )}
+                  <div className="flex justify-end mt-1">
                     <a
                       href={`/project/${projectId}/plan`}
                       className="btn-ghost p-0 text-[10px] font-bold text-primary hover:bg-transparent flex items-center gap-1"
                     >
-                      <span>View</span>
+                      <span>Go to Plan</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </a>
                   </div>

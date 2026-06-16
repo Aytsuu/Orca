@@ -1,5 +1,5 @@
 // src/stores/projectStore.ts
-import { atom, map } from 'nanostores';
+import { atom } from 'nanostores';
 
 export interface Project {
   id: string;
@@ -311,7 +311,7 @@ function saveProjectDetailToStorage(projectId: string, state: ProjectDetailState
 // -------------------------------------------------------------
 export const projects = atom<Project[]>(loadProjectsFromStorage());
 export const sessionId = atom<string>(loadSessionId());
-export const activeProjectState = map<ProjectDetailState | null>(null);
+export const activeProjectState = atom<ProjectDetailState | null>(null);
 export const toastMessages = atom<{ id: string; type: 'success' | 'warning' | 'error' | 'info'; text: string }[]>([]);
 
 // -------------------------------------------------------------
@@ -333,13 +333,20 @@ export function selectProject(projectId: string) {
   activeProjectState.set(detail);
 }
 
-export function createProject(name: string, description: string): string {
+export function createProject(name: string, description: string, skipAtomUpdate = false): string {
   const list = projects.get();
   const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `proj-${Date.now()}`;
   
   // Check duplication
   const exists = list.some(p => p.id === id);
-  const finalId = exists ? `${id}-${Date.now().toString().slice(-4)}` : id;
+  let finalId = id;
+  if (exists) {
+    let counter = 1;
+    while (list.some(p => p.id === `${id}-${counter}`)) {
+      counter++;
+    }
+    finalId = `${id}-${counter}`;
+  }
 
   const newProject: Project = {
     id: finalId,
@@ -352,7 +359,9 @@ export function createProject(name: string, description: string): string {
   };
 
   const updatedList = [newProject, ...list];
-  projects.set(updatedList);
+  if (!skipAtomUpdate) {
+    projects.set(updatedList);
+  }
   saveProjectsToStorage(updatedList);
 
   // Initialize and seed details in localStorage
@@ -452,13 +461,15 @@ export function triggerAIPipeline(userText?: string) {
     updateAgentStatus('ANALYZER', 'active');
 
     // Add a panel suggestion dynamically
-    const isFile = userText?.includes('[Uploaded File:');
-    const gapText = isFile
+    const isFile = !!userText?.includes('[Uploaded File:');
+    const gapText = (isFile && userText)
       ? `Found new dependencies in file: "${userText.replace('[Uploaded File: ', '').replace(']', '')}"`
       : `Extracted action items related to: "${userText || 'discussion'}"`;
     
+    const changeId = `ch_${Date.now()}`;
+    
     const newPanelSuggestion: AIPanelSuggestion = {
-      id: `ps_${Date.now()}`,
+      id: `ps_${changeId}`,
       type: isFile ? 'INSIGHT' : 'GAP',
       content: gapText
     };
@@ -473,7 +484,6 @@ export function triggerAIPipeline(userText?: string) {
         ? `I've analyzed the document. Recommend adding architectural reviews to Phase 1.`
         : `Based on your request, I propose adding a new deliverable checklist.`;
 
-      const changeId = `ch_${Date.now()}`;
       const newChange: PendingChange = {
         id: changeId,
         type: 'ADD_TASK',
@@ -834,4 +844,51 @@ export function removeMCPServer(name: string) {
   activeProjectState.set(nextState);
   saveProjectDetailToStorage(detail.projectId, nextState);
   addToast('warning', `Disconnected tool server: ${name}`);
+}
+
+export function renameProject(projectId: string, newName: string) {
+  const list = projects.get();
+  const updatedList = list.map(p => {
+    if (p.id === projectId) {
+      return { ...p, name: newName };
+    }
+    return p;
+  });
+  projects.set(updatedList);
+  saveProjectsToStorage(updatedList);
+
+  const detail = activeProjectState.get();
+  if (detail && detail.projectId === projectId) {
+    const updatedPlan = {
+      ...detail.currentPlan,
+      title: `Project Plan — ${newName}`
+    };
+    const nextState = {
+      ...detail,
+      currentPlan: updatedPlan
+    };
+    activeProjectState.set(nextState);
+    saveProjectDetailToStorage(projectId, nextState);
+  } else {
+    const detailFromStorage = loadProjectDetailFromStorage(projectId);
+    detailFromStorage.currentPlan.title = `Project Plan — ${newName}`;
+    saveProjectDetailToStorage(projectId, detailFromStorage);
+  }
+}
+
+export function deleteProject(projectId: string) {
+  const list = projects.get();
+  const updatedList = list.filter(p => p.id !== projectId);
+  projects.set(updatedList);
+  saveProjectsToStorage(updatedList);
+
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(STORAGE_KEY_DETAILS + projectId);
+  }
+  addToast('warning', 'Project deleted successfully.');
+}
+
+export function getProjectMembers(projectId: string): Teammate[] {
+  const detail = loadProjectDetailFromStorage(projectId);
+  return detail.teammates || [];
 }

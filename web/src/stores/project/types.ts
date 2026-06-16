@@ -18,6 +18,15 @@ export interface Teammate {
   email?: string;
 }
 
+export interface ProjectMessage {
+  id: string;
+  projectId: string;
+  sessionId: string;
+  content: string;
+  createdAt: string;
+  isOptimistic?: boolean;
+}
+
 export interface ApiEnvelope<T> {
   data: T;
 }
@@ -43,6 +52,14 @@ export interface ApiProjectMember {
   role: 'creator' | 'approver' | 'member';
   can_approve: boolean;
   can_edit: boolean;
+}
+
+export interface ApiProjectMessage {
+  id: string;
+  project_id: string;
+  session_id: string;
+  content: string;
+  created_at: string;
 }
 
 export interface ApiMemberInvitation {

@@ -48,7 +48,7 @@ import {
 } from './projectStore';
 
 import type { Project, Teammate } from './project/types';
-import { type ProjectRepository } from './project/repository';
+import { ApiProjectRepository, type ProjectRepository } from './project/repository';
 
 describe('projectStore tests', () => {
   beforeEach(() => {
@@ -85,6 +85,8 @@ describe('projectStore tests', () => {
   describe('Projects Store', () => {
     const mockRepo: ProjectRepository = {
       fetchProjects: vi.fn(),
+      fetchProjectMessages: vi.fn(),
+      createProjectMessage: vi.fn(),
       fetchProjectMembers: vi.fn(),
       fetchProjectInvitationLink: vi.fn(),
       createProjectInvitation: vi.fn(),
@@ -233,6 +235,8 @@ describe('projectStore tests', () => {
   describe('Members Store', () => {
     const mockRepo: ProjectRepository = {
       fetchProjects: vi.fn(),
+      fetchProjectMessages: vi.fn(),
+      createProjectMessage: vi.fn(),
       fetchProjectMembers: vi.fn(),
       fetchProjectInvitationLink: vi.fn(),
       createProjectInvitation: vi.fn(),
@@ -332,6 +336,8 @@ describe('projectStore tests', () => {
   describe('Invitations Store', () => {
     const mockRepo: ProjectRepository = {
       fetchProjects: vi.fn(),
+      fetchProjectMessages: vi.fn(),
+      createProjectMessage: vi.fn(),
       fetchProjectMembers: vi.fn(),
       fetchProjectInvitationLink: vi.fn(),
       createProjectInvitation: vi.fn(),
@@ -359,6 +365,65 @@ describe('projectStore tests', () => {
 
       expect(projectId).toBe('proj_1');
       expect(mockRepo.fetchProjects).toHaveBeenCalled();
+    });
+  });
+
+  describe('Project Repository Messages', () => {
+    it('fetches project messages from the api', async () => {
+      const repo = new ApiProjectRepository();
+      const { apiFetch } = await import('../lib/api/client');
+      (apiFetch as Mock).mockResolvedValue({
+        data: [
+          {
+            id: 'msg_1',
+            project_id: 'proj_1',
+            session_id: 'alpha',
+            content: 'First message',
+            created_at: '2026-06-17T10:00:00Z',
+          },
+        ],
+      });
+
+      const messages = await repo.fetchProjectMessages('proj_1', 'alpha');
+
+      expect(apiFetch).toHaveBeenCalledWith('/api/projects/proj_1/messages', 'alpha');
+      expect(messages).toEqual([
+        {
+          id: 'msg_1',
+          projectId: 'proj_1',
+          sessionId: 'alpha',
+          content: 'First message',
+          createdAt: '2026-06-17T10:00:00Z',
+        },
+      ]);
+    });
+
+    it('sends project messages through the api', async () => {
+      const repo = new ApiProjectRepository();
+      const { apiFetch } = await import('../lib/api/client');
+      (apiFetch as Mock).mockResolvedValue({
+        data: {
+          id: 'msg_2',
+          project_id: 'proj_1',
+          session_id: 'beta',
+          content: 'Reply from beta',
+          created_at: '2026-06-17T10:01:00Z',
+        },
+      });
+
+      const message = await repo.createProjectMessage('proj_1', 'Reply from beta', 'beta');
+
+      expect(apiFetch).toHaveBeenCalledWith('/api/projects/proj_1/messages', 'beta', {
+        method: 'POST',
+        body: JSON.stringify({ content: 'Reply from beta' }),
+      });
+      expect(message).toEqual({
+        id: 'msg_2',
+        projectId: 'proj_1',
+        sessionId: 'beta',
+        content: 'Reply from beta',
+        createdAt: '2026-06-17T10:01:00Z',
+      });
     });
   });
 });

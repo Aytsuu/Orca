@@ -15,7 +15,8 @@ import {
   AlertCircle,
   ArrowRight,
   Eye,
-  EyeOff
+  EyeOff,
+  Loader2
 } from 'lucide-react';
 import {
   addToast,
@@ -25,8 +26,14 @@ import {
 import {
   useProjectWorkspace
 } from '../../../lib/query/projectWorkspace';
+import {
+  useProjectMessages,
+  useSendProjectMessage,
+} from '../../../lib/query/projectMessages';
 import { QueryProvider } from '../providers/QueryProvider';
 import { ShareProjectModal } from './ShareProjectModal';
+import { sessionId } from '../../../stores/project/session';
+import { toInitials } from '../../../stores/project/repository';
 
 interface ChatViewProps {
   projectId: string;
@@ -34,6 +41,13 @@ interface ChatViewProps {
 
 const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const { data: detail, isLoading, error } = useProjectWorkspace(projectId);
+  const {
+    data: projectMessages,
+    isLoading: isMessagesLoading,
+    error: messagesError,
+  } = useProjectMessages(projectId);
+  const sendMessageMutation = useSendProjectMessage(projectId);
+  const currentSessionId = sessionId.get();
 
   const projectList = useStore(projects);
   const currentProject = projectList.find((p) => p.id === projectId);
@@ -50,22 +64,6 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const [editingText, setEditingText] = useState('');
 
   const chatEndRef = useRef<HTMLDivElement>(null);
-
-  // Local mock states for interactive demo
-  const [messages, setMessages] = useState<Array<{
-    id: string;
-    senderName: string;
-    senderInitials: string;
-    isAI: boolean;
-    timestamp: string;
-    content: string;
-    aiSuggestion?: {
-      id: string;
-      title: string;
-      content: string;
-      status: 'pending' | 'accepted' | 'rejected' | 'applied';
-    };
-  }>>([]);
 
   const [files, setFiles] = useState<Array<{
     id: string;
@@ -88,27 +86,8 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     content: string;
   }>>([]);
 
-  // Initialize mock state when projectId changes
+  // Initialize non-chat mock state when projectId changes
   useEffect(() => {
-    setMessages([
-      {
-        id: 'msg_1',
-        senderName: 'Sarah Connor',
-        senderInitials: 'SC',
-        isAI: false,
-        timestamp: '10:30 AM',
-        content: `Hi everyone! Welcome to the new workspace for project ${projectId}. Let's outline our foundation plan.`
-      },
-      {
-        id: 'msg_2',
-        senderName: 'You',
-        senderInitials: 'YO',
-        isAI: false,
-        timestamp: '10:32 AM',
-        content: "Thanks Sarah, glad to be here. I'll upload some specs files so the AI planner can suggest tasks."
-      }
-    ]);
-
     setFiles([
       { id: 'file_1', name: 'pr-specs.pdf', size: '2.4 MB', type: 'PDF', uploadedAt: '10m ago' },
       { id: 'file_2', name: 'api-endpoints.json', size: '1.2 MB', type: 'JSON', uploadedAt: '5m ago' }
@@ -130,10 +109,60 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     ]);
   }, [projectId]);
 
-  // Scroll to bottom on new messages
+  const isInitialLoad = useRef(true);
+
+  // Scroll to bottom on new messages and load transitions
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    if (isLoading || isMessagesLoading) return;
+    const container = chatEndRef.current?.parentElement;
+    if (!container) return;
+
+    const scrollToBottom = (behavior: 'auto' | 'smooth' = 'auto') => {
+      if (behavior === 'auto') {
+        container.scrollTop = container.scrollHeight;
+      } else {
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: 'smooth',
+        });
+      }
+    };
+
+    // Initial scroll
+    scrollToBottom('auto');
+
+    // Handle container resizing (e.g. flexbox layout settling, window resizes)
+    const resizeObserver = new ResizeObserver(() => {
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+      if (isNearBottom || isInitialLoad.current) {
+        scrollToBottom('auto');
+      }
+    });
+    resizeObserver.observe(container);
+
+    // Watch for new messages added to DOM
+    const mutationObserver = new MutationObserver(() => {
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+      if (isNearBottom || isInitialLoad.current) {
+        scrollToBottom(isInitialLoad.current ? 'auto' : 'smooth');
+        if (isInitialLoad.current) {
+          isInitialLoad.current = false;
+        }
+      }
+    });
+    mutationObserver.observe(container, { childList: true, subtree: true });
+
+    // Mark initial load finished after a short delay
+    const timer = setTimeout(() => {
+      isInitialLoad.current = false;
+    }, 500);
+
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      clearTimeout(timer);
+    };
+  }, [isLoading, isMessagesLoading]);
 
   // Load projects list on mount to get the project name
   useEffect(() => {
@@ -156,56 +185,21 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     );
   }
 
-  const handleSend = (e: React.FormEvent) => {
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!messageText.trim()) return;
-    
-    const nextMsg = {
-      id: `msg_${Date.now()}`,
-      senderName: 'You',
-      senderInitials: 'YO',
-      isAI: false,
-      timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-      content: messageText.trim()
-    };
-    setMessages(prev => [...prev, nextMsg]);
+    const content = messageText.trim();
+    if (!content) return;
     setMessageText('');
 
-    // Trigger fake agent pipeline animations
-    setTimeout(() => {
-      setAgentStatus({ MONITOR: 'active', ANALYZER: 'active', PLANNER: 'idle', UPDATER: 'idle' });
-      setTimeout(() => {
-        setAgentStatus({ MONITOR: 'idle', ANALYZER: 'complete', PLANNER: 'active', UPDATER: 'idle' });
-        setTimeout(() => {
-          setAgentStatus({ MONITOR: 'idle', ANALYZER: 'complete', PLANNER: 'complete', UPDATER: 'idle' });
-          const sugId = `sug_${Date.now()}`;
-          const aiMsg = {
-            id: `msg_ai_${Date.now()}`,
-            senderName: 'AI Suggestion',
-            senderInitials: 'AI',
-            isAI: true,
-            timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-            content: 'The AI analyzed your message and proposed a new task for Phase 1.',
-            aiSuggestion: {
-              id: sugId,
-              title: 'AI Suggestion',
-              content: 'ADD TASK: Design API authorization flow',
-              status: 'pending' as const
-            }
-          };
-          setMessages(prev => [...prev, aiMsg]);
-          setPanelSuggestions(prev => [
-            ...prev,
-            {
-              id: `ps_${sugId}`,
-              type: 'TASK',
-              content: 'ADD TASK: Design API authorization flow'
-            }
-          ]);
-          addToast('info', 'New AI suggestion received!');
-        }, 1200);
-      }, 1000);
-    }, 1500);
+    try {
+      await sendMessageMutation.mutateAsync(content);
+    } catch (sendError) {
+      setMessageText(content);
+      addToast(
+        'error',
+        sendError instanceof Error ? sendError.message : 'Unable to send message.'
+      );
+    }
   };
 
   const handleFakeUpload = () => {
@@ -226,10 +220,10 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   };
 
   const handleApproveProposal = (sugId: string) => {
-    setMessages(prev =>
+    setPanelSuggestions(prev =>
       prev.map(msg =>
-        msg.aiSuggestion && msg.aiSuggestion.id === sugId
-          ? { ...msg, aiSuggestion: { ...msg.aiSuggestion, status: 'accepted' } }
+        msg.id === `ps_${sugId}`
+          ? { ...msg, content: `${msg.content} (approved)` }
           : msg
       )
     );
@@ -237,15 +231,37 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   };
 
   const handleRejectProposal = (sugId: string) => {
-    setMessages(prev =>
+    setPanelSuggestions(prev =>
       prev.map(msg =>
-        msg.aiSuggestion && msg.aiSuggestion.id === sugId
-          ? { ...msg, aiSuggestion: { ...msg.aiSuggestion, status: 'rejected' } }
+        msg.id === `ps_${sugId}`
+          ? { ...msg, content: `${msg.content} (rejected)` }
           : msg
       )
     );
     addToast('warning', 'Plan change rejected.');
   };
+
+  const renderedMessages = (projectMessages ?? []).map((message) => {
+    const teammate = detail.teammates.find((member) => member.sessionId === message.sessionId);
+    const isCurrentUser = message.sessionId === currentSessionId;
+
+    return {
+      id: message.id,
+      senderName: isCurrentUser ? 'You' : teammate?.name ?? message.sessionId,
+      senderInitials: isCurrentUser ? 'YO' : teammate?.initials ?? toInitials(message.sessionId),
+      timestamp: new Date(message.createdAt).toLocaleTimeString([], {
+        hour: 'numeric',
+        minute: '2-digit',
+      }),
+      content: message.content,
+      isCurrentUser,
+      isOptimistic: message.isOptimistic,
+    };
+  });
+
+  const lastUserMessageId = [...renderedMessages]
+    .reverse()
+    .find((msg) => msg.isCurrentUser)?.id;
 
   return (
     <div className="flex-grow flex flex-col lg:flex-row lg:h-[calc(100vh-112px)] lg:overflow-hidden bg-background relative lg:p-4 lg:gap-4">
@@ -338,125 +354,29 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
         <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-6">
           <div className="divider-labeled uppercase">TODAY</div>
 
-          {messages.map((msg) => {
-            const isUser = msg.senderName === 'You';
-            const isAI = msg.isAI;
+          {isMessagesLoading && (
+            <div className="text-sm text-text-muted">Loading messages...</div>
+          )}
 
-            if (isAI && msg.aiSuggestion) {
-              const sug = msg.aiSuggestion;
-              const isPending = sug.status === 'pending';
-              const isVisibleInChat = visibleSuggestionId === sug.id;
+          {messagesError && (
+            <div className="text-sm text-error">
+              {messagesError instanceof Error ? messagesError.message : 'Unable to load messages.'}
+            </div>
+          )}
 
-              if (!isVisibleInChat) {
-                return null;
-              }
+          {!isMessagesLoading && !messagesError && renderedMessages.length === 0 && (
+            <div className="text-sm text-text-muted">
+              No messages yet. Start the conversation with your project members.
+            </div>
+          )}
 
-              return (
-                <div
-                  key={msg.id}
-                  id={`msg-sug-${sug.id}`}
-                  className="bg-primary-muted border border-primary/20 rounded-sm p-6 flex flex-col gap-4 max-w-[680px] w-full self-end fade-up scroll-mt-6"
-                >
-                  <div className="flex justify-between items-center text-xs font-semibold">
-                    <div className="flex items-center gap-2 text-primary">
-                      <Zap className="w-3.5 h-3.5 text-primary shrink-0" />
-                      <span className="tracking-wide uppercase">AI SUGGESTION</span>
-                    </div>
-                    <span className="text-text-muted">{msg.timestamp}</span>
-                  </div>
-
-                  <p className="text-md text-text-secondary leading-relaxed select-text">
-                    {msg.content}
-                  </p>
-
-                  <div className="border border-border-subtle bg-background p-4 rounded-sm">
-                    <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">Proposed plan change</p>
-
-                    {editingSugId === sug.id ? (
-                      <div className="mt-2 flex flex-col gap-2">
-                        <textarea
-                          value={editingText}
-                          onChange={(e) => setEditingText(e.target.value)}
-                          rows={2}
-                          className="bg-surface border border-border p-2 text-sm text-text-primary focus:outline-none focus:border-primary rounded-sm"
-                        />
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => setEditingSugId(null)}
-                            className="px-2.5 py-1 text-xs btn-secondary"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={() => {
-                              sug.content = editingText;
-                              setEditingSugId(null);
-                              addToast('success', 'Plan change draft updated.');
-                            }}
-                            className="px-2.5 py-1 text-xs btn-primary"
-                          >
-                            Save
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-sm font-semibold text-text-primary mt-1 select-text">
-                        {sug.content}
-                      </p>
-                    )}
-                  </div>
-
-                  {isPending && (
-                    <div className="flex gap-3 mt-1">
-                      <button
-                        onClick={() => handleApproveProposal(sug.id)}
-                        className="btn-primary py-1.5 px-4 text-xs font-semibold flex items-center gap-1"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Accept</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingSugId(sug.id);
-                          setEditingText(sug.content);
-                        }}
-                        className="btn-secondary py-1.5 px-4 text-xs font-semibold flex items-center gap-1"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                        <span>Edit</span>
-                      </button>
-                      <button
-                        onClick={() => handleRejectProposal(sug.id)}
-                        className="btn-secondary text-error hover:bg-error/10 hover:border-error/30 py-1.5 px-4 text-xs font-semibold flex items-center gap-1"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                        <span>Reject</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {!isPending && (
-                    <div className="text-xs font-semibold flex items-center gap-1.5 mt-1 select-none">
-                      {sug.status === 'accepted' && (
-                        <>
-                          <span className="text-success flex items-center gap-1"><Check className="w-3.5 h-3.5" /> Approved & Synced</span>
-                          <span className="text-text-muted">plan updated</span>
-                        </>
-                      )}
-                      {sug.status === 'rejected' && (
-                        <span className="text-error flex items-center gap-1"><X className="w-3.5 h-3.5" /> Plan change rejected</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            }
-
+          {renderedMessages.map((msg) => {
+            const isUser = msg.isCurrentUser;
             return (
               <div
                 key={msg.id}
-                className={`flex gap-4 max-w-[680px] w-full fade-up ${isUser ? 'self-end flex-row-reverse' : 'self-start'
-                  }`}
+                className={`flex gap-4 max-w-[680px] w-full fade-up transition-opacity duration-300 ${isUser ? 'self-end flex-row-reverse' : 'self-start'
+                  } ${msg.isOptimistic ? 'opacity-70' : 'opacity-100'}`}
               >
                 {/* Avatar */}
                 <div className="h-8 w-8 rounded-full bg-surface border border-border flex items-center justify-center text-xs font-semibold text-text-muted select-none shrink-0">
@@ -468,10 +388,31 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
                     <span className="text-xs font-semibold text-text-muted">{msg.senderName}</span>
                     <span className="text-[10px] text-text-muted font-medium">{msg.timestamp}</span>
                   </div>
-                  <p className={`text-md text-text-secondary leading-relaxed select-text whitespace-pre-wrap ${isUser ? 'text-right' : 'text-left'
-                    }`}>
+
+                  {/* Message Bubble Container */}
+                  <div
+                    className={`rounded-2xl py-2 px-4 text-sm max-w-[85%] select-text whitespace-pre-wrap leading-relaxed ${isUser
+                      ? 'bg-primary-muted border border-primary/10 text-text-primary rounded-tr-none'
+                      : 'bg-surface-raised border border-border-subtle text-text-secondary rounded-tl-none'
+                      }`}
+                  >
                     {msg.content}
-                  </p>
+                  </div>
+
+                  {isUser && (msg.isOptimistic || msg.id === lastUserMessageId) && (
+                    <div className="mt-0.5 flex justify-end items-center text-text-muted select-none">
+                      {msg.isOptimistic ? (
+                        <span className="flex items-center gap-1" title="Sending...">
+                          <span className='text-[11px]'>Sending</span>
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 font-medium animate-fade-in" title="Delivered">
+                          <span className='text-[11px]'>Delivered</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -498,7 +439,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  handleSend(e);
+                  void handleSend(e);
                 }
               }}
               style={{ backgroundColor: 'transparent', border: 'none', outline: 'none' }}
@@ -507,7 +448,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
 
             <button
               type="submit"
-              disabled={!messageText.trim()}
+              disabled={!messageText.trim() || sendMessageMutation.isPending}
               className="h-8 w-8 rounded-full flex items-center justify-center transition-colors bg-surface-raised hover:bg-border text-text-secondary hover:text-text-primary disabled:opacity-40 disabled:hover:bg-surface-raised disabled:hover:text-text-secondary shrink-0 cursor-pointer disabled:cursor-not-allowed"
               title="Send message"
             >

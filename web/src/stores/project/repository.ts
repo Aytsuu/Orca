@@ -2,14 +2,18 @@ import { apiFetch } from '../../lib/api/client';
 import type {
   Project,
   Teammate,
+  ProjectMessage,
   ApiEnvelope,
   ApiProject,
   ApiProjectMember,
+  ApiProjectMessage,
   ApiMemberInvitation,
 } from './types';
 
 export interface ProjectRepository {
   fetchProjects(sessionId: string): Promise<Project[]>;
+  fetchProjectMessages(projectId: string, sessionId: string): Promise<ProjectMessage[]>;
+  createProjectMessage(projectId: string, content: string, sessionId: string): Promise<ProjectMessage>;
   fetchProjectMembers(projectId: string, sessionId: string): Promise<Teammate[]>;
   fetchProjectInvitationLink(projectId: string, sessionId: string): Promise<string>;
   createProjectInvitation(
@@ -35,6 +39,30 @@ export class ApiProjectRepository implements ProjectRepository {
   async fetchProjects(sessionId: string): Promise<Project[]> {
     const response = await apiFetch<ApiEnvelope<ApiProject[]>>('/api/projects', sessionId);
     return response.data.map(mapApiProject);
+  }
+
+  async fetchProjectMessages(projectId: string, sessionId: string): Promise<ProjectMessage[]> {
+    const response = await apiFetch<ApiEnvelope<ApiProjectMessage[]>>(
+      `/api/projects/${projectId}/messages`,
+      sessionId
+    );
+    return response.data.map(mapApiProjectMessage);
+  }
+
+  async createProjectMessage(
+    projectId: string,
+    content: string,
+    sessionId: string
+  ): Promise<ProjectMessage> {
+    const response = await apiFetch<ApiEnvelope<ApiProjectMessage>>(
+      `/api/projects/${projectId}/messages`,
+      sessionId,
+      {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      }
+    );
+    return mapApiProjectMessage(response.data);
   }
 
   async fetchProjectMembers(projectId: string, sessionId: string): Promise<Teammate[]> {
@@ -172,6 +200,16 @@ export function mapApiProject(project: ApiProject): Project {
     membersCount: project.member_count,
     updatedText: formatRelativeTime(project.created_at),
     status: 'active',
+  };
+}
+
+export function mapApiProjectMessage(message: ApiProjectMessage): ProjectMessage {
+  return {
+    id: message.id,
+    projectId: message.project_id,
+    sessionId: message.session_id,
+    content: message.content,
+    createdAt: message.created_at,
   };
 }
 

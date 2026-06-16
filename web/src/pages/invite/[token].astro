@@ -1,0 +1,18 @@
+---
+import InvitationAcceptView from '../../components/islands/features/InvitationAcceptView';
+import Page from '../../layouts/Page.astro';
+
+export const prerender = false;
+
+const { token } = Astro.params;
+
+if (!token) {
+  return Astro.redirect('/');
+}
+---
+
+<Page title="Join Workspace — Orca">
+  <InvitationAcceptView token={token} client:only="react">
+    <div class="max-w-[720px] mx-auto px-8 py-24 w-full"></div>
+  </InvitationAcceptView>
+</Page>

@@ -10,6 +10,7 @@ from src.agents.router import router as agents_router
 from src.chat.router import router as chat_router
 from src.config import get_settings
 from src.exceptions import AppException
+from src.invitations.router import router as invitations_router
 from src.members.router import router as members_router
 from src.models import ErrorBody, ErrorEnvelope
 from src.plans.router import router as plans_router
@@ -67,4 +68,5 @@ app.include_router(chat_router, prefix="/api/v1/projects")
 app.include_router(members_router, prefix="/api/v1/projects")
 app.include_router(plans_router, prefix="/api/v1/projects")
 app.include_router(agents_router, prefix="/api/v1/projects")
+app.include_router(invitations_router, prefix="/api/v1")
 

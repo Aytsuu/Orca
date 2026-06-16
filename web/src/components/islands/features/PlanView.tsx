@@ -1,38 +1,49 @@
 // src/components/islands/features/PlanView.tsx
 import React, { useState, useEffect } from 'react';
-import { useStore } from '@nanostores/react';
 import {
   ChevronLeft,
   ChevronRight,
   AlertTriangle,
   RotateCcw,
   Check,
-  X,
   ArrowRight,
-  Info,
-  Zap
+  Info
 } from 'lucide-react';
 import {
-  activeProjectState,
-  selectProject,
-  acceptChange,
-  rejectChange,
-  acceptAllChanges,
-  revertPlan,
-  finalizePlan,
   addToast
 } from '../../../stores/projectStore';
+import { QueryProvider } from '../providers/QueryProvider';
 import { Modal } from '../ui/Modal';
+
+interface Task {
+  id: string;
+  title: string;
+  owner: string;
+  due: string;
+  isNew?: boolean;
+  hasGap?: boolean;
+  gapText?: string;
+}
+
+interface Phase {
+  title: string;
+  timeframe: string;
+  tasks: Task[];
+}
+
+interface ProjectPlan {
+  title: string;
+  updatedAt: string;
+  phases: Phase[];
+}
 
 interface PlanViewProps {
   projectId: string;
 }
 
-export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
-  const detail = useStore(activeProjectState);
-
+const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
   // Simulation Role (to test both Approver and Viewer views)
-  const [userRole, setUserRole] = useState<'APPROVER' | 'VIEWER'>('APPROVER');
+  const [userRole] = useState<'APPROVER' | 'VIEWER'>('APPROVER');
 
   // Modals state
   const [isRevertOpen, setIsRevertOpen] = useState(false);
@@ -41,44 +52,87 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
   // Active version index (0 is current, 1 is previous, etc.)
   const [versionIndex, setVersionIndex] = useState(0);
 
+  // Local state for plan (mock plan feature)
+  const defaultPlan: ProjectPlan = {
+    title: `Project Plan - ${projectId}`,
+    updatedAt: 'No approved plan yet',
+    phases: [
+      {
+        title: 'Phase 1 - Foundation',
+        timeframe: 'Pending',
+        tasks: [],
+      },
+    ],
+  };
+
+  const [currentPlan, setCurrentPlan] = useState<ProjectPlan>(defaultPlan);
+  const [planHistory, setPlanHistory] = useState<ProjectPlan[]>([defaultPlan]);
+  const [revertsRemaining, setRevertsRemaining] = useState<number>(3);
+  const [finalizedAt, setFinalizedAt] = useState<string | undefined>(undefined);
+
   useEffect(() => {
-    selectProject(projectId);
+    const freshPlan: ProjectPlan = {
+      title: `Project Plan - ${projectId}`,
+      updatedAt: 'No approved plan yet',
+      phases: [
+        {
+          title: 'Phase 1 - Foundation',
+          timeframe: 'Pending',
+          tasks: [],
+        },
+      ],
+    };
+    setCurrentPlan(freshPlan);
+    setPlanHistory([freshPlan]);
+    setRevertsRemaining(3);
+    setFinalizedAt(undefined);
+    setVersionIndex(0);
   }, [projectId]);
 
-  if (!detail || detail.projectId !== projectId) {
-    return (
-      <div className="flex-grow flex items-center justify-center text-text-muted select-none">
-        Loading workspace data...
-      </div>
-    );
-  }
+
 
   // Get active plan based on versionIndex
-  const activePlan = detail.planHistory[versionIndex] || detail.currentPlan;
-  const totalVersions = detail.planHistory.length;
+  const activePlan = planHistory[versionIndex] || currentPlan;
+  const totalVersions = planHistory.length;
   const versionDisplayNum = totalVersions - versionIndex;
 
   // Calculate gaps
   let gapCount = 0;
-  activePlan.phases.forEach(phase => {
-    phase.tasks.forEach(task => {
+  activePlan.phases.forEach((phase: Phase) => {
+    phase.tasks.forEach((task: Task) => {
       if (task.hasGap) gapCount++;
     });
   });
 
   const handleRevertConfirm = () => {
-    revertPlan();
+    if (revertsRemaining <= 0) {
+      addToast('error', 'Revert limit reached! Max 3 reverts allowed.');
+      setIsRevertOpen(false);
+      return;
+    }
+    if (planHistory.length <= 1) {
+      addToast('warning', 'No older version of the plan exists.');
+      setIsRevertOpen(false);
+      return;
+    }
+
+    const nextHistory = planHistory.slice(1);
+    const previousPlan = nextHistory[0];
+    setCurrentPlan(previousPlan);
+    setPlanHistory(nextHistory);
+    setRevertsRemaining(revertsRemaining - 1);
     setIsRevertOpen(false);
     setVersionIndex(0); // reset version index to current
+    addToast('success', `Plan reverted. Reverts remaining: ${revertsRemaining - 1}`);
   };
 
   const handleFinalizeConfirm = () => {
-    finalizePlan();
+    setFinalizedAt(new Date().toLocaleDateString());
     setIsFinalizeOpen(false);
+    addToast('success', 'Plan finalized. All members notified.');
   };
 
   const isApprover = userRole === 'APPROVER';
-  const hasPending = detail.pendingChanges.length > 0;
 
   return (
     <div className="flex-grow flex flex-col bg-background h-[calc(100vh-112px)] overflow-hidden">
@@ -124,7 +178,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
 
                 <button
                   onClick={() => setIsRevertOpen(true)}
-                  disabled={detail.revertsRemaining <= 0 || totalVersions <= 1}
+                  disabled={revertsRemaining <= 0 || totalVersions <= 1}
                   className="btn-secondary py-1 px-3.5 text-xs font-semibold flex items-center gap-1.5"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
@@ -133,10 +187,10 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
 
                 <button
                   onClick={() => setIsFinalizeOpen(true)}
-                  disabled={hasPending || detail.finalizedAt !== undefined}
+                  disabled={finalizedAt !== undefined}
                   className="btn-primary py-1 px-3.5 text-xs font-semibold flex items-center gap-1.5"
                 >
-                  {detail.finalizedAt ? (
+                  {finalizedAt ? (
                     <>
                       <span>Finalized</span>
                       <Check className="w-3.5 h-3.5 text-success" />
@@ -155,157 +209,94 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
             <div className="bg-primary-muted border-b border-primary/20 px-8 py-3 flex items-center gap-3 shrink-0">
               <Info className="w-4 h-4 text-primary shrink-0" />
               <span className="text-xs font-semibold text-text-primary tracking-wide">
-                This plan was finalized on {detail.finalizedAt || 'Jun 12'}. Comment via chat.
+                This plan was finalized on {finalizedAt || 'Jun 12'}. Comment via chat.
               </span>
             </div>
           )}
 
           {/* Timeline Scrollable Content */}
           <div className="flex-1 overflow-y-auto px-10 py-12 flex justify-center">
-          <div className="max-w-[760px] w-full flex flex-col gap-8">
-            <div>
-              <h1 className="text-display-sm text-text-primary font-bold tracking-tight">
-                {activePlan.title}
-              </h1>
-              <p className="text-xs text-text-muted mt-2">
-                {activePlan.updatedAt}
-              </p>
-            </div>
+            <div className="max-w-[760px] w-full flex flex-col gap-8">
+              <div>
+                <h1 className="text-display-sm text-text-primary font-bold tracking-tight">
+                  {activePlan.title}
+                </h1>
+                <p className="text-xs text-text-muted mt-2">
+                  {activePlan.updatedAt}
+                </p>
+              </div>
 
-            <hr className="border-border-subtle" />
+              <hr className="border-border-subtle" />
 
-            {/* Timeline Phases */}
-            <div className="flex flex-col gap-10">
-              {activePlan.phases.map((phase, pIdx) => (
-                <div key={pIdx} className="flex flex-col gap-5">
-                  <div className="flex items-center gap-4">
-                    <h2 className="text-lg font-bold text-text-primary">
-                      {phase.title}
-                    </h2>
-                    <span className="category-badge badge--viewer text-[11px] py-0.5 px-2 font-semibold">
-                      {phase.timeframe}
-                    </span>
-                  </div>
+              {/* Timeline Phases */}
+              <div className="flex flex-col gap-10">
+                {activePlan.phases.map((phase: Phase, pIdx: number) => (
+                  <div key={pIdx} className="flex flex-col gap-5">
+                    <div className="flex items-center gap-4">
+                      <h2 className="text-lg font-bold text-text-primary">
+                        {phase.title}
+                      </h2>
+                      <span className="category-badge badge--viewer text-[11px] py-0.5 px-2 font-semibold">
+                        {phase.timeframe}
+                      </span>
+                    </div>
 
-                  {/* Tasks in Phase */}
-                  <div className="flex flex-col gap-4 pl-6 ml-3">
-                    {phase.tasks.map((task, tIdx) => {
-                      const stepNum = String(tIdx + 1).padStart(2, '0');
+                    {/* Tasks in Phase */}
+                    <div className="flex flex-col gap-4 pl-6 ml-3">
+                      {phase.tasks.map((task: Task, tIdx: number) => {
+                        const stepNum = String(tIdx + 1).padStart(2, '0');
 
-                      let rowStyle = 'border-l-2 border-transparent hover:bg-surface-raised/40';
-                      let badge = null;
+                        let rowStyle = 'border-l-2 border-transparent hover:bg-surface-raised/40';
+                        let badge = null;
 
-                      if (task.isNew) {
-                        rowStyle = 'border-l-2 border-primary bg-primary-muted/10 hover:bg-primary-muted/20';
-                        badge = <span className="category-badge badge--approver text-[9px] py-0.5 px-1.5 font-bold">NEW</span>;
-                      } else if (task.hasGap) {
-                        rowStyle = 'border-l-2 border-warning bg-warning/5 hover:bg-warning/10';
-                        badge = (
-                          <span className="text-warning text-xs font-semibold flex items-center gap-1.5">
-                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                            <span>{task.gapText || 'Missing Owner'}</span>
-                          </span>
-                        );
-                      }
+                        if (task.isNew) {
+                          rowStyle = 'border-l-2 border-primary bg-primary-muted/10 hover:bg-primary-muted/20';
+                          badge = <span className="category-badge badge--approver text-[9px] py-0.5 px-1.5 font-bold">NEW</span>;
+                        } else if (task.hasGap) {
+                          rowStyle = 'border-l-2 border-warning bg-warning/5 hover:bg-warning/10';
+                          badge = (
+                            <span className="text-warning text-xs font-semibold flex items-center gap-1.5">
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                              <span>{task.gapText || 'Missing Owner'}</span>
+                            </span>
+                          );
+                        }
 
-                      return (
-                        <div
-                          key={task.id}
-                          className={`flex items-start gap-4 transition-all p-2 -mx-2 rounded-sm ${rowStyle}`}
-                        >
-                          <span className="font-mono text-xs text-text-muted mt-1 select-none">
-                            {stepNum}
-                          </span>
+                        return (
+                          <div
+                            key={task.id}
+                            className={`flex items-start gap-4 transition-all p-2 -mx-2 rounded-sm ${rowStyle}`}
+                          >
+                            <span className="font-mono text-xs text-text-muted mt-1 select-none">
+                              {stepNum}
+                            </span>
 
-                          <div className="flex-grow">
-                            <div className="flex items-center gap-3">
-                              <h3 className="text-sm font-bold text-text-primary">
-                                {task.title}
-                              </h3>
-                              {badge}
+                            <div className="flex-grow">
+                              <div className="flex items-center gap-3">
+                                <h3 className="text-sm font-bold text-text-primary">
+                                  {task.title}
+                                </h3>
+                                {badge}
+                              </div>
+
+                              <p className="text-xs text-text-muted mt-1 select-text">
+                                Owner: <span className="font-semibold text-text-secondary">{task.owner}</span> · Due: <span className="font-semibold text-text-secondary">{task.due}</span>
+                              </p>
                             </div>
-
-                            <p className="text-xs text-text-muted mt-1 select-text">
-                              Owner: <span className="font-semibold text-text-secondary">{task.owner}</span> · Due: <span className="font-semibold text-text-secondary">{task.due}</span>
-                            </p>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
 
-                    {phase.tasks.length === 0 && (
-                      <div className="text-xs text-text-muted italic">No tasks in this phase.</div>
-                    )}
+                      {phase.tasks.length === 0 && (
+                        <div className="text-xs text-text-muted italic">No tasks in this phase.</div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         </div>
-      </div>
-
-        {/* 6.3 Review Panel Sidebar (Right, Approver Only) */}
-        {isApprover && (
-          <aside className="w-full md:w-[28%] md:min-w-[300px] md:max-w-[380px] border-t md:border-0 md:rounded-xl bg-surface p-6 flex flex-col gap-6 shrink-0 md:h-full overflow-hidden">
-            <div className="flex justify-between items-center">
-              <span className="section-label">PENDING CHANGES</span>
-              <span className="category-badge badge--approver text-xs font-bold py-0.5 px-2">
-                {detail.pendingChanges.length}
-              </span>
-            </div>
-
-            <div className="flex-grow overflow-y-auto flex flex-col gap-3 pr-1">
-              {detail.pendingChanges.map((change) => (
-                <div
-                  key={change.id}
-                  className="bg-background border border-border-subtle rounded-sm p-4 flex flex-col gap-3 fade-up"
-                >
-                  <div>
-                    <span className="text-[10px] font-bold text-primary tracking-widest uppercase flex items-center gap-1.5">
-                      <Zap className="w-3.5 h-3.5" />
-                      <span>{change.type.replace('_', ' ')}</span>
-                    </span>
-                    <h4 className="text-sm font-bold text-text-primary mt-1 leading-snug">
-                      "{change.taskTitle}"
-                    </h4>
-                    <p className="text-xs text-text-muted mt-1">
-                      {change.detail}
-                    </p>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => acceptChange(change.id)}
-                      className="btn-primary py-1.5 px-4 text-xs font-semibold flex-grow flex items-center justify-center gap-1"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Accept</span>
-                    </button>
-                    <button
-                      onClick={() => rejectChange(change.id)}
-                      className="btn-secondary py-1.5 px-4 text-xs font-semibold text-error border-error/20 hover:bg-error/5 flex items-center justify-center gap-1"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                      <span>Reject</span>
-                    </button>
-                  </div>
-                </div>
-              ))}
-
-              {!hasPending && (
-                <div className="flex flex-col items-center justify-center py-12 text-center gap-1.5">
-                  <Check className="w-6 h-6 text-text-muted mx-auto" />
-                  <p className="text-xs text-text-muted font-semibold mt-1">
-                    No pending changes.
-                  </p>
-                  <p className="text-[10px] text-text-muted mt-0.5">
-                    Review complete.
-                  </p>
-                </div>
-              )}
-            </div>
-          </aside>
-        )}
       </div>
 
       {/* 6.4 Revert Confirmation Modal */}
@@ -320,7 +311,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
             This will restore Version 1 and permanently remove all comments on the current version.
           </p>
           <p className="text-sm text-text-muted font-medium">
-            You have {detail.revertsRemaining} reverts remaining ({detail.revertsRemaining - 1} after this).
+            You have {revertsRemaining} reverts remaining ({revertsRemaining - 1} after this).
           </p>
           <div className="flex justify-end gap-3 border-t border-border-subtle pt-4 mt-2">
             <button
@@ -349,7 +340,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
       >
         <div className="flex flex-col gap-4">
           <p className="text-sm">
-            This plan will be synced to all 4 project members. They'll be notified and can comment via chat.
+            This plan will be synced to all project members. They'll be notified and can comment via chat.
           </p>
           <div className="flex justify-end gap-3 border-t border-border-subtle pt-4 mt-2">
             <button
@@ -371,4 +362,13 @@ export const PlanView: React.FC<PlanViewProps> = ({ projectId }) => {
     </div>
   );
 };
+
+export const PlanView: React.FC<PlanViewProps> = (props) => {
+  return (
+    <QueryProvider>
+      <PlanViewInner {...props} />
+    </QueryProvider>
+  );
+};
+
 export default PlanView;

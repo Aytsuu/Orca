@@ -122,6 +122,7 @@ class FakeSupabase:
         self.tables = {
             "project": [],
             "project_member": [],
+            "project_invitation": [],
             "chat_message": [],
             "uploaded_file": [],
             "agent_status": [],
@@ -145,6 +146,10 @@ class FakeSupabase:
             row.setdefault("created_at", _iso_now())
         if table_name == "project_member":
             row.setdefault("created_at", _iso_now())
+        if table_name == "project_invitation":
+            row.setdefault("created_at", _iso_now())
+            row.setdefault("redeemed_at", None)
+            row.setdefault("redeemed_by_session_id", None)
         if table_name == "chat_message":
             row.setdefault("created_at", _iso_now())
         if table_name == "uploaded_file":
@@ -234,6 +239,125 @@ async def test_create_and_list_projects(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_project_creation_creates_default_member_invitation(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    create_response = await client.post(
+        "/api/v1/projects",
+        headers={"X-Session-Id": "alpha"},
+        json={"name": "Orca", "description": "Planning workspace"},
+    )
+
+    assert create_response.status_code == 201
+    assert len(fake_supabase.tables["project_invitation"]) == 1
+    invitation = fake_supabase.tables["project_invitation"][0]
+    assert invitation["invitee_email"] == "__default__"
+    assert invitation["can_edit"] is True
+
+    project_id = create_response.json()["data"]["id"]
+    default_invitation = await client.get(
+        f"/api/v1/projects/{project_id}/member-invitations/default",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert default_invitation.status_code == 200
+    assert default_invitation.json()["data"]["token"] == invitation["token"]
+
+
+@pytest.mark.asyncio
+async def test_get_update_delete_and_list_members_for_project(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    creator = fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    collaborator = fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "beta",
+            "role": "member",
+            "can_approve": False,
+            "can_edit": True,
+        },
+    )
+
+    get_response = await client.get(
+        f"/api/v1/projects/{project['id']}",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert get_response.status_code == 200
+    assert get_response.json()["data"]["name"] == "Alpha"
+
+    members_response = await client.get(
+        f"/api/v1/projects/{project['id']}/members",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert members_response.status_code == 200
+    assert [member["id"] for member in members_response.json()["data"]] == [
+        creator["id"],
+        collaborator["id"],
+    ]
+
+    patch_response = await client.patch(
+        f"/api/v1/projects/{project['id']}",
+        headers={"X-Session-Id": "alpha"},
+        json={"name": "Alpha Prime", "description": "Updated"},
+    )
+    assert patch_response.status_code == 200
+    assert patch_response.json()["data"]["name"] == "Alpha Prime"
+    assert fake_supabase.tables["project"][0]["description"] == "Updated"
+
+    delete_response = await client.delete(
+        f"/api/v1/projects/{project['id']}",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert delete_response.status_code == 204
+    assert fake_supabase.tables["project"] == []
+    assert fake_supabase.tables["project_member"] == []
+
+
+@pytest.mark.asyncio
+async def test_update_and_delete_project_require_approver(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "beta",
+            "role": "member",
+            "can_approve": False,
+            "can_edit": True,
+        },
+    )
+
+    patch_response = await client.patch(
+        f"/api/v1/projects/{project['id']}",
+        headers={"X-Session-Id": "beta"},
+        json={"name": "Blocked Rename"},
+    )
+    assert patch_response.status_code == 403
+
+    delete_response = await client.delete(
+        f"/api/v1/projects/{project['id']}",
+        headers={"X-Session-Id": "beta"},
+    )
+    assert delete_response.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_messages_and_upload_url_require_membership(
     client: AsyncClient,
     fake_supabase: FakeSupabase,
@@ -277,6 +401,185 @@ async def test_messages_and_upload_url_require_membership(
 
 
 @pytest.mark.asyncio
+async def test_finalize_and_list_uploaded_files(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+    fake_queue_producer: FakeQueueProducer,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+
+    upload_url = await client.get(
+        f"/api/v1/projects/{project['id']}/files/upload-url",
+        headers={"X-Session-Id": "alpha"},
+        params={"filename": "brief.pdf", "mime_type": "application/pdf"},
+    )
+    assert upload_url.status_code == 200
+    upload_data = upload_url.json()["data"]
+
+    finalize_upload = await client.post(
+        f"/api/v1/projects/{project['id']}/files",
+        headers={"X-Session-Id": "alpha"},
+        json={
+            "filename": "brief.pdf",
+            "mime_type": "application/pdf",
+            "storage_path": upload_data["storage_path"],
+            "size_bytes": 2048,
+        },
+    )
+
+    assert finalize_upload.status_code == 201
+    uploaded = finalize_upload.json()["data"]
+    assert uploaded["filename"] == "brief.pdf"
+    assert uploaded["size_bytes"] == 2048
+    assert len(fake_supabase.tables["agent_run"]) == 1
+    assert fake_supabase.tables["agent_run"][0]["new_file_ids"] == [uploaded["id"]]
+    assert fake_queue_producer.enqueued_run_ids == [fake_supabase.tables["agent_run"][0]["id"]]
+
+    files_response = await client.get(
+        f"/api/v1/projects/{project['id']}/files",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert files_response.status_code == 200
+    assert files_response.json()["data"] == [uploaded]
+
+
+@pytest.mark.asyncio
+async def test_file_finalization_rejects_storage_path_outside_project_scope(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+
+    response = await client.post(
+        f"/api/v1/projects/{project['id']}/files",
+        headers={"X-Session-Id": "alpha"},
+        json={
+            "filename": "brief.pdf",
+            "mime_type": "application/pdf",
+            "storage_path": f"other-project/alpha/{uuid4()}-brief.pdf",
+            "size_bytes": 2048,
+        },
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_activity_endpoints_return_latest_artifacts_and_latest_proposal(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+
+    older_run = fake_supabase.insert_row(
+        "agent_run",
+        {"project_id": project["id"], "triggered_by": "alpha", "status": "completed"},
+    )
+    latest_run = fake_supabase.insert_row(
+        "agent_run",
+        {"project_id": project["id"], "triggered_by": "alpha", "status": "completed"},
+    )
+    fake_supabase.insert_row(
+        "agent_artifact",
+        {
+            "run_id": older_run["id"],
+            "project_id": project["id"],
+            "agent": "planner",
+            "payload": {"summary": "old summary", "changes": []},
+            "created_at": "2026-06-16T10:00:00+00:00",
+        },
+    )
+    latest_planner_artifact = fake_supabase.insert_row(
+        "agent_artifact",
+        {
+            "run_id": latest_run["id"],
+            "project_id": project["id"],
+            "agent": "planner",
+            "payload": {"summary": "latest summary", "changes": [{"id": "chg-1"}]},
+            "created_at": "2026-06-16T11:00:00+00:00",
+        },
+    )
+    latest_analyzer_artifact = fake_supabase.insert_row(
+        "agent_artifact",
+        {
+            "run_id": latest_run["id"],
+            "project_id": project["id"],
+            "agent": "analyzer",
+            "payload": {"gaps": [{"title": "Owner missing", "detail": "Assign an owner", "severity": "major"}]},
+            "created_at": "2026-06-16T11:01:00+00:00",
+        },
+    )
+    older_proposal = fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "superseded",
+            "changes": [{"id": "old"}],
+            "created_at": "2026-06-16T10:00:00+00:00",
+        },
+    )
+    latest_proposal = fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "changes": [{"id": "new"}],
+            "created_at": "2026-06-16T11:05:00+00:00",
+        },
+    )
+
+    artifacts_response = await client.get(
+        f"/api/v1/projects/{project['id']}/agents/artifacts/latest",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert artifacts_response.status_code == 200
+    artifacts = artifacts_response.json()["data"]
+    assert [artifact["id"] for artifact in artifacts] == [
+        latest_analyzer_artifact["id"],
+        latest_planner_artifact["id"],
+    ]
+
+    latest_proposal_response = await client.get(
+        f"/api/v1/projects/{project['id']}/plan/proposals/latest",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert latest_proposal_response.status_code == 200
+    assert latest_proposal_response.json()["data"]["id"] == latest_proposal["id"]
+    assert latest_proposal_response.json()["data"]["status"] == "pending"
+    assert older_proposal["id"] != latest_proposal["id"]
+
+
+@pytest.mark.asyncio
 async def test_member_management_requires_approver(
     client: AsyncClient,
     fake_supabase: FakeSupabase,
@@ -307,6 +610,102 @@ async def test_member_management_requires_approver(
     )
     assert patch_member_response.status_code == 200
     assert patch_member_response.json()["data"]["can_approve"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_and_accept_project_invitation(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+
+    create_invitation = await client.post(
+        f"/api/v1/projects/{project['id']}/member-invitations",
+        headers={"X-Session-Id": "alpha"},
+        json={
+            "invitee_name": "Beta User",
+            "invitee_email": "beta@example.com",
+            "role": "member",
+            "can_approve": False,
+            "can_edit": True,
+        },
+    )
+
+    assert create_invitation.status_code == 201
+    token = create_invitation.json()["data"]["token"]
+    assert token
+
+    accept_invitation = await client.post(
+        f"/api/v1/member-invitations/{token}/accept",
+        headers={"X-Session-Id": "beta"},
+    )
+
+    assert accept_invitation.status_code == 200
+    accepted = accept_invitation.json()["data"]
+    assert accepted["project_id"] == project["id"]
+    assert accepted["member"]["session_id"] == "beta"
+    assert accepted["member"]["can_edit"] is True
+    assert fake_supabase.tables["project_invitation"][0]["redeemed_by_session_id"] == "beta"
+
+
+@pytest.mark.asyncio
+async def test_redeemed_invitation_cannot_be_used_by_another_session(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    invitation = fake_supabase.insert_row(
+        "project_invitation",
+        {
+            "project_id": project["id"],
+            "token": "invite-token",
+            "invitee_name": "Beta User",
+            "invitee_email": "beta@example.com",
+            "role": "member",
+            "can_approve": False,
+            "can_edit": False,
+            "created_by_session_id": "alpha",
+            "redeemed_at": _iso_now(),
+            "redeemed_by_session_id": "beta",
+        },
+    )
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "beta",
+            "role": "member",
+            "can_approve": False,
+            "can_edit": False,
+        },
+    )
+
+    response = await client.post(
+        f"/api/v1/member-invitations/{invitation['token']}/accept",
+        headers={"X-Session-Id": "gamma"},
+    )
+
+    assert response.status_code == 409
 
 
 @pytest.mark.asyncio

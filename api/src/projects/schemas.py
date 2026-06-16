@@ -16,6 +16,11 @@ class ProjectCreate(ApiModel):
     description: str = Field(default="", max_length=4000)
 
 
+class ProjectUpdate(ApiModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=4000)
+
+
 class ProjectMembershipOut(ApiModel):
     role: ProjectMemberRole
     can_approve: bool
@@ -27,4 +32,5 @@ class ProjectOut(ApiModel):
     name: str
     description: str
     created_at: datetime
+    member_count: int
     membership: ProjectMembershipOut

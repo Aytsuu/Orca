@@ -14,3 +14,13 @@ class MemberNotFound(NotFound):
 class InvalidPermissionsUpdate(BadRequest):
     message = "At least one permission field must be provided."
     error_code = "INVALID_PERMISSIONS_UPDATE"
+
+
+class MemberInvitationNotFound(NotFound):
+    message = "Project invitation not found."
+    error_code = "MEMBER_INVITATION_NOT_FOUND"
+
+
+class MemberInvitationAlreadyRedeemed(Conflict):
+    message = "This invitation link has already been redeemed."
+    error_code = "MEMBER_INVITATION_ALREADY_REDEEMED"

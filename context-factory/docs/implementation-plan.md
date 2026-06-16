@@ -39,7 +39,7 @@
 ---
 
 ## [x] Phase 2 - API (FastAPI)
-/status
+
 ### Infrastructure
 - [x] `main.py` - app setup, lifespan, router registration
 - [x] `supabase_client.py` - async client factory

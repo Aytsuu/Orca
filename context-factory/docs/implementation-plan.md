@@ -39,7 +39,7 @@
 ---
 
 ## [x] Phase 2 - API (FastAPI)
-
+/status
 ### Infrastructure
 - [x] `main.py` - app setup, lifespan, router registration
 - [x] `supabase_client.py` - async client factory
@@ -73,7 +73,14 @@
 
 ---
 
-## Phase 3 - AI Engine (FastAPI)
+## [/] Phase 3 - AI Engine (FastAPI)
+
+> Phase 3 is now partially implemented: schema migration, API queue/run plumbing,
+> `ai_engine` scaffolding, worker entrypoint, context builder, core guardrails,
+> Monitor/Analyzer/Planner pipeline, deterministic updater hardening, and
+> backend tests are in place. Remaining work is primarily hybrid debounce,
+> per-project locking, retry/backoff, planner fallback/repair flow, input
+> sanitization completion, and broader test coverage.
 
 ### Schema Migration
 

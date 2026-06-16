@@ -6,7 +6,12 @@ from typing import Any
 
 from supabase import AsyncClient
 
-from src.plans.exceptions import PlanProposalNotFound, PlanRevertUnavailable
+from src.agents.service import get_agent_statuses, set_agent_status
+from src.plans.exceptions import (
+    PlanProposalAlreadyResolved,
+    PlanProposalNotFound,
+    PlanRevertUnavailable,
+)
 
 MAX_REVERTS = 3
 
@@ -63,6 +68,18 @@ async def get_pending_proposal(supabase: AsyncClient, project_id: str) -> dict[s
     return rows[0] if rows else None
 
 
+async def get_latest_proposal(supabase: AsyncClient, project_id: str) -> dict[str, Any] | None:
+    rows = (
+        await supabase.table("plan_proposal")
+        .select("*")
+        .eq("project_id", project_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    ).data
+    return rows[0] if rows else None
+
+
 async def approve_proposal(
     supabase: AsyncClient,
     *,
@@ -71,66 +88,77 @@ async def approve_proposal(
 ) -> dict[str, Any]:
     proposal = await get_pending_proposal(supabase, project_id)
     if not proposal:
+        latest = await get_latest_proposal(supabase, project_id)
+        if latest:
+            raise PlanProposalAlreadyResolved()
         raise PlanProposalNotFound()
 
-    approved_indexes = set(approved_change_indexes or range(len(proposal["changes"])))
-    approved_changes = [
-        {**change, "approved": index in approved_indexes}
-        for index, change in enumerate(proposal["changes"])
-        if index in approved_indexes
-    ]
+    await get_agent_statuses(supabase, project_id)
+    await set_agent_status(supabase, project_id=project_id, agent="updater", status="running")
 
-    current_plan = await get_current_plan(supabase, project_id)
-    current_content = deepcopy(current_plan["content"]) if current_plan else {}
-    next_content = current_content
-    for change in approved_changes:
-        next_content = _merge_change(next_content, change)
+    try:
+        approved_indexes = set(approved_change_indexes or range(len(proposal["changes"])))
+        approved_changes = [
+            {**change, "approved": index in approved_indexes}
+            for index, change in enumerate(proposal["changes"])
+            if index in approved_indexes
+        ]
 
-    if current_plan:
-        await supabase.table("plan_version").insert(
-            {"project_id": project_id, "content": current_content}
-        ).execute()
-        updated = (
-            await supabase.table("project_plan")
-            .update(
-                {
-                    "content": next_content,
-                    "version": current_plan["version"] + 1,
-                    "finalized_at": datetime.now(timezone.utc).isoformat(),
-                }
-            )
-            .eq("id", current_plan["id"])
+        current_plan = await get_current_plan(supabase, project_id)
+        current_content = deepcopy(current_plan["content"]) if current_plan else {}
+        next_content = current_content
+        for change in approved_changes:
+            next_content = _merge_change(next_content, change)
+
+        if current_plan:
+            await supabase.table("plan_version").insert(
+                {"project_id": project_id, "content": current_content}
+            ).execute()
+            updated = (
+                await supabase.table("project_plan")
+                .update(
+                    {
+                        "content": next_content,
+                        "version": current_plan["version"] + 1,
+                        "finalized_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                .eq("id", current_plan["id"])
+                .execute()
+            ).data[0]
+        else:
+            updated = (
+                await supabase.table("project_plan")
+                .insert(
+                    {
+                        "project_id": project_id,
+                        "content": next_content,
+                        "version": 1,
+                        "finalized_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                .execute()
+            ).data[0]
+
+        await supabase.table("plan_proposal").update(
+            {"status": "applied", "changes": approved_changes}
+        ).eq("id", proposal["id"]).execute()
+
+        versions = (
+            await supabase.table("plan_version")
+            .select("*")
+            .eq("project_id", project_id)
+            .order("created_at", desc=True)
             .execute()
-        ).data[0]
-    else:
-        updated = (
-            await supabase.table("project_plan")
-            .insert(
-                {
-                    "project_id": project_id,
-                    "content": next_content,
-                    "version": 1,
-                    "finalized_at": datetime.now(timezone.utc).isoformat(),
-                }
-            )
-            .execute()
-        ).data[0]
+        ).data
+        for stale_version in versions[MAX_REVERTS:]:
+            await supabase.table("plan_version").delete().eq("id", stale_version["id"]).execute()
 
-    await supabase.table("plan_proposal").update(
-        {"status": "applied", "changes": approved_changes}
-    ).eq("id", proposal["id"]).execute()
-
-    versions = (
-        await supabase.table("plan_version")
-        .select("*")
-        .eq("project_id", project_id)
-        .order("created_at", desc=True)
-        .execute()
-    ).data
-    for stale_version in versions[MAX_REVERTS:]:
-        await supabase.table("plan_version").delete().eq("id", stale_version["id"]).execute()
-
-    return updated
+        await set_agent_status(supabase, project_id=project_id, agent="updater", status="completed")
+        return updated
+    except Exception:
+        await set_agent_status(supabase, project_id=project_id, agent="updater", status="failed")
+        raise
 
 
 async def reject_proposal(supabase: AsyncClient, project_id: str) -> dict[str, Any]:

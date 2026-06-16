@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from supabase import AsyncClient
 
+from src.agents.queue import QueueProducer
+
 AGENT_NAMES = ("monitor", "analyzer", "planner", "updater")
+ACTIVE_RUN_STATUSES = {"queued", "running"}
 
 
 async def get_agent_statuses(supabase: AsyncClient, project_id: str) -> list[dict]:
@@ -29,12 +33,131 @@ async def get_agent_statuses(supabase: AsyncClient, project_id: str) -> list[dic
     return initialized
 
 
-async def trigger_agents(supabase: AsyncClient, project_id: str) -> dict:
-    await get_agent_statuses(supabase, project_id)
+async def set_agent_status(
+    supabase: AsyncClient,
+    *,
+    project_id: str,
+    agent: str,
+    status: str,
+) -> None:
+    await supabase.table("agent_status").update(
+        {
+            "status": status,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+    ).eq("project_id", project_id).eq("agent", agent).execute()
+
+
+async def set_agent_statuses_for_new_run(supabase: AsyncClient, project_id: str) -> None:
     updated_at = datetime.now(timezone.utc).isoformat()
     for index, agent_name in enumerate(AGENT_NAMES):
         status = "queued" if index == 0 else "idle"
         await supabase.table("agent_status").update(
             {"status": status, "updated_at": updated_at}
         ).eq("project_id", project_id).eq("agent", agent_name).execute()
-    return {"project_id": project_id, "status": "queued"}
+
+
+async def get_active_run(supabase: AsyncClient, project_id: str) -> dict[str, Any] | None:
+    rows = (
+        await supabase.table("agent_run")
+        .select("*")
+        .eq("project_id", project_id)
+        .order("created_at", desc=True)
+        .execute()
+    ).data
+    for row in rows:
+        if row["status"] in ACTIVE_RUN_STATUSES:
+            return row
+    return None
+
+
+def _merge_ids(existing: list[str], incoming: list[str]) -> list[str]:
+    merged = list(existing)
+    for item in incoming:
+        if item not in merged:
+            merged.append(item)
+    return merged
+
+
+async def append_run_inputs(
+    supabase: AsyncClient,
+    *,
+    run: dict[str, Any],
+    message_ids: list[str] | None = None,
+    file_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "new_message_ids": _merge_ids(run.get("new_message_ids", []), message_ids or []),
+        "new_file_ids": _merge_ids(run.get("new_file_ids", []), file_ids or []),
+    }
+    updated = (
+        await supabase.table("agent_run").update(payload).eq("id", run["id"]).execute()
+    ).data[0]
+    return updated
+
+
+async def create_agent_run(
+    supabase: AsyncClient,
+    *,
+    project_id: str,
+    triggered_by: str,
+    message_ids: list[str] | None = None,
+    file_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    inserted = (
+        await supabase.table("agent_run")
+        .insert(
+            {
+                "project_id": project_id,
+                "triggered_by": triggered_by,
+                "status": "queued",
+                "new_message_ids": message_ids or [],
+                "new_file_ids": file_ids or [],
+            }
+        )
+        .execute()
+    ).data[0]
+    return inserted
+
+
+async def trigger_agents(
+    supabase: AsyncClient,
+    queue_producer: QueueProducer,
+    *,
+    project_id: str,
+    triggered_by: str,
+    message_ids: list[str] | None = None,
+    file_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    await get_agent_statuses(supabase, project_id)
+    active_run = await get_active_run(supabase, project_id)
+
+    if active_run:
+        updated_run = await append_run_inputs(
+            supabase,
+            run=active_run,
+            message_ids=message_ids,
+            file_ids=file_ids,
+        )
+        return {
+            "run_id": updated_run["id"],
+            "project_id": project_id,
+            "status": updated_run["status"],
+            "reused_active_run": True,
+        }
+
+    created_run = await create_agent_run(
+        supabase,
+        project_id=project_id,
+        triggered_by=triggered_by,
+        message_ids=message_ids,
+        file_ids=file_ids,
+    )
+    await set_agent_statuses_for_new_run(supabase, project_id)
+    queue_producer.enqueue_run(created_run["id"])
+    return {
+        "run_id": created_run["id"],
+        "project_id": project_id,
+        "status": "queued",
+        "reused_active_run": False,
+    }

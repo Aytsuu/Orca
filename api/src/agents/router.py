@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from supabase import AsyncClient
 
+from src.agents.queue import QueueProducer, get_queue_producer
 from src.agents.schemas import AgentStatusOut, AgentTriggerOut
 from src.agents.service import get_agent_statuses, trigger_agents
 from src.models import DataEnvelope
@@ -35,7 +36,13 @@ async def trigger_agents_endpoint(
     project_id: UUID,
     project_context: Annotated[dict, Depends(get_project_context)],
     supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
+    queue_producer: Annotated[QueueProducer, Depends(get_queue_producer)],
 ) -> DataEnvelope[AgentTriggerOut]:
     require_approver_membership(project_context["membership"])
-    result = await trigger_agents(supabase, str(project_id))
+    result = await trigger_agents(
+        supabase,
+        queue_producer,
+        project_id=str(project_id),
+        triggered_by=project_context["session_id"],
+    )
     return DataEnvelope(data=AgentTriggerOut.model_validate(result))

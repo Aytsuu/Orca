@@ -19,5 +19,7 @@ class AgentStatusOut(ApiModel):
 
 
 class AgentTriggerOut(ApiModel):
+    run_id: UUID
     project_id: UUID
     status: str
+    reused_active_run: bool = False

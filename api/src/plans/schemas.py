@@ -8,7 +8,7 @@ from pydantic import Field
 
 from src.models import ApiModel
 
-ProposalStatus = Literal["pending", "approved", "rejected", "applied"]
+ProposalStatus = Literal["pending", "approved", "rejected", "applied", "superseded"]
 
 
 class PlanOut(ApiModel):

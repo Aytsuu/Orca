@@ -73,7 +73,7 @@
 
 ---
 
-## Phase 3 - AI Agent Pipeline
+## Phase 3 - AI Engine (FastAPI)
 
 ### Schema Migration
 

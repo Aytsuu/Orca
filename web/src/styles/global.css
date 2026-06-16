@@ -4,7 +4,6 @@
 @config "../../tailwind.config.mjs";
 @import './tokens.css';
 @import './typography.css';
-@import "tailwindcss";
 
 @theme {
   --color-background: #0B0E0C;

@@ -610,7 +610,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
               return (
                 <div
                   key={sug.id}
-                  className="bg-background border border-border-subtle rounded-sm p-4 flex flex-col gap-2 transition-all"
+                  className="bg-background/50 border border-border-subtle rounded-xl p-4 flex flex-col gap-2 transition-all"
                 >
                   <div className="flex justify-between items-center text-xs font-bold">
                     <div className="flex items-center gap-1.5">

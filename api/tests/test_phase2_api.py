@@ -267,6 +267,43 @@ async def test_project_creation_creates_default_member_invitation(
 
 
 @pytest.mark.asyncio
+async def test_project_creation_initializes_base_project_plan(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    create_response = await client.post(
+        "/api/v1/projects",
+        headers={"X-Session-Id": "alpha"},
+        json={"name": "Orca", "description": "Planning workspace"},
+    )
+
+    assert create_response.status_code == 201
+    assert len(fake_supabase.tables["project_plan"]) == 1
+
+    project = create_response.json()["data"]
+    project_plan = fake_supabase.tables["project_plan"][0]
+    assert project_plan["project_id"] == project["id"]
+    assert project_plan["version"] == 1
+    assert project_plan["finalized_at"] is None
+    assert project_plan["content"] == {
+        "title": "Orca",
+        "description": "Planning workspace",
+        "objectives": [],
+        "stakeholders": [],
+        "phases": [],
+        "global_risks": [],
+    }
+
+    get_plan = await client.get(
+        f"/api/v1/projects/{project['id']}/plan",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert get_plan.status_code == 200
+    assert get_plan.json()["data"]["title"] == "Orca"
+    assert get_plan.json()["data"]["description"] == "Planning workspace"
+
+
+@pytest.mark.asyncio
 async def test_get_update_delete_and_list_members_for_project(
     client: AsyncClient,
     fake_supabase: FakeSupabase,

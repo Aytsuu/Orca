@@ -11,6 +11,17 @@ from src.projects.exceptions import ProjectAccessDenied, ProjectNotFound
 AGENT_NAMES = ("monitor", "analyzer", "planner", "updater")
 
 
+def _initial_project_plan_content(*, title: str, description: str) -> dict[str, Any]:
+    return {
+        "title": title,
+        "description": description,
+        "objectives": [],
+        "stakeholders": [],
+        "phases": [],
+        "global_risks": [],
+    }
+
+
 def _project_with_membership(
     project_row: dict[str, Any],
     member_row: dict[str, Any],
@@ -52,6 +63,17 @@ async def create_project(
         "can_edit": True,
     }
     member_result = await supabase.table("project_member").insert(member_payload).execute()
+    await supabase.table("project_plan").insert(
+        {
+            "project_id": project["id"],
+            "content": _initial_project_plan_content(
+                title=name.strip(),
+                description=description.strip(),
+            ),
+            "version": 1,
+            "finalized_at": None,
+        }
+    ).execute()
     for agent_name in AGENT_NAMES:
         await supabase.table("agent_status").insert(
             {"project_id": project["id"], "agent": agent_name, "status": "idle"}

@@ -71,7 +71,7 @@
 
 #### Schemas (`plans/schemas.py`)
 - [ ] `StructuredPlanOut` — full plan hierarchy (phases, tasks, gaps, risks, objectives, stakeholders) returned by `GET /plan`; `phases: []` when no plan generated yet (triggers frontend empty state)
-- [ ] `ProposedChangeOut` — typed diff card (action, section, targetId, title, detail, sourceQuote) returned by `GET /plan/proposal`
+- [ ] `ProposedChangeOut` — typed diff card (action, section, targetId, title, detail, confidence, sourceQuote) returned by `GET /plan/proposal`
 - [ ] `PlanMetaUpdate` — title, description, objectives[], stakeholders[]
 - [ ] `PhaseCreate` / `PhaseUpdate` — title (required), goal, timeframe
 - [ ] `TaskCreate` / `TaskUpdate` — title (required), owner, due, priority, description, acceptanceCriteria[]

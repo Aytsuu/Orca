@@ -363,6 +363,7 @@ The atomic unit of a plan. Has 5 distinct visual states.
 | Task title | `--text-sm`, `--weight-bold`, `--color-text-primary` |
 | Meta line | `--text-xs`, `--color-text-muted`, flex row with `·` separators |
 | Priority dot | 6px circle — Critical: `--color-error`; High: `--color-warning`; Medium: `--color-primary`; Low: `--color-text-muted` |
+| Confidence (medium/low) | Shown only in review panel, not in the task row itself |
 | Hover | `background: rgba(var(--color-surface-raised), 0.40)`, `cursor: pointer` |
 | Transition | `200ms ease` on background and border-color |
 | Row padding | `padding: --space-2`, `margin: 0 calc(-1 * --space-2)` (bleed to left) |

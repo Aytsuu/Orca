@@ -1,4 +1,3 @@
-// src/components/islands/features/ChatView.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '@nanostores/react';
 import {
@@ -17,36 +16,64 @@ import {
   ArrowRight,
   Eye,
   EyeOff,
-  HelpCircle,
-  Settings,
-  Mail,
-  Copy,
-  Globe,
-  Link,
-  ChevronDown
+  Loader2,
+  Compass,
+  Calendar,
+  RefreshCw
 } from 'lucide-react';
 import {
-  addProjectMember,
   addToast,
-  projectInvitationLinks,
-  loadProjectInvitationLink,
-  updateProjectMemberRole
+  projects,
+  loadProjects
 } from '../../../stores/projectStore';
 import {
   useProjectWorkspace
 } from '../../../lib/query/projectWorkspace';
+import {
+  useProjectMessages,
+  useSendProjectMessage,
+} from '../../../lib/query/projectMessages';
+import {
+  useProjectFiles,
+  useUploadProjectFile,
+} from '../../../lib/query/projectFiles';
 import { QueryProvider } from '../providers/QueryProvider';
-import { Modal } from '../ui/Modal';
+import { ShareProjectModal } from './ShareProjectModal';
+import { sessionId } from '../../../stores/project/session';
+import { formatRelativeTime, toInitials } from '../../../stores/project/repository';
 
 interface ChatViewProps {
   projectId: string;
 }
 
+const agentDetails: Record<
+  string,
+  { name: string; icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }> }
+> = {
+  MONITOR: { name: 'Monitor Orca', icon: Eye },
+  ANALYZER: { name: 'Analyzer Orca', icon: Compass },
+  PLANNER: { name: 'Planner Orca', icon: Calendar },
+  UPDATER: { name: 'Updater Orca', icon: RefreshCw },
+};
+
 const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const { data: detail, isLoading, error } = useProjectWorkspace(projectId);
+  const {
+    data: projectMessages,
+    isLoading: isMessagesLoading,
+    error: messagesError,
+  } = useProjectMessages(projectId);
+  const {
+    data: projectFiles,
+    isLoading: isFilesLoading,
+    error: filesError,
+  } = useProjectFiles(projectId);
+  const sendMessageMutation = useSendProjectMessage(projectId);
+  const uploadFileMutation = useUploadProjectFile(projectId);
+  const currentSessionId = sessionId.get();
 
-  const invitationLinks = useStore(projectInvitationLinks);
-  const [isLoadingInviteLink, setIsLoadingInviteLink] = useState(false);
+  const projectList = useStore(projects);
+  const currentProject = projectList.find((p) => p.id === projectId);
 
   const [messageText, setMessageText] = useState('');
   const [mobileTab, setMobileTab] = useState<'files' | 'chat' | 'ai'>('chat');
@@ -60,23 +87,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const [editingText, setEditingText] = useState('');
 
   const chatEndRef = useRef<HTMLDivElement>(null);
-
-  // Local mock states for interactive demo
-  const [messages, setMessages] = useState<Array<{
-    id: string;
-    senderName: string;
-    senderInitials: string;
-    isAI: boolean;
-    timestamp: string;
-    content: string;
-    aiSuggestion?: {
-      id: string;
-      title: string;
-      content: string;
-      status: 'pending' | 'accepted' | 'rejected' | 'applied';
-    };
-  }>>([]);
-
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<Array<{
     id: string;
     name: string;
@@ -98,32 +109,8 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     content: string;
   }>>([]);
 
-  // Initialize mock state when projectId changes
+  // Initialize non-chat mock state when projectId changes
   useEffect(() => {
-    setMessages([
-      {
-        id: 'msg_1',
-        senderName: 'Sarah Connor',
-        senderInitials: 'SC',
-        isAI: false,
-        timestamp: '10:30 AM',
-        content: `Hi everyone! Welcome to the new workspace for project ${projectId}. Let's outline our foundation plan.`
-      },
-      {
-        id: 'msg_2',
-        senderName: 'You',
-        senderInitials: 'YO',
-        isAI: false,
-        timestamp: '10:32 AM',
-        content: "Thanks Sarah, glad to be here. I'll upload some specs files so the AI planner can suggest tasks."
-      }
-    ]);
-
-    setFiles([
-      { id: 'file_1', name: 'pr-specs.pdf', size: '2.4 MB', type: 'PDF', uploadedAt: '10m ago' },
-      { id: 'file_2', name: 'api-endpoints.json', size: '1.2 MB', type: 'JSON', uploadedAt: '5m ago' }
-    ]);
-
     setAgentStatus({
       MONITOR: 'idle',
       ANALYZER: 'idle',
@@ -140,20 +127,84 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     ]);
   }, [projectId]);
 
-  // Scroll to bottom on new messages
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  // Load invitation link when modal is opened
-  useEffect(() => {
-    if (isInviteOpen && !invitationLinks[projectId]) {
-      setIsLoadingInviteLink(true);
-      void loadProjectInvitationLink(projectId).finally(() => {
-        setIsLoadingInviteLink(false);
-      });
+    if (projectFiles) {
+      setFiles(
+        projectFiles.map((file) => ({
+          id: file.id,
+          name: file.filename,
+          size: formatFileSize(file.sizeBytes),
+          type: file.mimeType.split('/').pop()?.toUpperCase() || 'FILE',
+          uploadedAt: formatRelativeTime(file.createdAt),
+        }))
+      );
+      return;
     }
-  }, [isInviteOpen, projectId, invitationLinks]);
+
+    if (!isFilesLoading && !filesError) {
+      setFiles([]);
+    }
+  }, [projectFiles, isFilesLoading, filesError]);
+
+  const isInitialLoad = useRef(true);
+
+  // Scroll to bottom on new messages and load transitions
+  useEffect(() => {
+    if (isLoading || isMessagesLoading) return;
+    const container = chatEndRef.current?.parentElement;
+    if (!container) return;
+
+    const scrollToBottom = (behavior: 'auto' | 'smooth' = 'auto') => {
+      if (behavior === 'auto') {
+        container.scrollTop = container.scrollHeight;
+      } else {
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: 'smooth',
+        });
+      }
+    };
+
+    // Initial scroll
+    scrollToBottom('auto');
+
+    // Handle container resizing (e.g. flexbox layout settling, window resizes)
+    const resizeObserver = new ResizeObserver(() => {
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+      if (isNearBottom || isInitialLoad.current) {
+        scrollToBottom('auto');
+      }
+    });
+    resizeObserver.observe(container);
+
+    // Watch for new messages added to DOM
+    const mutationObserver = new MutationObserver(() => {
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+      if (isNearBottom || isInitialLoad.current) {
+        scrollToBottom(isInitialLoad.current ? 'auto' : 'smooth');
+        if (isInitialLoad.current) {
+          isInitialLoad.current = false;
+        }
+      }
+    });
+    mutationObserver.observe(container, { childList: true, subtree: true });
+
+    // Mark initial load finished after a short delay
+    const timer = setTimeout(() => {
+      isInitialLoad.current = false;
+    }, 500);
+
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      clearTimeout(timer);
+    };
+  }, [isLoading, isMessagesLoading]);
+
+  // Load projects list on mount to get the project name
+  useEffect(() => {
+    void loadProjects();
+  }, []);
 
   if (isLoading) {
     return (
@@ -171,80 +222,44 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     );
   }
 
-  const handleSend = (e: React.FormEvent) => {
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!messageText.trim()) return;
-    
-    const nextMsg = {
-      id: `msg_${Date.now()}`,
-      senderName: 'You',
-      senderInitials: 'YO',
-      isAI: false,
-      timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-      content: messageText.trim()
-    };
-    setMessages(prev => [...prev, nextMsg]);
+    const content = messageText.trim();
+    if (!content) return;
     setMessageText('');
 
-    // Trigger fake agent pipeline animations
-    setTimeout(() => {
-      setAgentStatus({ MONITOR: 'active', ANALYZER: 'active', PLANNER: 'idle', UPDATER: 'idle' });
-      setTimeout(() => {
-        setAgentStatus({ MONITOR: 'idle', ANALYZER: 'complete', PLANNER: 'active', UPDATER: 'idle' });
-        setTimeout(() => {
-          setAgentStatus({ MONITOR: 'idle', ANALYZER: 'complete', PLANNER: 'complete', UPDATER: 'idle' });
-          const sugId = `sug_${Date.now()}`;
-          const aiMsg = {
-            id: `msg_ai_${Date.now()}`,
-            senderName: 'AI Suggestion',
-            senderInitials: 'AI',
-            isAI: true,
-            timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-            content: 'The AI analyzed your message and proposed a new task for Phase 1.',
-            aiSuggestion: {
-              id: sugId,
-              title: 'AI Suggestion',
-              content: 'ADD TASK: Design API authorization flow',
-              status: 'pending' as const
-            }
-          };
-          setMessages(prev => [...prev, aiMsg]);
-          setPanelSuggestions(prev => [
-            ...prev,
-            {
-              id: `ps_${sugId}`,
-              type: 'TASK',
-              content: 'ADD TASK: Design API authorization flow'
-            }
-          ]);
-          addToast('info', 'New AI suggestion received!');
-        }, 1200);
-      }, 1000);
-    }, 1500);
+    try {
+      await sendMessageMutation.mutateAsync(content);
+    } catch (sendError) {
+      setMessageText(content);
+      addToast(
+        'error',
+        sendError instanceof Error ? sendError.message : 'Unable to send message.'
+      );
+    }
   };
 
-  const handleFakeUpload = () => {
-    const filenames = ['db-migration.sql', 'assets-pack.zip', 'architecture.md'];
-    const randomName = filenames[Math.floor(Math.random() * filenames.length)];
-    const fileExt = randomName.split('.').pop()?.toUpperCase() || 'FILE';
-    const randomSize = `${(Math.random() * 5 + 1).toFixed(1)} MB`;
+  const handleUploadSelection = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
 
-    const newFile = {
-      id: `file_${Date.now()}`,
-      name: randomName,
-      size: randomSize,
-      type: fileExt,
-      uploadedAt: 'Just now'
-    };
-    setFiles(prev => [newFile, ...prev]);
-    addToast('success', `${randomName} uploaded successfully!`);
+    try {
+      await uploadFileMutation.mutateAsync(file);
+      addToast('success', `${file.name} uploaded successfully.`);
+    } catch (uploadError) {
+      addToast(
+        'error',
+        uploadError instanceof Error ? uploadError.message : 'Unable to upload file.'
+      );
+    }
   };
 
   const handleApproveProposal = (sugId: string) => {
-    setMessages(prev =>
+    setPanelSuggestions(prev =>
       prev.map(msg =>
-        msg.aiSuggestion && msg.aiSuggestion.id === sugId
-          ? { ...msg, aiSuggestion: { ...msg.aiSuggestion, status: 'accepted' } }
+        msg.id === `ps_${sugId}`
+          ? { ...msg, content: `${msg.content} (approved)` }
           : msg
       )
     );
@@ -252,15 +267,37 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   };
 
   const handleRejectProposal = (sugId: string) => {
-    setMessages(prev =>
+    setPanelSuggestions(prev =>
       prev.map(msg =>
-        msg.aiSuggestion && msg.aiSuggestion.id === sugId
-          ? { ...msg, aiSuggestion: { ...msg.aiSuggestion, status: 'rejected' } }
+        msg.id === `ps_${sugId}`
+          ? { ...msg, content: `${msg.content} (rejected)` }
           : msg
       )
     );
     addToast('warning', 'Plan change rejected.');
   };
+
+  const renderedMessages = (projectMessages ?? []).map((message) => {
+    const teammate = detail.teammates.find((member) => member.sessionId === message.sessionId);
+    const isCurrentUser = message.sessionId === currentSessionId;
+
+    return {
+      id: message.id,
+      senderName: isCurrentUser ? 'You' : teammate?.name ?? message.sessionId,
+      senderInitials: isCurrentUser ? 'YO' : teammate?.initials ?? toInitials(message.sessionId),
+      timestamp: new Date(message.createdAt).toLocaleTimeString([], {
+        hour: 'numeric',
+        minute: '2-digit',
+      }),
+      content: message.content,
+      isCurrentUser,
+      isOptimistic: message.isOptimistic,
+    };
+  });
+
+  const lastUserMessageId = [...renderedMessages]
+    .reverse()
+    .find((msg) => msg.isCurrentUser)?.id;
 
   return (
     <div className="flex-grow flex flex-col lg:flex-row lg:h-[calc(100vh-112px)] lg:overflow-hidden bg-background relative lg:p-4 lg:gap-4">
@@ -297,16 +334,30 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
           ))}
 
           {files.length === 0 && (
-            <div className="text-xs text-text-muted italic py-4">No files uploaded.</div>
+            <div className="text-xs text-text-muted py-4">No files uploaded.</div>
           )}
         </div>
 
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          onChange={(event) => {
+            void handleUploadSelection(event);
+          }}
+        />
+
         <button
-          onClick={handleFakeUpload}
-          className="btn-ghost border border-solid border-border rounded-full flex items-center justify-center gap-1.5 py-2 hover:border-primary hover:text-primary"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploadFileMutation.isPending}
+          className="btn-ghost border border-solid border-border rounded-full flex items-center justify-center gap-1.5 py-2 hover:border-primary hover:text-primary disabled:opacity-60"
         >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Add File</span>
+          {uploadFileMutation.isPending ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Plus className="w-3.5 h-3.5" />
+          )}
+          <span>{uploadFileMutation.isPending ? 'Uploading...' : 'Add File'}</span>
         </button>
       </aside>
 
@@ -353,125 +404,29 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
         <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-6">
           <div className="divider-labeled uppercase">TODAY</div>
 
-          {messages.map((msg) => {
-            const isUser = msg.senderName === 'You';
-            const isAI = msg.isAI;
+          {isMessagesLoading && (
+            <div className="text-sm text-text-muted">Loading messages...</div>
+          )}
 
-            if (isAI && msg.aiSuggestion) {
-              const sug = msg.aiSuggestion;
-              const isPending = sug.status === 'pending';
-              const isVisibleInChat = visibleSuggestionId === sug.id;
+          {messagesError && (
+            <div className="text-sm text-error">
+              {messagesError instanceof Error ? messagesError.message : 'Unable to load messages.'}
+            </div>
+          )}
 
-              if (!isVisibleInChat) {
-                return null;
-              }
+          {!isMessagesLoading && !messagesError && renderedMessages.length === 0 && (
+            <div className="text-sm text-text-muted">
+              No messages yet. Start the conversation with your project members.
+            </div>
+          )}
 
-              return (
-                <div
-                  key={msg.id}
-                  id={`msg-sug-${sug.id}`}
-                  className="bg-primary-muted border border-primary/20 rounded-sm p-6 flex flex-col gap-4 max-w-[680px] w-full self-end fade-up scroll-mt-6"
-                >
-                  <div className="flex justify-between items-center text-xs font-semibold">
-                    <div className="flex items-center gap-2 text-primary">
-                      <Zap className="w-3.5 h-3.5 text-primary shrink-0" />
-                      <span className="tracking-wide uppercase">AI SUGGESTION</span>
-                    </div>
-                    <span className="text-text-muted">{msg.timestamp}</span>
-                  </div>
-
-                  <p className="text-md text-text-secondary leading-relaxed select-text">
-                    {msg.content}
-                  </p>
-
-                  <div className="border border-border-subtle bg-background p-4 rounded-sm">
-                    <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">Proposed plan change</p>
-
-                    {editingSugId === sug.id ? (
-                      <div className="mt-2 flex flex-col gap-2">
-                        <textarea
-                          value={editingText}
-                          onChange={(e) => setEditingText(e.target.value)}
-                          rows={2}
-                          className="bg-surface border border-border p-2 text-sm text-text-primary focus:outline-none focus:border-primary rounded-sm"
-                        />
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => setEditingSugId(null)}
-                            className="px-2.5 py-1 text-xs btn-secondary"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={() => {
-                              sug.content = editingText;
-                              setEditingSugId(null);
-                              addToast('success', 'Plan change draft updated.');
-                            }}
-                            className="px-2.5 py-1 text-xs btn-primary"
-                          >
-                            Save
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-sm font-semibold text-text-primary mt-1 select-text">
-                        {sug.content}
-                      </p>
-                    )}
-                  </div>
-
-                  {isPending && (
-                    <div className="flex gap-3 mt-1">
-                      <button
-                        onClick={() => handleApproveProposal(sug.id)}
-                        className="btn-primary py-1.5 px-4 text-xs font-semibold flex items-center gap-1"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Accept</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingSugId(sug.id);
-                          setEditingText(sug.content);
-                        }}
-                        className="btn-secondary py-1.5 px-4 text-xs font-semibold flex items-center gap-1"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                        <span>Edit</span>
-                      </button>
-                      <button
-                        onClick={() => handleRejectProposal(sug.id)}
-                        className="btn-secondary text-error hover:bg-error/10 hover:border-error/30 py-1.5 px-4 text-xs font-semibold flex items-center gap-1"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                        <span>Reject</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {!isPending && (
-                    <div className="text-xs font-semibold flex items-center gap-1.5 mt-1 select-none">
-                      {sug.status === 'accepted' && (
-                        <>
-                          <span className="text-success flex items-center gap-1"><Check className="w-3.5 h-3.5" /> Approved & Synced</span>
-                          <span className="text-text-muted">plan updated</span>
-                        </>
-                      )}
-                      {sug.status === 'rejected' && (
-                        <span className="text-error flex items-center gap-1"><X className="w-3.5 h-3.5" /> Plan change rejected</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            }
-
+          {renderedMessages.map((msg) => {
+            const isUser = msg.isCurrentUser;
             return (
               <div
                 key={msg.id}
-                className={`flex gap-4 max-w-[680px] w-full fade-up ${isUser ? 'self-end flex-row-reverse' : 'self-start'
-                  }`}
+                className={`flex gap-4 max-w-[680px] w-full fade-up transition-opacity duration-300 ${isUser ? 'self-end flex-row-reverse' : 'self-start'
+                  } ${msg.isOptimistic ? 'opacity-70' : 'opacity-100'}`}
               >
                 {/* Avatar */}
                 <div className="h-8 w-8 rounded-full bg-surface border border-border flex items-center justify-center text-xs font-semibold text-text-muted select-none shrink-0">
@@ -483,10 +438,31 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
                     <span className="text-xs font-semibold text-text-muted">{msg.senderName}</span>
                     <span className="text-[10px] text-text-muted font-medium">{msg.timestamp}</span>
                   </div>
-                  <p className={`text-md text-text-secondary leading-relaxed select-text whitespace-pre-wrap ${isUser ? 'text-right' : 'text-left'
-                    }`}>
+
+                  {/* Message Bubble Container */}
+                  <div
+                    className={`rounded-2xl py-2 px-4 text-sm max-w-[85%] select-text whitespace-pre-wrap leading-relaxed ${isUser
+                      ? 'bg-primary-muted border border-primary/10 text-text-primary rounded-tr-none'
+                      : 'bg-surface-raised border border-border-subtle text-text-secondary rounded-tl-none'
+                      }`}
+                  >
                     {msg.content}
-                  </p>
+                  </div>
+
+                  {isUser && (msg.isOptimistic || msg.id === lastUserMessageId) && (
+                    <div className="mt-0.5 flex justify-end items-center text-text-muted select-none">
+                      {msg.isOptimistic ? (
+                        <span className="flex items-center gap-1" title="Sending...">
+                          <span className='text-[11px]'>Sending</span>
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 font-medium animate-fade-in" title="Delivered">
+                          <span className='text-[11px]'>Delivered</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -513,7 +489,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  handleSend(e);
+                  void handleSend(e);
                 }
               }}
               style={{ backgroundColor: 'transparent', border: 'none', outline: 'none' }}
@@ -522,7 +498,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
 
             <button
               type="submit"
-              disabled={!messageText.trim()}
+              disabled={!messageText.trim() || sendMessageMutation.isPending}
               className="h-8 w-8 rounded-full flex items-center justify-center transition-colors bg-surface-raised hover:bg-border text-text-secondary hover:text-text-primary disabled:opacity-40 disabled:hover:bg-surface-raised disabled:hover:text-text-secondary shrink-0 cursor-pointer disabled:cursor-not-allowed"
               title="Send message"
             >
@@ -541,36 +517,68 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
 
         {/* Agents statuses */}
         <div className="flex flex-col gap-2">
-          <span className="text-xs font-bold text-text-primary tracking-wider uppercase">AGENTS</span>
+          <span className="text-xs font-bold text-text-primary tracking-wider uppercase">ORCAS</span>
 
-          <div className="flex flex-col border border-border-subtle bg-background/50 rounded-sm divide-y divide-border-subtle/50">
-            {Object.entries(agentStatus).map(([agent, status]) => {
+          <div className="relative flex items-center justify-between px-6 py-4 bg-background/50 rounded-xl border border-border-subtle">
+            {/* Connector Line */}
+            <div className="absolute left-[42px] right-[42px] h-0.5 bg-border-subtle top-1/2 -translate-y-1/2 z-0" />
+
+            {['MONITOR', 'ANALYZER', 'PLANNER', 'UPDATER'].map((key) => {
+              const status = agentStatus[key] || 'idle';
+              const agentInfo = agentDetails[key];
+              if (!agentInfo) return null;
+
+              const IconComponent = agentInfo.icon;
               const isActive = status === 'active';
               const isComplete = status === 'complete';
               const isError = status === 'error';
 
-              let labelColor = 'text-text-muted';
-              let iconNode: React.ReactNode = <span className="h-2 w-2 rounded-full bg-text-muted shrink-0" />;
+              let iconContainerClass = '';
 
               if (isActive) {
-                labelColor = 'text-primary font-bold';
-                iconNode = <span className="h-2 w-2 rounded-full agent-pulse-dot shrink-0" />;
+                iconContainerClass = 'border-primary text-primary bg-primary/15 shadow-sm shadow-primary-glow/20';
               } else if (isComplete) {
-                labelColor = 'text-success';
-                iconNode = <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />;
+                iconContainerClass = 'border-success/50 text-success bg-success/10';
               } else if (isError) {
-                labelColor = 'text-error';
-                iconNode = <AlertCircle className="w-3.5 h-3.5 text-error shrink-0" />;
+                iconContainerClass = 'border-error/50 text-error bg-error/10';
+              } else {
+                iconContainerClass = 'border-border-subtle text-text-muted bg-surface-raised/50';
               }
 
               return (
-                <div key={agent} className="flex justify-between items-center px-4 py-2.5 text-xs">
-                  <span className="font-mono text-text-primary tracking-wider font-semibold">{agent}</span>
-                  <div className="flex items-center gap-2">
-                    {iconNode}
-                    <span className={`uppercase tracking-widest text-[10px] ${labelColor}`}>
-                      {status === 'active' ? 'Active' : status}
-                    </span>
+                <div key={key} className="relative z-10 flex flex-col items-center group cursor-help" title={`${agentInfo.name}: ${status}`}>
+                  {/* Tooltip */}
+                  <div className="absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-30 flex flex-col items-center">
+                    <div className="bg-surface-raised border border-border-subtle text-text-primary text-[10px] px-2.5 py-1 rounded-md shadow-lg font-medium tracking-wide whitespace-nowrap">
+                      <span className="font-semibold text-text-primary">{agentInfo.name}</span>
+                      <span className="mx-1 text-text-muted">•</span>
+                      <span className={`uppercase text-[9px] font-bold ${
+                        isActive ? 'text-primary animate-pulse' : isComplete ? 'text-success' : isError ? 'text-error' : 'text-text-muted'
+                      }`}>{status}</span>
+                    </div>
+                    <div className="w-1.5 h-1.5 bg-surface-raised border-r border-b border-border-subtle transform rotate-45 -mt-1" />
+                  </div>
+
+                  {/* Icon Container with solid backing to mask the line */}
+                  <div className="relative transition-transform duration-300 hover:scale-110">
+                    {/* Solid Mask */}
+                    <div className="absolute inset-0 rounded-full bg-surface -z-10" />
+                    
+                    {/* Pulsing ring for active state */}
+                    {isActive && (
+                      <div className="absolute -inset-1 rounded-full bg-primary/25 animate-ping -z-10" />
+                    )}
+
+                    <div className={`h-9 w-9 rounded-full flex items-center justify-center border transition-all duration-300 ${iconContainerClass}`}>
+                      <IconComponent
+                        className={`w-4.5 h-4.5 ${
+                          isActive && key !== 'UPDATER' ? 'animate-pulse' : ''
+                        } ${
+                          isActive && key === 'UPDATER' ? 'animate-spin' : ''
+                        }`}
+                        style={isActive && key === 'UPDATER' ? { animationDuration: '3s' } : undefined}
+                      />
+                    </div>
                   </div>
                 </div>
               );
@@ -682,202 +690,13 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
         </button>
       </nav>
 
-      {/* Invite Teammates Modal */}
-      <Modal
+      {/* Share / Members Modal */}
+      <ShareProjectModal
         isOpen={isInviteOpen}
         onClose={() => setIsInviteOpen(false)}
-        maxWidthClass="max-w-[560px]"
-      >
-        <div className="flex flex-col gap-6 text-text-secondary select-text">
-          {/* Header */}
-          <div className="flex justify-between items-center">
-            <h2 className="text-xl font-heading font-medium text-text-primary select-none">
-              Share Project Workspace
-            </h2>
-            <div className="flex items-center gap-3 text-text-muted select-none">
-              <button
-                type="button"
-                onClick={() => addToast('info', 'Help is under construction.')}
-                className="hover:text-text-primary transition-colors cursor-pointer"
-                title="Help"
-              >
-                <HelpCircle className="w-5 h-5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => addToast('info', 'Settings are under construction.')}
-                className="hover:text-text-primary transition-colors cursor-pointer"
-                title="Settings"
-              >
-                <Settings className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-
-          {/* Search Box / Add Member */}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const input = (e.currentTarget.elements.namedItem('emailOrName') as HTMLInputElement);
-              const val = input.value.trim();
-              if (val) {
-                const atIdx = val.indexOf('@');
-                const name = atIdx !== -1 ? val.substring(0, atIdx) : val;
-                const email = atIdx !== -1 ? val : `${val.toLowerCase().replace(/\s+/g, '')}@company.com`;
-                
-                addProjectMember(projectId, name, email, 'EDITOR');
-                input.value = '';
-              }
-            }}
-            className="w-full select-none"
-          >
-            <input
-              type="text"
-              name="emailOrName"
-              placeholder="Add people, groups, spaces and calendar events"
-              className="w-full bg-background border border-border focus:border-primary focus:outline-none rounded-xl px-4 py-3 text-sm text-text-primary placeholder-text-muted transition-colors"
-            />
-          </form>
-
-          {/* People with Access */}
-          <div className="flex flex-col gap-3">
-            <div className="flex justify-between items-center select-none">
-              <h3 className="text-sm font-medium text-text-primary font-heading uppercase tracking-wider">
-                People with access
-              </h3>
-              <div className="flex items-center gap-3 text-text-muted">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (invitationLinks[projectId]) {
-                      await navigator.clipboard.writeText(invitationLinks[projectId]);
-                      addToast('success', 'Invitation link copied.');
-                    } else {
-                      addToast('warning', 'Link not available yet.');
-                    }
-                  }}
-                  className="hover:text-text-primary transition-colors cursor-pointer"
-                  title="Copy link"
-                >
-                  <Copy className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => addToast('info', 'Email invitations are sent automatically.')}
-                  className="hover:text-text-primary transition-colors cursor-pointer"
-                  title="Mail access details"
-                >
-                  <Mail className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Members List container */}
-            <div className="flex flex-col border border-border-subtle bg-surface rounded-xl divide-y divide-border-subtle overflow-hidden px-4">
-              {detail.teammates.map((member) => {
-                const email = member.email || `${member.name.toLowerCase().replace(/[^a-z0-9]/g, '')}@company.com`;
-                const isYou = member.name.toLowerCase().includes('you');
-                
-                return (
-                  <div key={member.id} className="flex items-center justify-between py-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      {/* Avatar */}
-                      <div className="h-9 w-9 rounded-full bg-gradient-to-br from-primary-glow to-primary-muted border border-border flex items-center justify-center text-xs font-bold text-primary shrink-0 select-none">
-                        {member.initials}
-                      </div>
-                      <div className="truncate pr-4">
-                        <p className="text-sm font-semibold text-text-primary truncate">
-                          {member.name} {isYou && <span className="text-text-muted font-normal">(you)</span>}
-                        </p>
-                        <p className="text-xs text-text-muted truncate select-all">{email}</p>
-                      </div>
-                    </div>
-
-                    {/* Dropdown / Role Selector */}
-                    {member.isCreator ? (
-                      <span className="text-xs text-text-muted select-none font-medium pr-2">Owner</span>
-                    ) : (
-                      <div className="relative select-none">
-                        <select
-                          value={member.role}
-                          onChange={(e) => {
-                            void updateProjectMemberRole(projectId, member.id, e.target.value as any);
-                          }}
-                          className="bg-transparent text-xs font-medium text-text-secondary hover:text-text-primary border-none outline-none focus:outline-none pr-6 pl-2 py-1 cursor-pointer appearance-none text-right"
-                        >
-                          <option value="APPROVER" className="bg-surface">Approver</option>
-                          <option value="EDITOR" className="bg-surface">Editor</option>
-                          <option value="VIEWER" className="bg-surface">Viewer</option>
-                        </select>
-                        <ChevronDown className="w-3 h-3 text-text-muted pointer-events-none absolute right-1 top-1/2 -translate-y-1/2" />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* General Access Section */}
-          <div className="flex flex-col gap-3 mt-1">
-            <h3 className="text-sm font-medium text-text-primary font-heading uppercase tracking-wider select-none">
-              General access
-            </h3>
-            
-            <div className="flex items-start justify-between p-4 bg-surface border border-border-subtle rounded-xl">
-              <div className="flex gap-3 min-w-0">
-                <div className="h-9 w-9 rounded-full bg-success/10 border border-success/20 flex items-center justify-center text-success shrink-0 select-none">
-                  <Globe className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5 select-none">
-                    <span className="text-sm font-semibold text-text-primary">Anyone with the link</span>
-                  </div>
-                  <p className="text-xs text-text-muted mt-0.5">
-                    Anyone on the Internet with the link can edit
-                  </p>
-                </div>
-              </div>
-
-              <div className="relative select-none">
-                <select
-                  defaultValue="EDITOR"
-                  className="bg-transparent text-xs font-medium text-text-secondary hover:text-text-primary border-none outline-none focus:outline-none pr-6 pl-2 py-1 cursor-pointer appearance-none text-right"
-                  disabled
-                >
-                  <option value="EDITOR" className="bg-surface">Editor</option>
-                </select>
-                <ChevronDown className="w-3 h-3 text-text-muted pointer-events-none absolute right-1 top-1/2 -translate-y-1/2" />
-              </div>
-            </div>
-          </div>
-
-          {/* Footer Actions */}
-          <div className="flex justify-between items-center pt-4 border-t border-border-subtle mt-2 select-none">
-            <button
-              type="button"
-              onClick={async () => {
-                if (invitationLinks[projectId]) {
-                  await navigator.clipboard.writeText(invitationLinks[projectId]);
-                  addToast('success', 'Link copied to clipboard!');
-                } else {
-                  addToast('warning', 'Link not available yet.');
-                }
-              }}
-              className="btn-secondary py-2 px-5 text-sm font-semibold rounded-full flex items-center gap-2"
-            >
-              <Link className="w-4 h-4" />
-              <span>Copy link</span>
-            </button>
-            <button
-              onClick={() => setIsInviteOpen(false)}
-              className="py-2.5 px-6 text-sm font-semibold rounded-full bg-primary hover:bg-primary-hover text-text-inverse transition-all hover:scale-[1.02] shadow-lg shadow-primary-glow/20"
-            >
-              Done
-            </button>
-          </div>
-        </div>
-      </Modal>
+        projectId={projectId}
+        projectName={currentProject?.name || 'Project Workspace'}
+      />
     </div>
   );
 };
@@ -891,3 +710,10 @@ export const ChatView: React.FC<ChatViewProps> = (props) => {
 };
 
 export default ChatView;
+
+function formatFileSize(sizeBytes: number): string {
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  if (sizeBytes < 1024 * 1024 * 1024) return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(sizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}

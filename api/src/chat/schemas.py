@@ -36,7 +36,7 @@ class UploadedFileCreate(ApiModel):
     filename: str = Field(min_length=1, max_length=255)
     mime_type: str = Field(min_length=1, max_length=255)
     storage_path: str = Field(min_length=1, max_length=1024)
-    size_bytes: int = Field(ge=0)
+    size_bytes: int = Field(gt=0)
 
 
 class UploadedFileOut(ApiModel):

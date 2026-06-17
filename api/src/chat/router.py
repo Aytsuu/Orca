@@ -19,7 +19,7 @@ from src.chat.schemas import (
 from src.chat.service import (
     create_message,
     create_signed_upload,
-    finalize_uploaded_file,
+    create_uploaded_file,
     list_messages,
     list_uploaded_files,
 )
@@ -92,14 +92,14 @@ async def get_upload_url_endpoint(
     response_model=DataEnvelope[UploadedFileOut],
     status_code=status.HTTP_201_CREATED,
 )
-async def finalize_uploaded_file_endpoint(
+async def create_uploaded_file_endpoint(
     project_id: UUID,
     payload: UploadedFileCreate,
     project_context: Annotated[dict, Depends(get_project_context)],
     supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
     queue_producer: Annotated[QueueProducer, Depends(get_queue_producer)],
 ) -> DataEnvelope[UploadedFileOut]:
-    uploaded_file = await finalize_uploaded_file(
+    uploaded_file = await create_uploaded_file(
         supabase,
         project_id=str(project_id),
         session_id=project_context["session_id"],
@@ -124,5 +124,7 @@ async def list_uploaded_files_endpoint(
     _: Annotated[dict, Depends(get_project_context)],
     supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
 ) -> DataEnvelope[list[UploadedFileOut]]:
-    files = await list_uploaded_files(supabase, str(project_id))
-    return DataEnvelope(data=[UploadedFileOut.model_validate(row) for row in files])
+    uploaded_files = await list_uploaded_files(supabase, str(project_id))
+    return DataEnvelope(
+        data=[UploadedFileOut.model_validate(uploaded_file) for uploaded_file in uploaded_files]
+    )

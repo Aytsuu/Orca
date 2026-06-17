@@ -61,11 +61,60 @@
 - [x] `PATCH /api/v1/projects/{project_id}/members/{session_id}/permissions` - update can_approve / can_edit
 
 ### Plans domain
+
+#### Existing endpoints
 - [x] `GET /api/v1/projects/{project_id}/plan` - return current finalized plan
 - [x] `GET /api/v1/projects/{project_id}/plan/proposal` - return pending proposal (approvers only)
 - [x] `POST /api/v1/projects/{project_id}/plan/approve` - approve proposal items; trigger Updater
 - [x] `POST /api/v1/projects/{project_id}/plan/reject` - reject proposal; mark as rejected
 - [x] `POST /api/v1/projects/{project_id}/plan/revert` - revert to previous version (max 3)
+
+#### Schemas (`plans/schemas.py`)
+- [ ] `StructuredPlanOut` — full plan hierarchy (phases, tasks, gaps, risks, objectives, stakeholders) returned by `GET /plan`; `phases: []` when no plan generated yet (triggers frontend empty state)
+- [ ] `ProposedChangeOut` — typed diff card (action, section, targetId, title, detail, sourceQuote) returned by `GET /plan/proposal`
+- [ ] `PlanMetaUpdate` — title, description, objectives[], stakeholders[]
+- [ ] `PhaseCreate` / `PhaseUpdate` — title (required), goal, timeframe
+- [ ] `TaskCreate` / `TaskUpdate` — title (required), owner, due, priority, description, acceptanceCriteria[]
+- [ ] `RiskCreate` / `RiskUpdate` — description (required), severity, mitigation
+- [ ] `ChangeActionRequest` — `change_ids: list[UUID]` body for partial accept/reject (empty = act on all)
+- [ ] `GapOut` — gap notice for API responses (id, description, severity, sourceMessageIds, sourceExcerpt)
+- [ ] `PlanVersionOut` — version list item (id, version number, created_at, status)
+
+#### Typed plan & proposal responses
+- [ ] `GET /plan` — return full `StructuredPlanOut` (not raw jsonb blob); return empty plan skeleton when `project_plan` row does not exist yet
+- [ ] `GET /plan/proposal` — return typed `ProposedChange[]` list
+
+#### Partial change accept / reject *(item-level, not whole-proposal)*
+- [ ] `PATCH /api/v1/projects/{project_id}/plan/proposal/changes/{change_id}/accept` — accept a single change card; requires `can_approve`
+- [ ] `PATCH /api/v1/projects/{project_id}/plan/proposal/changes/{change_id}/reject` — reject a single change card; requires `can_approve`
+- [ ] Repurpose existing `POST /plan/approve` to accept optional `ChangeActionRequest` body — acts on listed `change_ids` or all pending if omitted
+
+#### Version history
+- [ ] `GET /api/v1/projects/{project_id}/plan/versions` — return ordered list of up to 3 `PlanVersionOut` records for controls-bar navigation
+
+#### Manual authoring *(bypass proposal queue — caller's action is the approval)*
+> All mutations below require `can_edit` permission. Gap dismissal and change accept/reject require `can_approve`.
+> The AI pipeline treats `project_plan.content` as ground truth on every run; manual content is never overridden unless conversation explicitly supports it.
+
+- [ ] `PATCH /api/v1/projects/{project_id}/plan` — update top-level plan meta (title, description, objectives, stakeholders)
+- [ ] `POST /api/v1/projects/{project_id}/plan/phases` — add a new phase manually
+- [ ] `PATCH /api/v1/projects/{project_id}/plan/phases/{phase_id}` — edit phase title / goal / timeframe
+- [ ] `DELETE /api/v1/projects/{project_id}/plan/phases/{phase_id}` — delete phase; return `400` with task count if tasks exist unless `force=true` query param
+- [ ] `POST /api/v1/projects/{project_id}/plan/phases/{phase_id}/tasks` — add task to a phase manually
+- [ ] `PATCH /api/v1/projects/{project_id}/plan/phases/{phase_id}/tasks/{task_id}` — edit any task field
+- [ ] `DELETE /api/v1/projects/{project_id}/plan/phases/{phase_id}/tasks/{task_id}` — delete task
+- [ ] `DELETE /api/v1/projects/{project_id}/plan/phases/{phase_id}/gaps/{gap_id}` — dismiss a gap notice (soft-delete; agent may re-surface on next run if underlying issue persists)
+- [ ] `POST /api/v1/projects/{project_id}/plan/risks` — add a risk item manually
+- [ ] `PATCH /api/v1/projects/{project_id}/plan/risks/{risk_id}` — edit risk description / severity / mitigation
+- [ ] `DELETE /api/v1/projects/{project_id}/plan/risks/{risk_id}` — delete risk item
+
+#### Task-level file attachments
+- [ ] `POST /api/v1/projects/{project_id}/plan/phases/{phase_id}/tasks/{task_id}/attachments` — associate an already-uploaded Storage file with a specific task (separate from project-level files panel)
+- [ ] `DELETE /api/v1/projects/{project_id}/plan/phases/{phase_id}/tasks/{task_id}/attachments/{attachment_id}` — remove a task-level attachment
+
+#### Stale-proposal guard *(Updater integrity)*
+- [ ] Before applying any approved `ProposedChange`, Updater must verify the `targetId` still exists in `project_plan.content`; if missing, mark that change as `stale` and skip — never error the whole proposal
+- [ ] Manual-authoring mutation endpoints must check if a `pending` proposal exists that targets the same `phase_id` / `task_id`; if so, surface a warning in the response (`conflicts: [change_id, ...]`) without blocking the save — the approver can then re-review the stale change card
 
 ### Agents domain
 - [x] `GET /api/v1/projects/{project_id}/agents/status` - return agent pipeline status

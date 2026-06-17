@@ -363,7 +363,6 @@ The atomic unit of a plan. Has 5 distinct visual states.
 | Task title | `--text-sm`, `--weight-bold`, `--color-text-primary` |
 | Meta line | `--text-xs`, `--color-text-muted`, flex row with `·` separators |
 | Priority dot | 6px circle — Critical: `--color-error`; High: `--color-warning`; Medium: `--color-primary`; Low: `--color-text-muted` |
-| Confidence (medium/low) | Shown only in review panel, not in the task row itself |
 | Hover | `background: rgba(var(--color-surface-raised), 0.40)`, `cursor: pointer` |
 | Transition | `200ms ease` on background and border-color |
 | Row padding | `padding: --space-2`, `margin: 0 calc(-1 * --space-2)` (bleed to left) |
@@ -569,7 +568,7 @@ The right sidebar on the Plan tab. This panel contains a **diff queue** — not 
 │  ─────────────────────────────────────────────────────────────  │
 │                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │  ◈ ADD TASK                           ● High confidence   │  │  ← action type + confidence
+│  │  ◈ ADD TASK                                               │  │  ← action type
 │  │  "Deploy to staging"                                      │  │
 │  │  Phase 2  ·  Owner @ryu  ·  Due Jun 15                    │  │
 │  │                                                           │  │
@@ -579,7 +578,7 @@ The right sidebar on the Plan tab. This panel contains a **diff queue** — not 
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │  ◈ UPDATE PRIORITY                    ◎ Medium confidence  │  │
+│  │  ◈ UPDATE PRIORITY                                        │  │
 │  │  "API integration"  Low → High                            │  │
 │  │  Phase 2                                                  │  │
 │  │                                                           │  │
@@ -599,7 +598,6 @@ The right sidebar on the Plan tab. This panel contains a **diff queue** — not 
 |---|---|
 | Card container | `background: var(--color-background)`, `border: 1px solid var(--color-border-subtle)`, `--radius-sm`, `padding: --space-5`, `margin-bottom: --space-3` |
 | Action type | `◈` glyph + label — `--text-xs`, `--tracking-widest`, uppercase, `--color-primary` |
-| Confidence badge | `● High` / `◎ Medium` / `○ Low` — `--text-xs`, inline right of action type; High = `--color-success`; Medium = `--color-warning`; Low = `--color-text-muted` |
 | Change title | `--text-sm`, `--weight-bold`, `--color-text-primary` |
 | Detail line | `--text-xs`, `--color-text-muted` |
 | Source quote | `--text-xs`, `--color-text-muted`, `font-style: italic` |
@@ -645,13 +643,7 @@ How each `ProposedChange` from `ai-engine.md §8` maps to what the user sees:
 | `gap_flag` (from Analyzer) | Inline GapNotice in the relevant phase; task row gets `gap` state if task-specific | `⚠ GAP FLAGGED` change card |
 | Risk items (from Analyzer) | Added to Risk Summary block | No change card — informational only |
 
-**Confidence rendering:**
-
-| `confidence` value | In plan content | In review panel |
-|---|---|---|
-| `high` | Normal display | `● High confidence` in green |
-| `medium` | Normal display | `◎ Medium confidence` in amber |
-| `low` | No extra treatment in plan | `○ Low confidence` + italic note: *"AI is uncertain — please verify"* |
+***
 
 ---
 

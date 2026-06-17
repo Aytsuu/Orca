@@ -123,7 +123,7 @@ interface ProposedChange {
   targetId: string;
   title: string;
   detail: string;
-  confidence: 'high' | 'medium' | 'low';
+  confidence?: 'high' | 'medium' | 'low';
   sourceQuote: string;
 }
 
@@ -320,7 +320,6 @@ const INITIAL_CHANGES: ProposedChange[] = [
     targetId: 't2',
     title: 'Deploy staging environment',
     detail: 'Phase 1 · Owner @ryu · Due Jun 15',
-    confidence: 'high',
     sourceQuote: '"we need a staging env before the demo" — @ryu, Jun 13'
   },
   {
@@ -330,7 +329,6 @@ const INITIAL_CHANGES: ProposedChange[] = [
     targetId: 't3',
     title: 'API integration',
     detail: 'Priority changed: Low → High · Owner @jan',
-    confidence: 'medium',
     sourceQuote: '"this is now the main blocker" — @jan, Jun 13'
   },
   {
@@ -340,7 +338,6 @@ const INITIAL_CHANGES: ProposedChange[] = [
     targetId: 't5',
     title: 'Migrate legacy data',
     detail: 'Phase 2 · Owner @sam · Due Jun 17',
-    confidence: 'high',
     sourceQuote: '"do we really need this for MVP? Let\'s push it out" — @jan, Jun 14'
   }
 ];
@@ -2312,9 +2309,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
             {/* Scrollable list of cards */}
             <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
               {pendingChanges.map(change => {
-                // Confidence badge styles
-                const confColor = 'text-text-muted bg-surface-raised';
-
                 // Heading action prefix formatting
                 let actionPrefix = 'ADD TASK';
                 if (change.action === 'update') {
@@ -2332,9 +2326,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                       <span className="text-[9px] uppercase tracking-widest font-bold text-primary">
                         {actionPrefix}
                       </span>
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${confColor}`}>
-                        {change.confidence}
-                      </span>
                     </div>
 
                     <div className="text-xs font-bold text-text-primary leading-snug">
@@ -2348,12 +2339,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                     {change.sourceQuote && (
                       <div className="text-[10px] text-text-muted italic border-l border-border-subtle pl-2 select-text leading-normal">
                         {change.sourceQuote}
-                      </div>
-                    )}
-
-                    {change.confidence === 'low' && (
-                      <div className="text-[9px] text-warning italic font-medium mt-0.5 select-none">
-                        AI is uncertain — please verify
                       </div>
                     )}
 
@@ -2518,8 +2503,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
             {/* Change list */}
             <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
               {pendingChanges.map(change => {
-                const confColor = 'text-text-muted bg-surface-raised';
-
                 return (
                   <div
                     key={change.id}
@@ -2528,9 +2511,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                     <div className="flex items-center justify-between select-none">
                       <span className="text-[9px] uppercase tracking-widest font-bold text-primary">
                         ◈ {change.action.toUpperCase()} TASK
-                      </span>
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${confColor}`}>
-                        ● {change.confidence}
                       </span>
                     </div>
 

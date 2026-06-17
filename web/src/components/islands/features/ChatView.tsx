@@ -16,7 +16,10 @@ import {
   ArrowRight,
   Eye,
   EyeOff,
-  Loader2
+  Loader2,
+  Compass,
+  Calendar,
+  RefreshCw
 } from 'lucide-react';
 import {
   addToast,
@@ -42,6 +45,16 @@ import { formatRelativeTime, toInitials } from '../../../stores/project/reposito
 interface ChatViewProps {
   projectId: string;
 }
+
+const agentDetails: Record<
+  string,
+  { name: string; icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }> }
+> = {
+  MONITOR: { name: 'Monitor Orca', icon: Eye },
+  ANALYZER: { name: 'Analyzer Orca', icon: Compass },
+  PLANNER: { name: 'Planner Orca', icon: Calendar },
+  UPDATER: { name: 'Updater Orca', icon: RefreshCw },
+};
 
 const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const { data: detail, isLoading, error } = useProjectWorkspace(projectId);
@@ -504,36 +517,68 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
 
         {/* Agents statuses */}
         <div className="flex flex-col gap-2">
-          <span className="text-xs font-bold text-text-primary tracking-wider uppercase">AGENTS</span>
+          <span className="text-xs font-bold text-text-primary tracking-wider uppercase">ORCAS</span>
 
-          <div className="flex flex-col border border-border-subtle bg-background/50 rounded-sm divide-y divide-border-subtle/50">
-            {Object.entries(agentStatus).map(([agent, status]) => {
+          <div className="relative flex items-center justify-between px-6 py-4 bg-background/50 rounded-xl border border-border-subtle">
+            {/* Connector Line */}
+            <div className="absolute left-[42px] right-[42px] h-0.5 bg-border-subtle top-1/2 -translate-y-1/2 z-0" />
+
+            {['MONITOR', 'ANALYZER', 'PLANNER', 'UPDATER'].map((key) => {
+              const status = agentStatus[key] || 'idle';
+              const agentInfo = agentDetails[key];
+              if (!agentInfo) return null;
+
+              const IconComponent = agentInfo.icon;
               const isActive = status === 'active';
               const isComplete = status === 'complete';
               const isError = status === 'error';
 
-              let labelColor = 'text-text-muted';
-              let iconNode: React.ReactNode = <span className="h-2 w-2 rounded-full bg-text-muted shrink-0" />;
+              let iconContainerClass = '';
 
               if (isActive) {
-                labelColor = 'text-primary font-bold';
-                iconNode = <span className="h-2 w-2 rounded-full agent-pulse-dot shrink-0" />;
+                iconContainerClass = 'border-primary text-primary bg-primary/15 shadow-sm shadow-primary-glow/20';
               } else if (isComplete) {
-                labelColor = 'text-success';
-                iconNode = <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />;
+                iconContainerClass = 'border-success/50 text-success bg-success/10';
               } else if (isError) {
-                labelColor = 'text-error';
-                iconNode = <AlertCircle className="w-3.5 h-3.5 text-error shrink-0" />;
+                iconContainerClass = 'border-error/50 text-error bg-error/10';
+              } else {
+                iconContainerClass = 'border-border-subtle text-text-muted bg-surface-raised/50';
               }
 
               return (
-                <div key={agent} className="flex justify-between items-center px-4 py-2.5 text-xs">
-                  <span className="font-mono text-text-primary tracking-wider font-semibold">{agent}</span>
-                  <div className="flex items-center gap-2">
-                    {iconNode}
-                    <span className={`uppercase tracking-widest text-[10px] ${labelColor}`}>
-                      {status === 'active' ? 'Active' : status}
-                    </span>
+                <div key={key} className="relative z-10 flex flex-col items-center group cursor-help" title={`${agentInfo.name}: ${status}`}>
+                  {/* Tooltip */}
+                  <div className="absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-30 flex flex-col items-center">
+                    <div className="bg-surface-raised border border-border-subtle text-text-primary text-[10px] px-2.5 py-1 rounded-md shadow-lg font-medium tracking-wide whitespace-nowrap">
+                      <span className="font-semibold text-text-primary">{agentInfo.name}</span>
+                      <span className="mx-1 text-text-muted">•</span>
+                      <span className={`uppercase text-[9px] font-bold ${
+                        isActive ? 'text-primary animate-pulse' : isComplete ? 'text-success' : isError ? 'text-error' : 'text-text-muted'
+                      }`}>{status}</span>
+                    </div>
+                    <div className="w-1.5 h-1.5 bg-surface-raised border-r border-b border-border-subtle transform rotate-45 -mt-1" />
+                  </div>
+
+                  {/* Icon Container with solid backing to mask the line */}
+                  <div className="relative transition-transform duration-300 hover:scale-110">
+                    {/* Solid Mask */}
+                    <div className="absolute inset-0 rounded-full bg-surface -z-10" />
+                    
+                    {/* Pulsing ring for active state */}
+                    {isActive && (
+                      <div className="absolute -inset-1 rounded-full bg-primary/25 animate-ping -z-10" />
+                    )}
+
+                    <div className={`h-9 w-9 rounded-full flex items-center justify-center border transition-all duration-300 ${iconContainerClass}`}>
+                      <IconComponent
+                        className={`w-4.5 h-4.5 ${
+                          isActive && key !== 'UPDATER' ? 'animate-pulse' : ''
+                        } ${
+                          isActive && key === 'UPDATER' ? 'animate-spin' : ''
+                        }`}
+                        style={isActive && key === 'UPDATER' ? { animationDuration: '3s' } : undefined}
+                      />
+                    </div>
                   </div>
                 </div>
               );

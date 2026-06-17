@@ -5,12 +5,11 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from test_phase2_api import FakeQueueProducer, FakeSupabase
 
 from src.agents.queue import get_queue_producer
 from src.main import app
 from src.supabase_client import get_supabase_admin
-
-from test_phase2_api import FakeQueueProducer, FakeSupabase
 
 
 @pytest.fixture
@@ -170,7 +169,13 @@ async def test_latest_activity_endpoints_return_latest_rows(
             "project_id": project["id"],
             "agent": "analyzer",
             "payload": {
-                "gaps": [{"title": "Owner missing", "detail": "Assign an owner", "severity": "major"}]
+                "gaps": [
+                    {
+                        "title": "Owner missing",
+                        "detail": "Assign an owner",
+                        "severity": "major",
+                    }
+                ]
             },
             "created_at": "2026-06-16T11:01:00+00:00",
         },

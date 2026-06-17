@@ -57,6 +57,7 @@ async def create_message_endpoint(
         project_id=str(project_id),
         triggered_by=project_context["session_id"],
         message_ids=[message["id"]],
+        debounce=True,
     )
     return DataEnvelope(data=MessageOut.model_validate(message))
 

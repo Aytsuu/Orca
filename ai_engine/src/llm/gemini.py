@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from src.config import Settings, get_settings
+from src.config import get_settings
 from src.exceptions import (
     AuthenticationError,
     ConfigurationError,
@@ -28,12 +28,18 @@ Return ONLY the corrected JSON.
 
 
 class GeminiJsonLlmClient:
-    def __init__(self, rate_limiter: RateLimiter | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        rate_limiter: RateLimiter | None = None,
+    ) -> None:
         settings = get_settings()
-        if not settings.llm_api_key:
+        resolved_api_key = api_key or settings.llm_api_key
+        if not resolved_api_key:
             raise ConfigurationError("LLM_API_KEY is required for Gemini.")
         self._settings = settings
-        self._api_key = settings.llm_api_key
+        self._api_key = resolved_api_key
         self._rate_limiter = rate_limiter or RateLimiter(settings.llm_rate_limit_rpm)
         self._async_client = None
 
@@ -77,6 +83,10 @@ class GeminiJsonLlmClient:
             classified = self._classify_exception(exc, errors_module=errors)
             if classified:
                 raise classified from exc
+            if isinstance(exc, (AttributeError, TypeError, ValueError)):
+                raise ConfigurationError(
+                    f"Gemini schema/request configuration failed: {exc}"
+                ) from exc
             raise
 
     def _classify_exception(self, exc: Exception, *, errors_module) -> Exception | None:

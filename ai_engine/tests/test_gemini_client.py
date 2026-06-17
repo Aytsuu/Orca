@@ -26,7 +26,11 @@ class FakeGenerateContentConfig:
         self.kwargs = kwargs
 
 
-def install_fake_google(monkeypatch: pytest.MonkeyPatch, fake_client_class, client_error_class=None):
+def install_fake_google(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_client_class,
+    client_error_class=None,
+):
     google_module = ModuleType("google")
     genai_module = ModuleType("google.genai")
     types_module = ModuleType("google.genai.types")
@@ -76,8 +80,18 @@ async def test_gemini_client_reuses_async_sdk_client(monkeypatch: pytest.MonkeyP
     install_fake_google(monkeypatch, FakeClient)
 
     client = GeminiJsonLlmClient()
-    first = await client.generate_json("first", Ping, model="gemini-2.5-flash-lite", temperature=0.0)
-    second = await client.generate_json("second", Ping, model="gemini-2.5-flash-lite", temperature=0.0)
+    first = await client.generate_json(
+        "first",
+        Ping,
+        model="gemini-2.5-flash-lite",
+        temperature=0.0,
+    )
+    second = await client.generate_json(
+        "second",
+        Ping,
+        model="gemini-2.5-flash-lite",
+        temperature=0.0,
+    )
 
     assert first.msg == "pong"
     assert second.msg == "pong"

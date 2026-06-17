@@ -5,7 +5,12 @@ function getApiBaseUrl(): string {
 }
 
 function buildUrl(path: string): string {
-  return path.startsWith('http') ? path : `${getApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`;
+  if (path.startsWith('http')) {
+    return path;
+  }
+
+  // Browser clients should go through Astro's same-origin /api proxy routes.
+  return path.startsWith('/') ? path : `/${path}`;
 }
 
 export async function apiFetch<T>(

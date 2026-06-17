@@ -101,6 +101,7 @@ class FakeSupabase:
             "project_plan": [],
             "chat_message": [],
             "uploaded_file": [],
+            "agent_status": [],
             "project_memory": [],
             "conversation_summary": [],
             "agent_run": [],
@@ -132,6 +133,8 @@ class FakeSupabase:
             row.setdefault("created_at", _iso_now())
             row.setdefault("new_message_ids", [])
             row.setdefault("new_file_ids", [])
+        if table_name == "agent_status":
+            row.setdefault("updated_at", _iso_now())
         if table_name == "project_llm_usage":
             row.setdefault("call_count", 0)
         self.tables[table_name].append(row)

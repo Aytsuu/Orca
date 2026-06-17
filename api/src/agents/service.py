@@ -6,6 +6,7 @@ from typing import Any
 from supabase import AsyncClient
 
 from src.agents.queue import QueueProducer
+from src.config import get_settings
 
 AGENT_NAMES = ("monitor", "analyzer", "planner", "updater")
 ACTIVE_RUN_STATUSES = {"queued", "running"}
@@ -82,6 +83,14 @@ async def set_agent_statuses_for_new_run(supabase: AsyncClient, project_id: str)
 
 
 async def get_active_run(supabase: AsyncClient, project_id: str) -> dict[str, Any] | None:
+    return await get_latest_run_with_statuses(supabase, project_id, ACTIVE_RUN_STATUSES)
+
+
+async def get_latest_run_with_statuses(
+    supabase: AsyncClient,
+    project_id: str,
+    statuses: set[str],
+) -> dict[str, Any] | None:
     rows = (
         await supabase.table("agent_run")
         .select("*")
@@ -90,7 +99,7 @@ async def get_active_run(supabase: AsyncClient, project_id: str) -> dict[str, An
         .execute()
     ).data
     for row in rows:
-        if row["status"] in ACTIVE_RUN_STATUSES:
+        if row["status"] in statuses:
             return row
     return None
 
@@ -152,22 +161,47 @@ async def trigger_agents(
     triggered_by: str,
     message_ids: list[str] | None = None,
     file_ids: list[str] | None = None,
+    debounce: bool = False,
 ) -> dict[str, Any]:
+    settings = get_settings()
     await get_agent_statuses(supabase, project_id)
-    active_run = await get_active_run(supabase, project_id)
+    queued_run = await get_latest_run_with_statuses(supabase, project_id, {"queued"})
 
-    if active_run:
+    if queued_run:
         updated_run = await append_run_inputs(
             supabase,
-            run=active_run,
+            run=queued_run,
             message_ids=message_ids,
             file_ids=file_ids,
         )
+        if (
+            debounce
+            and updated_run["status"] == "queued"
+            and len(updated_run.get("new_message_ids", [])) >= settings.debounce_message_count
+        ):
+            queue_producer.enqueue_run(updated_run["id"])
         return {
             "run_id": updated_run["id"],
             "project_id": project_id,
             "status": updated_run["status"],
             "reused_active_run": True,
+        }
+
+    running_run = await get_latest_run_with_statuses(supabase, project_id, {"running"})
+    if running_run:
+        created_run = await create_agent_run(
+            supabase,
+            project_id=project_id,
+            triggered_by=triggered_by,
+            message_ids=message_ids,
+            file_ids=file_ids,
+        )
+        queue_producer.enqueue_run(created_run["id"])
+        return {
+            "run_id": created_run["id"],
+            "project_id": project_id,
+            "status": "queued",
+            "reused_active_run": False,
         }
 
     created_run = await create_agent_run(
@@ -178,7 +212,10 @@ async def trigger_agents(
         file_ids=file_ids,
     )
     await set_agent_statuses_for_new_run(supabase, project_id)
-    queue_producer.enqueue_run(created_run["id"])
+    delay_seconds = None
+    if debounce and len(created_run.get("new_message_ids", [])) < settings.debounce_message_count:
+        delay_seconds = settings.debounce_silence_seconds
+    queue_producer.enqueue_run(created_run["id"], delay_seconds=delay_seconds)
     return {
         "run_id": created_run["id"],
         "project_id": project_id,

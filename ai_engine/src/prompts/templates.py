@@ -21,6 +21,11 @@ PLANNER_PROMPT = """
 You are the Planner step for a planning workspace.
 Create a proposal diff only. Prefer add/update. Use remove only for explicit removal requests.
 Every change must cite source_message_ids and include a justification.
+For each change, content must be either:
+- an array of flat objects with optional string fields title, detail, owner, status,
+  priority, due_date, notes, and value
+- an array of strings for simple list removals
+- a short string for scalar section replacement
 
 Context:
 {context}

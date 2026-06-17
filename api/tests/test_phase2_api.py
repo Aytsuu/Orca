@@ -188,9 +188,11 @@ def fake_supabase() -> FakeSupabase:
 class FakeQueueProducer:
     def __init__(self) -> None:
         self.enqueued_run_ids: list[str] = []
+        self.enqueued_runs: list[dict[str, object]] = []
 
-    def enqueue_run(self, run_id: str) -> str:
+    def enqueue_run(self, run_id: str, *, delay_seconds: int | None = None) -> str:
         self.enqueued_run_ids.append(run_id)
+        self.enqueued_runs.append({"run_id": run_id, "delay_seconds": delay_seconds})
         return f"job:{run_id}"
 
 
@@ -382,7 +384,9 @@ async def test_messages_and_upload_url_require_membership(
     )
     assert post_message.status_code == 201
     assert len(fake_supabase.tables["agent_run"]) == 1
-    assert fake_queue_producer.enqueued_run_ids == [fake_supabase.tables["agent_run"][0]["id"]]
+    assert fake_queue_producer.enqueued_runs == [
+        {"run_id": fake_supabase.tables["agent_run"][0]["id"], "delay_seconds": 8}
+    ]
 
     history = await client.get(
         f"/api/v1/projects/{project['id']}/messages",
@@ -535,7 +539,15 @@ async def test_activity_endpoints_return_latest_artifacts_and_latest_proposal(
             "run_id": latest_run["id"],
             "project_id": project["id"],
             "agent": "analyzer",
-            "payload": {"gaps": [{"title": "Owner missing", "detail": "Assign an owner", "severity": "major"}]},
+            "payload": {
+                "gaps": [
+                    {
+                        "title": "Owner missing",
+                        "detail": "Assign an owner",
+                        "severity": "major",
+                    }
+                ]
+            },
             "created_at": "2026-06-16T11:01:00+00:00",
         },
     )
@@ -832,10 +844,47 @@ async def test_trigger_reuses_active_run_for_new_messages(
     )
 
     assert first_message.status_code == 201
-    assert len(fake_supabase.tables["agent_run"]) == 1
+    assert len(fake_supabase.tables["agent_run"]) == 2
     assert fake_supabase.tables["agent_run"][0]["id"] == active_run["id"]
+    follow_up_run = fake_supabase.tables["agent_run"][1]
+    assert follow_up_run["status"] == "queued"
     assert (
         first_message.json()["data"]["id"]
-        in fake_supabase.tables["agent_run"][0]["new_message_ids"]
+        in follow_up_run["new_message_ids"]
     )
-    assert fake_queue_producer.enqueued_run_ids == []
+    assert fake_queue_producer.enqueued_run_ids == [follow_up_run["id"]]
+
+
+@pytest.mark.asyncio
+async def test_message_debounce_enqueues_immediately_after_threshold(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+    fake_queue_producer: FakeQueueProducer,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+
+    for index in range(3):
+        response = await client.post(
+            f"/api/v1/projects/{project['id']}/messages",
+            headers={"X-Session-Id": "alpha"},
+            json={"content": f"Message {index + 1}"},
+        )
+        assert response.status_code == 201
+
+    run = fake_supabase.tables["agent_run"][0]
+    assert len(fake_supabase.tables["agent_run"]) == 1
+    assert len(run["new_message_ids"]) == 3
+    assert fake_queue_producer.enqueued_runs == [
+        {"run_id": run["id"], "delay_seconds": 8},
+        {"run_id": run["id"], "delay_seconds": None},
+    ]

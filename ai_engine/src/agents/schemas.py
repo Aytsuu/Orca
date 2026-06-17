@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -44,11 +44,22 @@ class AnalyzerOutput(EngineModel):
     panel_suggestions: list[str] = Field(default_factory=list)
 
 
+class PlannerContentItem(EngineModel):
+    title: str | None = None
+    detail: str | None = None
+    owner: str | None = None
+    status: str | None = None
+    priority: str | None = None
+    due_date: str | None = None
+    notes: str | None = None
+    value: str | None = None
+
+
 class PlannerChange(EngineModel):
     id: str = Field(min_length=1)
     section: str = Field(min_length=1)
     action: PlannerAction
-    content: dict[str, Any] | list[Any] | str
+    content: list[PlannerContentItem] | list[str] | str
     justification: str = Field(min_length=1)
     source_message_ids: list[str] = Field(min_length=1)
     confidence: Confidence

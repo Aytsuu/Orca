@@ -14,7 +14,10 @@ from src.supabase_client import get_supabase_admin
 router = APIRouter(tags=["member-invitations"])
 
 
-@router.post("/member-invitations/{token}/accept", response_model=DataEnvelope[MemberInvitationAcceptanceOut])
+@router.post(
+    "/member-invitations/{token}/accept",
+    response_model=DataEnvelope[MemberInvitationAcceptanceOut],
+)
 async def accept_member_invitation_endpoint(
     token: str,
     session_id: Annotated[str, Depends(get_session_id)],

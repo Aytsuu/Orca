@@ -17,10 +17,22 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="gemini-2.5-flash", alias="LLM_MODEL")
     llm_fast_model: str = Field(default="gemini-2.5-flash-lite", alias="LLM_FAST_MODEL")
     llm_api_key: str | None = Field(default=None, alias="LLM_API_KEY")
+    llm_fallback_enabled: bool = Field(default=True, alias="LLM_FALLBACK_ENABLED")
+    llm_fallback_provider: str | None = Field(default="gemini", alias="LLM_FALLBACK_PROVIDER")
+    llm_fallback_api_key: str | None = Field(default=None, alias="LLM_FALLBACK_API_KEY")
+    llm_fallback_model: str = Field(
+        default="gemini-2.5-flash",
+        alias="LLM_FALLBACK_MODEL",
+    )
+    llm_fallback_fast_model: str = Field(
+        default="gemini-2.5-flash-lite",
+        alias="LLM_FALLBACK_FAST_MODEL",
+    )
     supabase_url: str | None = Field(default=None, alias="SUPABASE_URL")
     supabase_service_key: str | None = Field(default=None, alias="SUPABASE_SERVICE_KEY")
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     agent_queue_name: str = Field(default="orca-agent-pipeline", alias="AGENT_QUEUE_NAME")
+    agent_queue_timeout_seconds: int = Field(default=300, alias="AGENT_QUEUE_TIMEOUT_SECONDS")
     daily_llm_budget_per_project: int = Field(default=100, alias="DAILY_LLM_BUDGET")
     llm_budget_warning_threshold: float = Field(
         default=0.8,

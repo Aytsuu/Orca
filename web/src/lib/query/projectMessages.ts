@@ -43,7 +43,7 @@ export function useProjectMessages(projectId: string) {
     }
 
     let active = true;
-    let unsubscribe = () => {};
+    let unsubscribe = () => { };
 
     void getSupabaseBrowserClient().then((client) => {
       if (!client) {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from functools import lru_cache
 from typing import Protocol
 
@@ -7,15 +8,20 @@ from src.config import Settings, get_settings
 
 
 class QueueProducer(Protocol):
-    def enqueue_run(self, run_id: str) -> str | None:
+    def enqueue_run(self, run_id: str, *, delay_seconds: int | None = None) -> str | None:
         ...
+
+
+def build_run_job_id(run_id: str, *, delay_seconds: int | None = None) -> str:
+    suffix = "delayed" if delay_seconds is not None and delay_seconds > 0 else "immediate"
+    return f"agent-run:{run_id}:{suffix}"
 
 
 class RqQueueProducer:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
-    def enqueue_run(self, run_id: str) -> str | None:
+    def enqueue_run(self, run_id: str, *, delay_seconds: int | None = None) -> str | None:
         if not self._settings.redis_url:
             return None
 
@@ -26,11 +32,23 @@ class RqQueueProducer:
             name=self._settings.agent_queue_name,
             connection=Redis.from_url(self._settings.redis_url),
         )
-        job = queue.enqueue(
-            "src.tasks.worker.run_project_pipeline_job",
-            run_id,
-            job_timeout=self._settings.agent_queue_timeout_seconds,
-        )
+        job_kwargs = {
+            "job_timeout": self._settings.agent_queue_timeout_seconds,
+            "job_id": build_run_job_id(run_id, delay_seconds=delay_seconds),
+        }
+        if delay_seconds is not None and delay_seconds > 0:
+            job = queue.enqueue_in(
+                timedelta(seconds=delay_seconds),
+                "src.tasks.worker.run_project_pipeline_job",
+                run_id,
+                **job_kwargs,
+            )
+        else:
+            job = queue.enqueue(
+                "src.tasks.worker.run_project_pipeline_job",
+                run_id,
+                **job_kwargs,
+            )
         return job.id
 
 

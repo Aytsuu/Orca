@@ -24,6 +24,21 @@ async def update_agent_run(
     return updated.data[0]
 
 
+async def claim_agent_run(supabase: AsyncClient, run_id: str) -> dict[str, Any] | None:
+    payload = {
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    updated = (
+        await supabase.table("agent_run")
+        .update(payload)
+        .eq("id", run_id)
+        .eq("status", "queued")
+        .execute()
+    ).data
+    return updated[0] if updated else None
+
+
 async def set_run_status(
     supabase: AsyncClient,
     run_id: str,
@@ -43,6 +58,30 @@ async def set_run_status(
     if error_message:
         payload["error_message"] = error_message
     return await update_agent_run(supabase, run_id, payload)
+
+
+async def set_agent_status(
+    supabase: AsyncClient,
+    *,
+    project_id: str,
+    agent: str,
+    status: str,
+) -> None:
+    payload = {
+        "status": status,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    updated = (
+        await supabase.table("agent_status")
+        .update(payload)
+        .eq("project_id", project_id)
+        .eq("agent", agent)
+        .execute()
+    ).data
+    if not updated:
+        await supabase.table("agent_status").insert(
+            {"project_id": project_id, "agent": agent, **payload}
+        ).execute()
 
 
 async def create_agent_artifact(

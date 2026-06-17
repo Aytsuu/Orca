@@ -21,6 +21,11 @@ from src.prompts.templates import (
 )
 
 
+def _llm_metadata(client: JsonLlmClient) -> dict | None:
+    metadata = getattr(client, "last_metadata", None)
+    return dict(metadata) if isinstance(metadata, dict) else None
+
+
 class MonitorStep(AgentStep):
     agent_name = "monitor"
 
@@ -60,11 +65,15 @@ class MonitorStep(AgentStep):
                 output.open_questions,
             ]
         )
+        artifacts = output.model_dump(mode="json")
+        metadata = _llm_metadata(self._llm_client)
+        if metadata:
+            artifacts["llm"] = metadata
         return StepResult(
             agent=self.agent_name,
             output=output,
             should_continue=meaningful,
-            artifacts=output.model_dump(mode="json"),
+            artifacts=artifacts,
         )
 
 
@@ -98,11 +107,15 @@ class AnalyzerStep(AgentStep):
                 validate_source_message_ids(valid_ids, item.source_message_ids)
 
         actionable = any([output.gaps, output.risks, output.conflicts])
+        artifacts = output.model_dump(mode="json")
+        metadata = _llm_metadata(self._llm_client)
+        if metadata:
+            artifacts["llm"] = metadata
         return StepResult(
             agent=self.agent_name,
             output=output,
             should_continue=actionable,
-            artifacts=output.model_dump(mode="json"),
+            artifacts=artifacts,
         )
 
 
@@ -137,29 +150,37 @@ class PlannerStep(AgentStep):
         )
         valid_ids = [message["id"] for message in context.new_messages]
         normalized_changes = [
-            normalize_confidence(change.model_dump()) for change in output.changes
+            normalize_confidence(change.model_dump(mode="json", exclude_none=True))
+            for change in output.changes
         ]
         normalized_changes = deduplicate_changes(normalized_changes)
         for change in normalized_changes:
             validate_source_message_ids(valid_ids, change["source_message_ids"])
         ensure_remove_actions_are_explicit(normalized_changes, context.new_messages)
 
+        planner_metadata = _llm_metadata(self._llm_client)
         safety = await self._safety_client.generate_json(
             SAFETY_CHECK_PROMPT.format(context=normalized_changes),
             SafetyCheckOutput,
             model=self._settings.llm_fast_model,
             temperature=0.0,
         )
+        safety_metadata = _llm_metadata(self._safety_client)
         if not safety.safe:
             raise ValueError(f"Planner output failed safety check: {safety.violations}")
 
+        artifacts = {
+            "changes": normalized_changes,
+            "summary": output.summary,
+            "safety": safety.model_dump(mode="json"),
+        }
+        if planner_metadata:
+            artifacts["llm"] = planner_metadata
+        if safety_metadata:
+            artifacts["safety_llm"] = safety_metadata
         return StepResult(
             agent=self.agent_name,
             output=output,
             should_continue=False,
-            artifacts={
-                "changes": normalized_changes,
-                "summary": output.summary,
-                "safety": safety.model_dump(mode="json"),
-            },
+            artifacts=artifacts,
         )

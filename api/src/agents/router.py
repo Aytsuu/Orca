@@ -59,3 +59,16 @@ async def trigger_agents_endpoint(
         triggered_by=project_context["session_id"],
     )
     return DataEnvelope(data=AgentTriggerOut.model_validate(result))
+
+
+@router.get(
+    "/{project_id}/agents/artifacts/latest",
+    response_model=DataEnvelope[list[AgentArtifactOut]],
+)
+async def get_latest_agent_artifacts_endpoint(
+    project_id: UUID,
+    _: Annotated[dict, Depends(get_project_context)],
+    supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
+) -> DataEnvelope[list[AgentArtifactOut]]:
+    artifacts = await get_latest_agent_artifacts(supabase, str(project_id))
+    return DataEnvelope(data=[AgentArtifactOut.model_validate(row) for row in artifacts])

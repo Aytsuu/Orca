@@ -161,3 +161,26 @@ async def trigger_agents(
         "status": "queued",
         "reused_active_run": False,
     }
+
+
+async def get_latest_run_artifacts(supabase: AsyncClient, project_id: str) -> list[dict[str, Any]]:
+    runs = (
+        await supabase.table("agent_run")
+        .select("*")
+        .eq("project_id", project_id)
+        .order("created_at")
+        .execute()
+    ).data
+    if not runs:
+        return []
+    latest_run = runs[-1]
+
+    artifacts = (
+        await supabase.table("agent_artifact")
+        .select("*")
+        .eq("project_id", project_id)
+        .eq("run_id", latest_run["id"])
+        .order("created_at", desc=True)
+        .execute()
+    ).data
+    return artifacts

@@ -23,3 +23,12 @@ class AgentTriggerOut(ApiModel):
     project_id: UUID
     status: str
     reused_active_run: bool = False
+
+
+class AgentArtifactOut(ApiModel):
+    id: UUID
+    run_id: UUID
+    project_id: UUID
+    agent: AgentName
+    payload: dict
+    created_at: datetime

@@ -839,3 +839,395 @@ async def test_trigger_reuses_active_run_for_new_messages(
         in fake_supabase.tables["agent_run"][0]["new_message_ids"]
     )
     assert fake_queue_producer.enqueued_run_ids == []
+
+
+@pytest.mark.asyncio
+async def test_get_plan_returns_enriched_shape_without_breaking_legacy_fields(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "content": {
+                "title": "Runway Q3 Launch",
+                "description": "AI-generated plan",
+                "objectives": ["Reduce churn"],
+                "stakeholders": [
+                    {
+                        "user_id": "u1",
+                        "name": "Jan Doe",
+                        "role": "Tech Lead",
+                        "initials": "JD",
+                    }
+                ],
+                "phases": [
+                    {
+                        "id": "phase-1",
+                        "title": "Phase 1",
+                        "goal": "Ship foundation",
+                        "timeframe": "Day 1-2",
+                        "tasks": [],
+                        "gaps": [],
+                    }
+                ],
+                "global_risks": [],
+            },
+            "version": 3,
+            "finalized_at": _iso_now(),
+        },
+    )
+
+    response = await client.get(
+        f"/api/v1/projects/{project['id']}/plan",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["content"]["title"] == "Runway Q3 Launch"
+    assert payload["version"] == 3
+    assert payload["title"] == "Runway Q3 Launch"
+    assert payload["objectives"] == ["Reduce churn"]
+    assert payload["phases"][0]["id"] == "phase-1"
+    assert payload["global_risks"] == []
+
+
+@pytest.mark.asyncio
+async def test_manual_plan_mutations_create_versions_and_surface_conflicts(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "content": {
+                "title": "Initial",
+                "description": "Draft",
+                "objectives": [],
+                "stakeholders": [],
+                "phases": [
+                    {
+                        "id": "phase-1",
+                        "title": "Phase 1",
+                        "goal": "Ship",
+                        "timeframe": "Week 1",
+                        "tasks": [
+                            {
+                                "id": "task-1",
+                                "title": "Existing task",
+                                "priority": "medium",
+                                "attachments": [],
+                                "acceptance_criteria": [],
+                            }
+                        ],
+                        "gaps": [],
+                    }
+                ],
+                "global_risks": [],
+            },
+            "version": 1,
+            "finalized_at": _iso_now(),
+        },
+    )
+    fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "changes": [
+                {
+                    "id": "chg-task-1",
+                    "action": "update",
+                    "section": "tasks",
+                    "targetId": "task-1",
+                    "title": "Raise priority",
+                    "detail": "Needs urgent follow-up",
+                    "sourceQuote": "please prioritize this",
+                }
+            ],
+        },
+    )
+
+    patch_meta = await client.patch(
+        f"/api/v1/projects/{project['id']}/plan",
+        headers={"X-Session-Id": "alpha"},
+        json={
+            "title": "Updated title",
+            "description": "Updated description",
+            "objectives": ["Ship MVP"],
+            "stakeholders": [
+                {
+                    "user_id": "u1",
+                    "name": "Jan Doe",
+                    "role": "Tech Lead",
+                    "initials": "JD",
+                }
+            ],
+        },
+    )
+
+    assert patch_meta.status_code == 200
+    assert patch_meta.json()["data"]["title"] == "Updated title"
+    assert patch_meta.json()["meta"]["conflicts"] == []
+
+    patch_task = await client.patch(
+        f"/api/v1/projects/{project['id']}/plan/phases/phase-1/tasks/task-1",
+        headers={"X-Session-Id": "alpha"},
+        json={"priority": "high"},
+    )
+
+    assert patch_task.status_code == 200
+    assert patch_task.json()["data"]["priority"] == "high"
+    assert patch_task.json()["meta"]["conflicts"] == ["chg-task-1"]
+
+    versions = await client.get(
+        f"/api/v1/projects/{project['id']}/plan/versions",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert versions.status_code == 200
+    version_items = versions.json()["data"]
+    assert version_items[0]["status"] == "current"
+    assert version_items[0]["version"] == 3
+    assert version_items[1]["status"] == "archived"
+    assert version_items[1]["version"] == 2
+    assert version_items[2]["version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_phase_task_attachment_and_delete_phase_guards(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    uploaded_file = fake_supabase.insert_row(
+        "uploaded_file",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "filename": "brief.pdf",
+            "mime_type": "application/pdf",
+            "storage_path": f"{project['id']}/alpha/brief.pdf",
+            "size_bytes": 2048,
+        },
+    )
+
+    create_phase = await client.post(
+        f"/api/v1/projects/{project['id']}/plan/phases",
+        headers={"X-Session-Id": "alpha"},
+        json={"title": "Phase 1", "goal": "Ship", "timeframe": "Week 1"},
+    )
+    assert create_phase.status_code == 201
+    phase_id = create_phase.json()["data"]["id"]
+
+    create_task = await client.post(
+        f"/api/v1/projects/{project['id']}/plan/phases/{phase_id}/tasks",
+        headers={"X-Session-Id": "alpha"},
+        json={
+            "title": "Write API tests",
+            "owner": "@jan",
+            "due": "2026-06-20",
+            "priority": "high",
+            "description": "Cover critical plan flows",
+            "acceptance_criteria": ["Tests fail first", "Tests pass second"],
+        },
+    )
+    assert create_task.status_code == 201
+    task_id = create_task.json()["data"]["id"]
+
+    attach_file = await client.post(
+        f"/api/v1/projects/{project['id']}/plan/phases/{phase_id}/tasks/{task_id}/attachments",
+        headers={"X-Session-Id": "alpha"},
+        json={"uploaded_file_id": uploaded_file["id"]},
+    )
+
+    assert attach_file.status_code == 201
+    attachment = attach_file.json()["data"]
+    assert attachment["uploaded_file_id"] == uploaded_file["id"]
+    assert attachment["filename"] == "brief.pdf"
+
+    blocked_delete = await client.delete(
+        f"/api/v1/projects/{project['id']}/plan/phases/{phase_id}",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert blocked_delete.status_code == 400
+    assert blocked_delete.json()["error"]["detail"]["task_count"] == 1
+
+    force_delete = await client.delete(
+        f"/api/v1/projects/{project['id']}/plan/phases/{phase_id}",
+        headers={"X-Session-Id": "alpha"},
+        params={"force": "true"},
+    )
+    assert force_delete.status_code == 200
+    assert force_delete.json()["data"]["id"] == phase_id
+
+
+@pytest.mark.asyncio
+async def test_change_level_accept_reject_and_stale_guard_are_backward_compatible(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "content": {
+                "title": "Initial",
+                "description": "Draft",
+                "objectives": [],
+                "stakeholders": [],
+                "phases": [
+                    {
+                        "id": "phase-1",
+                        "title": "Phase 1",
+                        "goal": "Ship",
+                        "timeframe": "Week 1",
+                        "tasks": [],
+                        "gaps": [],
+                    }
+                ],
+                "global_risks": [],
+            },
+            "version": 1,
+            "finalized_at": _iso_now(),
+        },
+    )
+    proposal = fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "changes": [
+                {
+                    "id": "chg-add-task",
+                    "action": "add",
+                    "section": "tasks",
+                    "targetId": "phase-1",
+                    "title": "Add QA task",
+                    "detail": "Need QA coverage",
+                    "content": [
+                        {
+                            "id": "task-qa",
+                            "title": "Add QA owner",
+                            "priority": "high",
+                            "attachments": [],
+                            "acceptance_criteria": [],
+                        }
+                    ],
+                    "sourceQuote": "we need a QA owner",
+                },
+                {
+                    "id": "chg-stale-task",
+                    "action": "update",
+                    "section": "tasks",
+                    "targetId": "missing-task",
+                    "title": "Stale task",
+                    "detail": "This target was removed manually",
+                    "content": {"priority": "critical"},
+                    "sourceQuote": "raise the priority",
+                },
+            ],
+        },
+    )
+
+    accept_one = await client.patch(
+        f"/api/v1/projects/{project['id']}/plan/proposal/changes/chg-add-task/accept",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert accept_one.status_code == 200
+    assert accept_one.json()["data"]["version"] == 2
+    assert accept_one.json()["data"]["phases"][0]["tasks"][0]["id"] == "task-qa"
+
+    approve_stale = await client.post(
+        f"/api/v1/projects/{project['id']}/plan/approve",
+        headers={"X-Session-Id": "alpha"},
+        json={"change_ids": ["chg-stale-task"]},
+    )
+
+    assert approve_stale.status_code == 200
+    assert approve_stale.json()["data"]["version"] == 3
+    latest_proposal = next(
+        row for row in fake_supabase.tables["plan_proposal"] if row["id"] == proposal["id"]
+    )
+    assert latest_proposal["status"] == "applied"
+    assert latest_proposal["changes"][0]["id"] == "chg-stale-task"
+    assert latest_proposal["changes"][0]["state"] == "stale"
+
+    rejected_proposal = fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "changes": [
+                {
+                    "id": "chg-reject",
+                    "action": "add",
+                    "section": "risks",
+                    "targetId": "root",
+                    "title": "Add risk",
+                    "detail": "Need a fallback plan",
+                    "content": [{"id": "risk-1", "description": "Fallback missing"}],
+                    "sourceQuote": "add a fallback risk",
+                }
+            ],
+        },
+    )
+
+    reject_one = await client.patch(
+        f"/api/v1/projects/{project['id']}/plan/proposal/changes/chg-reject/reject",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert reject_one.status_code == 200
+    assert reject_one.json()["data"]["status"] == "rejected"
+    latest_rejected = next(
+        row for row in fake_supabase.tables["plan_proposal"] if row["id"] == rejected_proposal["id"]
+    )
+    assert latest_rejected["status"] == "rejected"

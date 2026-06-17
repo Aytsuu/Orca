@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, status
 from supabase import AsyncClient
 
 from src.agents.queue import QueueProducer, get_queue_producer
-from src.agents.schemas import AgentStatusOut, AgentTriggerOut
-from src.agents.service import get_agent_statuses, trigger_agents
+from src.agents.schemas import AgentArtifactOut, AgentStatusOut, AgentTriggerOut
+from src.agents.service import get_agent_statuses, get_latest_run_artifacts, trigger_agents
 from src.models import DataEnvelope
 from src.permissions import require_approver_membership
 from src.projects.dependencies import get_project_context
@@ -25,6 +25,19 @@ async def get_agent_statuses_endpoint(
 ) -> DataEnvelope[list[AgentStatusOut]]:
     statuses = await get_agent_statuses(supabase, str(project_id))
     return DataEnvelope(data=[AgentStatusOut.model_validate(row) for row in statuses])
+
+
+@router.get(
+    "/{project_id}/agents/artifacts/latest",
+    response_model=DataEnvelope[list[AgentArtifactOut]],
+)
+async def get_latest_agent_artifacts_endpoint(
+    project_id: UUID,
+    _: Annotated[dict, Depends(get_project_context)],
+    supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
+) -> DataEnvelope[list[AgentArtifactOut]]:
+    artifacts = await get_latest_run_artifacts(supabase, str(project_id))
+    return DataEnvelope(data=[AgentArtifactOut.model_validate(row) for row in artifacts])
 
 
 @router.post(

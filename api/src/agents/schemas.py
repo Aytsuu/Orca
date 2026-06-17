@@ -30,5 +30,5 @@ class AgentArtifactOut(ApiModel):
     run_id: UUID
     project_id: UUID
     agent: AgentName
-    payload: dict[str, Any]
+    payload: dict
     created_at: datetime

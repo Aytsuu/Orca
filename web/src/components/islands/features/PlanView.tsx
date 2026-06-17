@@ -2313,12 +2313,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
             <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
               {pendingChanges.map(change => {
                 // Confidence badge styles
-                const confColor =
-                  change.confidence === 'high'
-                    ? 'text-success bg-success/10'
-                    : change.confidence === 'medium'
-                      ? 'text-warning bg-warning/10'
-                      : 'text-text-muted bg-surface-raised';
+                const confColor = 'text-text-muted bg-surface-raised';
 
                 // Heading action prefix formatting
                 let actionPrefix = 'ADD TASK';
@@ -2523,12 +2518,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
             {/* Change list */}
             <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
               {pendingChanges.map(change => {
-                const confColor =
-                  change.confidence === 'high'
-                    ? 'text-success bg-success/10'
-                    : change.confidence === 'medium'
-                      ? 'text-warning bg-warning/10'
-                      : 'text-text-muted bg-surface-raised';
+                const confColor = 'text-text-muted bg-surface-raised';
 
                 return (
                   <div

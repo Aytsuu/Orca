@@ -130,6 +130,319 @@ async def test_pipeline_persists_planner_proposal(fake_supabase) -> None:
 
 
 @pytest.mark.asyncio
+async def test_pipeline_allows_analyzer_and_planner_to_cite_ids_from_supplied_context(
+    fake_supabase,
+) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha"})
+    prior_message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "QA ownership is still unresolved for launch",
+        },
+    )
+    new_message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Please revisit the QA ownership gap before launch",
+        },
+    )
+    fake_supabase.insert_row(
+        "project_memory",
+        {
+            "project_id": project["id"],
+            "kind": "task",
+            "content": "QA ownership unresolved before launch",
+            "source_message_ids": [prior_message["id"]],
+            "confidence": "medium",
+        },
+    )
+    fake_supabase.insert_row(
+        "conversation_summary",
+        {
+            "project_id": project["id"],
+            "summary": "Earlier discussion flagged the unresolved QA owner",
+            "source_message_ids": [prior_message["id"]],
+            "last_message_created_at": prior_message["created_at"],
+        },
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [new_message["id"]],
+        },
+    )
+    llm = FakeJsonLlmClient(
+        responses=[
+            MonitorOutput(
+                tasks=[
+                    {
+                        "kind": "task",
+                        "content": "Revisit QA ownership gap",
+                        "source_message_ids": [new_message["id"]],
+                        "excerpt": "revisit the QA ownership gap",
+                        "confidence": "medium",
+                    }
+                ],
+                summary_candidate="QA ownership needs another pass",
+            ),
+            AnalyzerOutput(
+                gaps=[
+                    {
+                        "title": "QA owner still missing",
+                        "detail": "Prior evidence still shows no assigned QA owner for launch.",
+                        "severity": "major",
+                        "source_message_ids": [prior_message["id"]],
+                    }
+                ]
+            ),
+            {
+                "changes": [
+                    {
+                        "id": "chg-1",
+                        "section": "tasks",
+                        "action": "add",
+                        "content": [{"title": "Assign QA owner before launch"}],
+                        "justification": "Historical conversation evidence still supports this gap.",
+                        "source_message_ids": [prior_message["id"]],
+                        "confidence": "medium",
+                    }
+                ],
+                "summary": "Assign QA owner",
+            },
+            {"safe": True, "violations": []},
+        ]
+    )
+
+    results = await run_project_pipeline(
+        fake_supabase,
+        run["id"],
+        llm_client=llm,
+        safety_client=llm,
+    )
+
+    assert [result.agent for result in results] == ["monitor", "analyzer", "planner"]
+    assert fake_supabase.tables["plan_proposal"][0]["changes"][0]["source_message_ids"] == [
+        prior_message["id"]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_sanitizes_analyzer_and_planner_prompt_payload_ids(fake_supabase) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha"})
+    prior_message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "QA ownership is still unresolved for launch",
+        },
+    )
+    new_message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Please revisit the QA ownership gap before launch",
+        },
+    )
+    memory_row = fake_supabase.insert_row(
+        "project_memory",
+        {
+            "project_id": project["id"],
+            "kind": "task",
+            "content": "QA ownership unresolved before launch",
+            "source_message_ids": [prior_message["id"]],
+            "confidence": "medium",
+        },
+    )
+    summary_row = fake_supabase.insert_row(
+        "conversation_summary",
+        {
+            "project_id": project["id"],
+            "summary": "Earlier discussion flagged the unresolved QA owner",
+            "source_message_ids": [prior_message["id"]],
+            "last_message_created_at": prior_message["created_at"],
+        },
+    )
+    plan_row = fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "phases": [
+                {
+                    "id": "phase-row-id",
+                    "tasks": [
+                        {
+                            "id": "task-row-id",
+                            "title": "Assign QA owner",
+                            "source_message_ids": [prior_message["id"]],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [new_message["id"]],
+        },
+    )
+    llm = FakeJsonLlmClient(
+        responses=[
+            MonitorOutput(
+                tasks=[
+                    {
+                        "kind": "task",
+                        "content": "Revisit QA ownership gap",
+                        "source_message_ids": [new_message["id"]],
+                        "excerpt": "revisit the QA ownership gap",
+                        "confidence": "medium",
+                    }
+                ],
+                summary_candidate="QA ownership needs another pass",
+            ),
+            AnalyzerOutput(
+                gaps=[
+                    {
+                        "title": "QA owner still missing",
+                        "detail": "Prior evidence still shows no assigned QA owner for launch.",
+                        "severity": "major",
+                        "source_message_ids": [prior_message["id"]],
+                    }
+                ]
+            ),
+            {
+                "changes": [
+                    {
+                        "id": "chg-1",
+                        "section": "tasks",
+                        "action": "add",
+                        "content": [{"title": "Assign QA owner before launch"}],
+                        "justification": "Historical conversation evidence still supports this gap.",
+                        "source_message_ids": [prior_message["id"]],
+                        "confidence": "medium",
+                    }
+                ],
+                "summary": "Assign QA owner",
+            },
+            {"safe": True, "violations": []},
+        ]
+    )
+
+    await run_project_pipeline(
+        fake_supabase,
+        run["id"],
+        llm_client=llm,
+        safety_client=llm,
+    )
+
+    analyzer_prompt = next(call["prompt"] for call in llm.calls if call["schema"] == "AnalyzerOutput")
+    planner_prompt = next(call["prompt"] for call in llm.calls if call["schema"] == "PlannerOutput")
+
+    for prompt in (analyzer_prompt, planner_prompt):
+        assert prior_message["id"] in prompt
+        assert new_message["id"] in prompt
+        assert prior_message["created_at"] not in prompt
+        assert new_message["created_at"] not in prompt
+        assert memory_row["id"] not in prompt
+        assert summary_row["id"] not in prompt
+        assert summary_row["last_message_created_at"] not in prompt
+        assert plan_row["id"] not in prompt
+        assert project["id"] not in prompt
+        assert run["id"] not in prompt
+        assert "phase-row-id" not in prompt
+        assert "task-row-id" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_pipeline_uses_wording_neutral_safety_confidence_rubric(fake_supabase) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha"})
+    message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Assign QA owner before launch",
+        },
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [message["id"]],
+        },
+    )
+    llm = FakeJsonLlmClient(
+        responses=[
+            MonitorOutput(
+                tasks=[
+                    {
+                        "kind": "task",
+                        "content": "Assign QA owner before launch",
+                        "source_message_ids": [message["id"]],
+                        "excerpt": "Assign QA owner before launch",
+                        "confidence": "medium",
+                    }
+                ]
+            ),
+            AnalyzerOutput(
+                gaps=[
+                    {
+                        "title": "QA owner missing",
+                        "detail": "Launch still needs an assigned QA owner.",
+                        "severity": "major",
+                        "source_message_ids": [message["id"]],
+                    }
+                ]
+            ),
+            {
+                "changes": [
+                    {
+                        "id": "chg-1",
+                        "section": "tasks",
+                        "action": "add",
+                        "content": [{"title": "Assign QA owner before launch"}],
+                        "justification": "This directly addresses the user's latest request.",
+                        "source_message_ids": [message["id"]],
+                        "confidence": "medium",
+                    }
+                ],
+                "summary": "Assign QA owner",
+            },
+            {"safe": True, "violations": []},
+        ]
+    )
+
+    await run_project_pipeline(
+        fake_supabase,
+        run["id"],
+        llm_client=llm,
+        safety_client=llm,
+    )
+
+    safety_prompt = next(call["prompt"] for call in llm.calls if call["schema"] == "SafetyCheckOutput")
+    assert "Judge confidence from the evidence structure" in safety_prompt
+    assert "Do not treat phrases such as" in safety_prompt
+    assert "directly reflects" in safety_prompt
+    assert "high: multiple consistent citations" in safety_prompt
+    assert "medium: a single citation with reasonable support" in safety_prompt
+    assert "Only mark a confidence mismatch" in safety_prompt
+
+
+@pytest.mark.asyncio
 async def test_pipeline_skips_planner_at_soft_budget(fake_supabase) -> None:
     project = fake_supabase.insert_row("project", {"name": "Alpha"})
     message = fake_supabase.insert_row(

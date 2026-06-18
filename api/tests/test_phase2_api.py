@@ -629,6 +629,91 @@ async def test_activity_endpoints_return_latest_artifacts_and_latest_proposal(
 
 
 @pytest.mark.asyncio
+async def test_agent_activity_endpoint_and_promote_actions(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    latest_run = fake_supabase.insert_row(
+        "agent_run",
+        {"project_id": project["id"], "triggered_by": "alpha", "status": "completed"},
+    )
+    planner_artifact = fake_supabase.insert_row(
+        "agent_artifact",
+        {
+            "run_id": latest_run["id"],
+            "project_id": project["id"],
+            "agent": "planner",
+            "payload": {
+                "summary": "Planner finished a draft.",
+                "changes": [
+                    {
+                        "id": "chg-1",
+                        "action": "add",
+                        "section": "phases",
+                        "content": [{"title": "Discovery"}],
+                        "justification": "Need a first phase.",
+                        "source_message_ids": ["m1"],
+                        "confidence": "medium",
+                    },
+                    {
+                        "id": "chg-2",
+                        "action": "update",
+                        "section": "description",
+                        "content": "Updated description",
+                        "justification": "Clarify scope.",
+                        "source_message_ids": ["m1"],
+                        "confidence": "medium",
+                    },
+                ],
+            },
+        },
+    )
+
+    activity_response = await client.get(
+        f"/api/v1/projects/{project['id']}/agents/activity",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert activity_response.status_code == 200
+    activity_items = activity_response.json()["data"]
+    proposal_items = [item for item in activity_items if item["kind"] == "proposal_change"]
+    assert len(proposal_items) == 2
+    assert proposal_items[0]["actionable"] is True
+    assert proposal_items[0]["proposal_change"]["id"] == "chg-1"
+    assert any(item["id"] == f"planner-summary:{planner_artifact['id']}" for item in activity_items)
+
+    promote_one = await client.post(
+        f"/api/v1/projects/{project['id']}/agents/activity/planner-change:{planner_artifact['id']}:chg-1/promote",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert promote_one.status_code == 200
+    assert promote_one.json()["data"]["change_ids"] == ["chg-1"]
+    pending_proposal = fake_supabase.tables["plan_proposal"][0]
+    assert [change["id"] for change in pending_proposal["changes"]] == ["chg-1"]
+
+    promote_all = await client.post(
+        f"/api/v1/projects/{project['id']}/agents/activity/promote-all",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert promote_all.status_code == 200
+    assert promote_all.json()["data"]["change_ids"] == ["chg-2"]
+    assert [change["id"] for change in fake_supabase.tables["plan_proposal"][0]["changes"]] == [
+        "chg-1",
+        "chg-2",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_member_management_requires_approver(
     client: AsyncClient,
     fake_supabase: FakeSupabase,

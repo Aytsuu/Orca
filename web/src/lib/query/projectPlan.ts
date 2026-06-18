@@ -1,14 +1,68 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 
-import { defaultProjectRepository } from '../../stores/project/repository';
+import { apiFetch } from '../api/client';
+import { defaultProjectRepository, mapPlan } from '../../stores/project/repository';
 import { sessionId } from '../../stores/project/session';
-import type { GapItem, Phase, RiskItem, StructuredPlan, Task } from '../../stores/project/types';
+import type {
+  ApiProjectPlan,
+  GapItem,
+  Phase,
+  ProposedChange,
+  RiskItem,
+  StructuredPlan,
+  Task,
+} from '../../stores/project/types';
 
 const projectPlanQueryKey = (projectId: string) => ['project-plan', projectId] as const;
 const projectPlanVersionsQueryKey = (projectId: string) => ['project-plan-versions', projectId] as const;
+const projectPendingProposalQueryKey = (projectId: string) => ['project-plan-proposal', projectId] as const;
+
+interface ApiEnvelope<T> {
+  data: T;
+}
+
+interface ApiProposalChange {
+  id: string;
+  action: 'add' | 'update' | 'remove';
+  section:
+    | 'title'
+    | 'description'
+    | 'objectives'
+    | 'stakeholders'
+    | 'tasks'
+    | 'phases'
+    | 'gaps'
+    | 'risks'
+    | 'global_risks';
+  targetId?: string | null;
+  title?: string;
+  detail?: string;
+  confidence?: 'high' | 'medium' | 'low' | null;
+  sourceQuote?: string | null;
+  state?: 'pending' | 'applied' | 'rejected' | 'stale' | null;
+  justification?: string | null;
+  source_message_ids?: string[] | null;
+  content?: unknown;
+}
+
+interface ApiProposal {
+  id: string;
+  status: 'pending' | 'approved' | 'rejected' | 'applied' | 'superseded';
+  changes: ApiProposalChange[];
+  created_at: string;
+}
 
 interface OptimisticPlanContext {
   previousPlan?: StructuredPlan;
+}
+
+interface PendingProposalView {
+  proposalId: string | null;
+  changes: ProposedChange[];
+}
+
+interface OptimisticProposalContext extends OptimisticPlanContext {
+  previousProposal?: PendingProposalView;
 }
 
 function buildOptimisticId(prefix: string): string {
@@ -59,6 +113,27 @@ function reconcileOptimisticPlanUpdate(
   persistedPlan: StructuredPlan
 ): void {
   queryClient.setQueryData(projectPlanQueryKey(projectId), persistedPlan);
+}
+
+function updateCachedProposal(
+  queryClient: Pick<QueryClient, 'setQueryData'>,
+  projectId: string,
+  updater: (proposal: PendingProposalView) => PendingProposalView | undefined
+): void {
+  queryClient.setQueryData<PendingProposalView | undefined>(
+    projectPendingProposalQueryKey(projectId),
+    (current) => (current ? updater(current) : current)
+  );
+}
+
+function rollbackOptimisticProposalUpdate(
+  queryClient: Pick<QueryClient, 'setQueryData'>,
+  projectId: string,
+  context?: OptimisticProposalContext
+): void {
+  if (context?.previousProposal) {
+    queryClient.setQueryData(projectPendingProposalQueryKey(projectId), context.previousProposal);
+  }
 }
 
 export function applyPlanMetaPatch(
@@ -276,11 +351,326 @@ export function dismissOptimisticGap(
   };
 }
 
+function asObjectArray(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null);
+  }
+  if (typeof value === 'object' && value !== null) {
+    return [value as Record<string, unknown>];
+  }
+  return [];
+}
+
+function toStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string');
+  }
+  if (typeof value === 'string') {
+    return [value];
+  }
+  return [];
+}
+
+function toOptimisticStakeholder(entry: Record<string, unknown>) {
+  return {
+    userId: String(entry.user_id || entry.userId || buildOptimisticId('stakeholder')),
+    name: typeof entry.name === 'string' ? entry.name : typeof entry.title === 'string' ? entry.title : 'Proposed stakeholder',
+    role: typeof entry.role === 'string' ? entry.role : '',
+    initials:
+      typeof entry.initials === 'string'
+        ? entry.initials
+        : typeof entry.name === 'string'
+          ? entry.name.slice(0, 2).toUpperCase()
+          : typeof entry.title === 'string'
+            ? entry.title.slice(0, 2).toUpperCase()
+            : 'PR',
+  };
+}
+
+function toOptimisticPhase(entry: Record<string, unknown>): Phase {
+  return {
+    id: typeof entry.id === 'string' ? entry.id : buildOptimisticId('phase'),
+    title: typeof entry.title === 'string' ? entry.title : 'Proposed phase',
+    goal: typeof entry.goal === 'string' ? entry.goal : '',
+    timeframe: typeof entry.timeframe === 'string' ? entry.timeframe : '',
+    tasks: [],
+    gaps: [],
+  };
+}
+
+function toOptimisticTask(entry: Record<string, unknown>): Task {
+  const acceptanceCriteria = Array.isArray(entry.acceptance_criteria)
+    ? entry.acceptance_criteria.filter((item): item is string => typeof item === 'string')
+    : Array.isArray(entry.acceptanceCriteria)
+      ? entry.acceptanceCriteria.filter((item): item is string => typeof item === 'string')
+      : [];
+
+  return {
+    id: typeof entry.id === 'string' ? entry.id : buildOptimisticId('task'),
+    title: typeof entry.title === 'string' ? entry.title : 'Proposed task',
+    description: typeof entry.description === 'string' ? entry.description : '',
+    acceptanceCriteria,
+    owner: typeof entry.owner === 'string' ? entry.owner : undefined,
+    due: typeof entry.due === 'string' ? entry.due : typeof entry.due_date === 'string' ? entry.due_date : undefined,
+    priority:
+      entry.priority === 'critical' || entry.priority === 'high' || entry.priority === 'medium' || entry.priority === 'low'
+        ? entry.priority
+        : 'medium',
+    status: 'accepted',
+    attachments: [],
+    sourceMessageIds: [],
+    confidence: 'high',
+    isNew: true,
+  };
+}
+
+function toOptimisticGap(entry: Record<string, unknown>): GapItem {
+  return {
+    id: typeof entry.id === 'string' ? entry.id : buildOptimisticId('gap'),
+    description:
+      typeof entry.description === 'string'
+        ? entry.description
+        : typeof entry.title === 'string'
+          ? entry.title
+          : 'Proposed gap',
+    severity:
+      entry.severity === 'critical' || entry.severity === 'major' || entry.severity === 'minor'
+        ? entry.severity
+        : 'minor',
+    sourceMessageIds: [],
+  };
+}
+
+function toOptimisticRisk(entry: Record<string, unknown>): RiskItem {
+  return {
+    id: typeof entry.id === 'string' ? entry.id : buildOptimisticId('risk'),
+    description:
+      typeof entry.description === 'string'
+        ? entry.description
+        : typeof entry.title === 'string'
+          ? entry.title
+          : 'Proposed risk',
+    severity:
+      entry.severity === 'critical' || entry.severity === 'major' || entry.severity === 'minor'
+        ? entry.severity
+        : 'minor',
+    mitigation: typeof entry.mitigation === 'string' ? entry.mitigation : undefined,
+    sourceMessageIds: [],
+  };
+}
+
+export function applyAcceptedProposalChange(plan: StructuredPlan, change: ProposedChange): StructuredPlan {
+  if (change.section === 'title') {
+    const nextTitle =
+      typeof change.content === 'string'
+        ? change.content
+        : toStringList(change.content)[0] || change.title || plan.title;
+    return applyPlanMetaPatch(plan, { title: nextTitle });
+  }
+
+  if (change.section === 'description') {
+    const nextDescription =
+      typeof change.content === 'string'
+        ? change.content
+        : toStringList(change.content)[0] || change.title || plan.description;
+    return applyPlanMetaPatch(plan, { description: nextDescription });
+  }
+
+  if (change.section === 'objectives') {
+    const objectives = toStringList(change.content);
+    if (change.action === 'remove') {
+      return applyPlanMetaPatch(plan, {
+        objectives: plan.objectives.filter((objective) => !objectives.includes(objective)),
+      });
+    }
+    return applyPlanMetaPatch(plan, {
+      objectives: change.action === 'add' ? [...plan.objectives, ...objectives] : objectives,
+    });
+  }
+
+  if (change.section === 'stakeholders') {
+    const stakeholders = asObjectArray(change.content).map(toOptimisticStakeholder);
+    if (change.action === 'remove') {
+      const namesToRemove = new Set(stakeholders.map((stakeholder) => stakeholder.name));
+      return applyPlanMetaPatch(plan, {
+        stakeholders: plan.stakeholders.filter((stakeholder) => !namesToRemove.has(stakeholder.name)),
+      });
+    }
+    return applyPlanMetaPatch(plan, {
+      stakeholders: change.action === 'add' ? [...plan.stakeholders, ...stakeholders] : stakeholders,
+    });
+  }
+
+  if (change.section === 'phases') {
+    const phases = asObjectArray(change.content).map(toOptimisticPhase);
+    if (change.action === 'add') {
+      return {
+        ...plan,
+        phases: [...plan.phases, ...phases],
+        updatedAt: getNextUpdatedAt(plan),
+      };
+    }
+    if (change.action === 'remove') {
+      const phaseId = change.targetId;
+      return phaseId ? removeOptimisticPhase(plan, phaseId) : plan;
+    }
+    if (change.action === 'update' && change.targetId && phases[0]) {
+      return applyPhasePatch(plan, {
+        phaseId: change.targetId,
+        title: phases[0].title,
+        goal: phases[0].goal,
+        timeframe: phases[0].timeframe,
+      });
+    }
+  }
+
+  if (change.section === 'tasks') {
+    if (change.action === 'add' && change.targetId) {
+      const tasks = asObjectArray(change.content).map(toOptimisticTask);
+      return tasks.reduce((nextPlan, task) => addOptimisticTask(nextPlan, change.targetId, task), plan);
+    }
+    if (change.action === 'remove' && change.targetId) {
+      const taskContext = plan.phases.find((phase) => phase.tasks.some((task) => task.id === change.targetId));
+      return taskContext ? removeOptimisticTask(plan, { phaseId: taskContext.id, taskId: change.targetId }) : plan;
+    }
+    if (change.action === 'update' && change.targetId) {
+      const taskContext = plan.phases.find((phase) => phase.tasks.some((task) => task.id === change.targetId));
+      const nextTask = asObjectArray(change.content)[0];
+      if (!taskContext || !nextTask) return plan;
+      return applyTaskPatch(plan, {
+        phaseId: taskContext.id,
+        taskId: change.targetId,
+        updates: {
+          title: typeof nextTask.title === 'string' ? nextTask.title : undefined,
+          description: typeof nextTask.description === 'string' ? nextTask.description : undefined,
+          owner: typeof nextTask.owner === 'string' ? nextTask.owner : undefined,
+          due:
+            typeof nextTask.due === 'string'
+              ? nextTask.due
+              : typeof nextTask.due_date === 'string'
+                ? nextTask.due_date
+                : undefined,
+          priority:
+            nextTask.priority === 'critical' || nextTask.priority === 'high' || nextTask.priority === 'medium' || nextTask.priority === 'low'
+              ? nextTask.priority
+              : undefined,
+          acceptanceCriteria: Array.isArray(nextTask.acceptance_criteria)
+            ? nextTask.acceptance_criteria.filter((item): item is string => typeof item === 'string')
+            : undefined,
+        },
+      });
+    }
+  }
+
+  if (change.section === 'gaps') {
+    if (change.action === 'add' && change.targetId) {
+      const gaps = asObjectArray(change.content).map(toOptimisticGap);
+      return {
+        ...plan,
+        phases: plan.phases.map((phase) =>
+          phase.id === change.targetId
+            ? {
+              ...phase,
+              gaps: [...phase.gaps, ...gaps],
+            }
+            : phase
+        ),
+        updatedAt: getNextUpdatedAt(plan),
+      };
+    }
+    if (change.action === 'remove' && change.targetId) {
+      const gapContext = plan.phases.find((phase) => phase.gaps.some((gap) => gap.id === change.targetId));
+      return gapContext ? dismissOptimisticGap(plan, { phaseId: gapContext.id, gapId: change.targetId }) : plan;
+    }
+  }
+
+  if (change.section === 'risks' || change.section === 'global_risks') {
+    const risks = asObjectArray(change.content).map(toOptimisticRisk);
+    if (change.action === 'add') {
+      return risks.reduce((nextPlan, risk) => addOptimisticRisk(nextPlan, risk), plan);
+    }
+    if (change.action === 'remove' && change.targetId) {
+      return removeOptimisticRisk(plan, change.targetId);
+    }
+    if (change.action === 'update' && change.targetId && risks[0]) {
+      return applyRiskPatch(plan, {
+        riskId: change.targetId,
+        updates: {
+          description: risks[0].description,
+          severity: risks[0].severity,
+          mitigation: risks[0].mitigation,
+        },
+      });
+    }
+  }
+
+  return plan;
+}
+
 export function useProjectPlan(projectId: string) {
   return useQuery({
     queryKey: projectPlanQueryKey(projectId),
     queryFn: () => defaultProjectRepository.fetchProjectPlan(projectId, sessionId.get()),
     enabled: Boolean(projectId),
+  });
+}
+
+function mapProposalChange(change: ApiProposalChange): ProposedChange {
+  return {
+    id: change.id,
+    action: change.action,
+    section: change.section,
+    targetId: change.targetId || '',
+    title: change.title || deriveProposalTitle(change),
+    detail: change.detail || change.justification || '',
+    confidence: change.confidence || undefined,
+    sourceQuote: change.sourceQuote || '',
+    state: change.state || undefined,
+    justification: change.justification || undefined,
+    sourceMessageIds: change.source_message_ids || undefined,
+    content: change.content,
+  };
+}
+
+function deriveProposalTitle(change: ApiProposalChange): string {
+  if (typeof change.content === 'string' && change.content.trim()) {
+    return change.content;
+  }
+
+  if (Array.isArray(change.content) && change.content.length > 0) {
+    const first = change.content[0];
+    if (typeof first === 'string' && first.trim()) {
+      return first;
+    }
+    if (first && typeof first === 'object') {
+      for (const key of ['title', 'name', 'description', 'detail', 'value', 'role'] as const) {
+        const derived = first[key as keyof typeof first];
+        if (typeof derived === 'string' && derived.trim()) {
+          return derived;
+        }
+      }
+    }
+  }
+
+  return `${change.action} ${change.section}`.replace('_', ' ');
+}
+
+export function usePendingProjectProposal(projectId: string) {
+  return useQuery({
+    queryKey: projectPendingProposalQueryKey(projectId),
+    queryFn: async () => {
+      const response = await apiFetch<ApiEnvelope<ApiProposal | null>>(
+        `/api/projects/${projectId}/plan/proposal`,
+        sessionId.get()
+      );
+      return response.data;
+    },
+    enabled: Boolean(projectId),
+    refetchInterval: 3000,
+    select: (proposal) => ({
+      proposalId: proposal?.id || null,
+      changes: (proposal?.changes || []).map(mapProposalChange),
+    }),
   });
 }
 
@@ -304,6 +694,142 @@ export function useUpdateProjectPlan(projectId: string) {
     },
     onSuccess: (plan) => {
       reconcileOptimisticPlanUpdate(queryClient, projectId, plan);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: projectPlanQueryKey(projectId) });
+    },
+  });
+}
+
+export function useAcceptProjectProposalChange(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (changeId: string) => {
+      const response = await apiFetch<ApiEnvelope<ApiProjectPlan>>(
+        `/api/projects/${projectId}/plan/proposal/changes/${changeId}/accept`,
+        sessionId.get(),
+        {
+          method: 'PATCH',
+        }
+      );
+      return mapPlan(response.data, projectId);
+    },
+    onMutate: async (changeId) => {
+      await queryClient.cancelQueries({ queryKey: projectPendingProposalQueryKey(projectId) });
+      await queryClient.cancelQueries({ queryKey: projectPlanQueryKey(projectId) });
+      const previousProposal = queryClient.getQueryData<PendingProposalView>(projectPendingProposalQueryKey(projectId));
+      const previousPlan = queryClient.getQueryData<StructuredPlan>(projectPlanQueryKey(projectId));
+      const acceptedChange = previousProposal?.changes.find((change) => change.id === changeId);
+
+      if (previousProposal) {
+        updateCachedProposal(queryClient, projectId, (proposal) => ({
+          ...proposal,
+          changes: proposal.changes.filter((change) => change.id !== changeId),
+        }));
+      }
+
+      if (previousPlan && acceptedChange) {
+        updateCachedPlan(queryClient, projectId, (plan) => applyAcceptedProposalChange(plan, acceptedChange));
+      }
+
+      return { previousPlan, previousProposal };
+    },
+    onError: (_error, _variables, context) => {
+      rollbackOptimisticPlanUpdate(queryClient, projectId, context);
+      rollbackOptimisticProposalUpdate(queryClient, projectId, context);
+    },
+    onSuccess: (plan) => {
+      reconcileOptimisticPlanUpdate(queryClient, projectId, plan);
+      void queryClient.invalidateQueries({ queryKey: projectPendingProposalQueryKey(projectId) });
+      void queryClient.invalidateQueries({ queryKey: ['project-ai-activity', projectId] });
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: projectPlanQueryKey(projectId) });
+    },
+  });
+}
+
+export function useRejectProjectProposalChange(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (changeId: string) => {
+      const response = await apiFetch<ApiEnvelope<ApiProposal>>(
+        `/api/projects/${projectId}/plan/proposal/changes/${changeId}/reject`,
+        sessionId.get(),
+        {
+          method: 'PATCH',
+        }
+      );
+      return response.data;
+    },
+    onMutate: async (changeId) => {
+      await queryClient.cancelQueries({ queryKey: projectPendingProposalQueryKey(projectId) });
+      const previousProposal = queryClient.getQueryData<PendingProposalView>(projectPendingProposalQueryKey(projectId));
+
+      if (previousProposal) {
+        updateCachedProposal(queryClient, projectId, (proposal) => ({
+          ...proposal,
+          changes: proposal.changes.filter((change) => change.id !== changeId),
+        }));
+      }
+
+      return { previousProposal };
+    },
+    onError: (_error, _variables, context) => {
+      rollbackOptimisticProposalUpdate(queryClient, projectId, context);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: projectPendingProposalQueryKey(projectId) });
+      void queryClient.invalidateQueries({ queryKey: ['project-ai-activity', projectId] });
+    },
+  });
+}
+
+export function useApproveProjectProposal(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (changeIds: string[]) => {
+      const response = await apiFetch<ApiEnvelope<ApiProjectPlan>>(
+        `/api/projects/${projectId}/plan/approve`,
+        sessionId.get(),
+        {
+          method: 'POST',
+          body: JSON.stringify({ change_ids: changeIds }),
+        }
+      );
+      return mapPlan(response.data, projectId);
+    },
+    onMutate: async (changeIds) => {
+      await queryClient.cancelQueries({ queryKey: projectPendingProposalQueryKey(projectId) });
+      await queryClient.cancelQueries({ queryKey: projectPlanQueryKey(projectId) });
+      const previousProposal = queryClient.getQueryData<PendingProposalView>(projectPendingProposalQueryKey(projectId));
+      const previousPlan = queryClient.getQueryData<StructuredPlan>(projectPlanQueryKey(projectId));
+      const acceptedChanges = previousProposal?.changes.filter((change) => changeIds.includes(change.id)) || [];
+
+      if (previousProposal) {
+        const selectedIds = new Set(changeIds);
+        updateCachedProposal(queryClient, projectId, (proposal) => ({
+          ...proposal,
+          changes: proposal.changes.filter((change) => !selectedIds.has(change.id)),
+        }));
+      }
+
+      if (previousPlan && acceptedChanges.length > 0) {
+        updateCachedPlan(queryClient, projectId, (plan) =>
+          acceptedChanges.reduce((nextPlan, change) => applyAcceptedProposalChange(nextPlan, change), plan)
+        );
+      }
+
+      return { previousPlan, previousProposal };
+    },
+    onError: (_error, _variables, context) => {
+      rollbackOptimisticPlanUpdate(queryClient, projectId, context);
+      rollbackOptimisticProposalUpdate(queryClient, projectId, context);
+    },
+    onSuccess: (plan) => {
+      reconcileOptimisticPlanUpdate(queryClient, projectId, plan);
+      void queryClient.invalidateQueries({ queryKey: projectPendingProposalQueryKey(projectId) });
+      void queryClient.invalidateQueries({ queryKey: ['project-ai-activity', projectId] });
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: projectPlanQueryKey(projectId) });

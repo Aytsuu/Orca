@@ -5,6 +5,7 @@ import {
   addOptimisticPhase,
   addOptimisticRisk,
   addOptimisticTask,
+  applyAcceptedProposalChange,
   applyPhasePatch,
   applyPlanMetaPatch,
   applyRiskPatch,
@@ -179,5 +180,77 @@ describe('projectPlan optimistic helpers', () => {
 
     expect(updated.phases[0].gaps).toEqual([]);
     expect(plan.phases[0].gaps).toHaveLength(1);
+  });
+
+  it('optimistically applies accepted proposal meta changes', () => {
+    const plan = createPlanFixture();
+
+    const updatedObjectives = applyAcceptedProposalChange(plan, {
+      id: 'change_1',
+      action: 'update',
+      section: 'objectives',
+      targetId: '',
+      title: 'Updated objectives',
+      detail: '',
+      sourceQuote: '',
+      content: ['Expand into bakery'],
+    });
+    const updatedDescription = applyAcceptedProposalChange(plan, {
+      id: 'change_2',
+      action: 'update',
+      section: 'description',
+      targetId: '',
+      title: 'Updated description',
+      detail: '',
+      sourceQuote: '',
+      content: 'New project description',
+    });
+
+    expect(updatedObjectives.objectives).toEqual(['Expand into bakery']);
+    expect(updatedDescription.description).toBe('New project description');
+  });
+
+  it('optimistically applies accepted proposal structural changes', () => {
+    const plan = createPlanFixture();
+
+    const phaseAdded = applyAcceptedProposalChange(plan, {
+      id: 'change_3',
+      action: 'add',
+      section: 'phases',
+      targetId: '',
+      title: 'Phase 2',
+      detail: '',
+      sourceQuote: '',
+      content: [{ title: 'Phase 2', goal: 'Scale', timeframe: 'Week 2' }],
+    });
+
+    const taskAdded = applyAcceptedProposalChange(plan, {
+      id: 'change_4',
+      action: 'add',
+      section: 'tasks',
+      targetId: 'phase_1',
+      title: 'New task',
+      detail: '',
+      sourceQuote: '',
+      content: [{ title: 'New task', owner: 'Sam', priority: 'high' }],
+    });
+
+    const riskAdded = applyAcceptedProposalChange(plan, {
+      id: 'change_5',
+      action: 'add',
+      section: 'global_risks',
+      targetId: '',
+      title: 'Supply risk',
+      detail: '',
+      sourceQuote: '',
+      content: [{ title: 'Supply risk', severity: 'major' }],
+    });
+
+    expect(phaseAdded.phases).toHaveLength(2);
+    expect(phaseAdded.phases[1]).toMatchObject({ title: 'Phase 2', goal: 'Scale' });
+    expect(taskAdded.phases[0].tasks).toHaveLength(2);
+    expect(taskAdded.phases[0].tasks[1]).toMatchObject({ title: 'New task', owner: 'Sam' });
+    expect(riskAdded.globalRisks).toHaveLength(2);
+    expect(riskAdded.globalRisks[1]).toMatchObject({ description: 'Supply risk', severity: 'major' });
   });
 });

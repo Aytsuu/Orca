@@ -32,3 +32,23 @@ class AgentArtifactOut(ApiModel):
     agent: AgentName
     payload: dict
     created_at: datetime
+
+
+ActivityKind = Literal["proposal_change", "gap", "risk", "insight"]
+
+
+class AgentActivityItemOut(ApiModel):
+    id: str
+    artifact_id: UUID
+    agent: AgentName
+    kind: ActivityKind
+    title: str
+    detail: str = ""
+    actionable: bool = False
+    proposal_change: dict[str, Any] | None = None
+    created_at: datetime
+
+
+class AgentActivityPromoteOut(ApiModel):
+    proposal_id: UUID
+    change_ids: list[str]

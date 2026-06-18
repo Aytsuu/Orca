@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from src.exceptions import InvalidOutputError
 
@@ -25,6 +26,38 @@ def validate_source_message_ids(valid_ids: Iterable[str], cited_ids: Iterable[st
     invalid = [message_id for message_id in cited_ids if message_id not in valid]
     if invalid:
         raise InvalidOutputError(f"Output cited unknown source_message_ids: {invalid}")
+
+
+def collect_context_source_message_ids(
+    *,
+    messages: list[dict[str, Any]],
+    memory: list[dict[str, Any]],
+    summaries: list[dict[str, Any]],
+    current_plan: dict[str, Any] | None,
+) -> set[str]:
+    valid_ids = {str(message["id"]) for message in messages if message.get("id")}
+    valid_ids.update(_extract_source_message_ids(memory))
+    valid_ids.update(_extract_source_message_ids(summaries))
+    valid_ids.update(_extract_source_message_ids(current_plan))
+    return valid_ids
+
+
+def _extract_source_message_ids(payload: Any) -> set[str]:
+    collected: set[str] = set()
+
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key in {"source_message_ids", "sourceMessageIds"} and isinstance(value, list):
+                collected.update(str(item) for item in value if item)
+                continue
+            collected.update(_extract_source_message_ids(value))
+        return collected
+
+    if isinstance(payload, list):
+        for item in payload:
+            collected.update(_extract_source_message_ids(item))
+
+    return collected
 
 
 def ensure_remove_actions_are_explicit(changes: list[dict], messages: list[dict]) -> None:

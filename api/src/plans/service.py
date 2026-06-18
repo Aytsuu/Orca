@@ -104,6 +104,29 @@ def _normalize_risk(risk: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _normalize_proposal_change(change: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(change)
+    section = str(normalized.get("section") or "")
+    target_id = normalized.get("targetId") or normalized.get("target_id")
+    parts = section.split(".")
+
+    if len(parts) >= 3 and parts[0] == "phases":
+        phase_id = parts[1]
+        nested_section = parts[2]
+        if nested_section in {"tasks", "gaps"}:
+            normalized["section"] = nested_section
+            if target_id is None:
+                if normalized.get("action") == "add":
+                    target_id = phase_id
+                elif len(parts) >= 4:
+                    target_id = parts[3]
+
+    if target_id is not None:
+        normalized["targetId"] = target_id
+
+    return normalized
+
+
 def normalize_plan_content(content: dict[str, Any] | None) -> dict[str, Any]:
     raw = deepcopy(content or {})
     normalized = _empty_plan_content()
@@ -218,9 +241,10 @@ def _has_structured_shape(content: dict[str, Any] | None) -> bool:
 
 
 def _target_exists(content: dict[str, Any], change: dict[str, Any]) -> bool:
-    section = change.get("section")
-    action = change.get("action")
-    target_id = change.get("targetId") or change.get("target_id")
+    normalized_change = _normalize_proposal_change(change)
+    section = normalized_change.get("section")
+    action = normalized_change.get("action")
+    target_id = normalized_change.get("targetId") or normalized_change.get("target_id")
 
     if not target_id:
         return True
@@ -274,10 +298,11 @@ def _target_exists(content: dict[str, Any], change: dict[str, Any]) -> bool:
 
 def _apply_structured_change(content: dict[str, Any], change: dict[str, Any]) -> dict[str, Any]:
     current = normalize_plan_content(content)
-    section = change.get("section")
-    action = change.get("action")
-    target_id = change.get("targetId") or change.get("target_id")
-    value = deepcopy(change.get("content"))
+    normalized_change = _normalize_proposal_change(change)
+    section = normalized_change.get("section")
+    action = normalized_change.get("action")
+    target_id = normalized_change.get("targetId") or normalized_change.get("target_id")
+    value = deepcopy(normalized_change.get("content"))
 
     if section == "tasks":
         if action == "add":
@@ -351,7 +376,7 @@ def _apply_structured_change(content: dict[str, Any], change: dict[str, Any]) ->
             ]
             return current
 
-    return _legacy_merge_change(current, change)
+    return _legacy_merge_change(current, normalized_change)
 
 
 async def get_current_plan(supabase: AsyncClient, project_id: str) -> dict[str, Any] | None:
@@ -509,7 +534,8 @@ async def _proposal_conflicts(
         return []
     conflicts: list[str] = []
     for change in proposal.get("changes", []):
-        target_id = change.get("targetId") or change.get("target_id")
+        normalized_change = _normalize_proposal_change(change)
+        target_id = normalized_change.get("targetId") or normalized_change.get("target_id")
         if target_id and target_id in target_ids:
             conflicts.append(change["id"])
     return conflicts
@@ -522,7 +548,7 @@ def _resolve_selected_changes(
     change_ids: list[str] | None,
 ) -> list[dict[str, Any]]:
     changes = [
-        {**change, "id": change.get("id", f"legacy-change-{index}")}
+        _normalize_proposal_change({**change, "id": change.get("id", f"legacy-change-{index}")})
         for index, change in enumerate(list(proposal["changes"]))
     ]
     proposal["changes"] = changes

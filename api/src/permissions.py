@@ -4,7 +4,7 @@ from src.exceptions import Forbidden
 
 
 def require_approver_membership(membership: dict) -> None:
-    if not membership["can_approve"]:
+    if not membership["can_approve"] and membership["role"] != "creator":
         raise Forbidden("Approval permission is required.")
 
 

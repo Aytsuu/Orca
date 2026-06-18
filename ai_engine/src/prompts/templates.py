@@ -38,6 +38,21 @@ Review the following proposed plan changes and verify:
 3. The changes are not destructive beyond supported evidence.
 4. Confidence levels match the evidence strength.
 
+Judge confidence from the evidence structure, not from rhetorical wording alone.
+Do not treat phrases such as "directly reflects", "directly addresses", "clearly", or
+similar strong wording as sufficient reason to fail a change when the cited evidence and
+confidence level are otherwise compatible.
+
+Use this rubric:
+- high: multiple consistent citations, or a single explicit and unambiguous instruction
+  that fully supports the change
+- medium: a single citation with reasonable support, or several citations that support the
+  change but still leave some interpretation
+- low: indirect, weak, incomplete, or ambiguous support
+
+Only mark a confidence mismatch when the cited evidence itself is materially stronger or
+weaker than the assigned confidence level.
+
 Return JSON only.
 
 Proposed changes:

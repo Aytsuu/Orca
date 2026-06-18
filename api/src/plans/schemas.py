@@ -4,13 +4,23 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from src.models import ApiModel
 
 ProposalStatus = Literal["pending", "approved", "rejected", "applied", "superseded"]
 ChangeAction = Literal["add", "update", "remove"]
-ChangeSection = Literal["tasks", "phases", "gaps", "risks"]
+ChangeSection = Literal[
+    "title",
+    "description",
+    "objectives",
+    "stakeholders",
+    "tasks",
+    "phases",
+    "gaps",
+    "risks",
+    "global_risks",
+]
 ChangeState = Literal["pending", "applied", "rejected", "stale"]
 Priority = Literal["critical", "high", "medium", "low"]
 Severity = Literal["critical", "major", "minor"]
@@ -105,7 +115,74 @@ class ProposedChangeOut(ApiModel):
         serialization_alias="sourceQuote",
     )
     state: ChangeState | None = None
+    justification: str | None = None
+    source_message_ids: list[str] = Field(default_factory=list)
     content: Any | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _populate_display_fields(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        normalized = cls._normalize_section_reference(dict(value))
+        content = normalized.get("content")
+
+        if not normalized.get("title"):
+            normalized["title"] = cls._derive_title(content, normalized.get("section"), normalized.get("action"))
+
+        if not normalized.get("detail"):
+            normalized["detail"] = normalized.get("justification") or ""
+
+        return normalized
+
+    @classmethod
+    def _normalize_section_reference(cls, value: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(value)
+        section = str(normalized.get("section") or "")
+        target_id = normalized.get("targetId") or normalized.get("target_id")
+        parts = section.split(".")
+
+        if len(parts) >= 3 and parts[0] == "phases":
+            phase_id = parts[1]
+            nested_section = parts[2]
+            if nested_section in {"tasks", "gaps"}:
+                normalized["section"] = nested_section
+                if target_id is None:
+                    if normalized.get("action") == "add":
+                        target_id = phase_id
+                    elif len(parts) >= 4:
+                        target_id = parts[3]
+
+        if target_id is not None:
+            normalized["targetId"] = target_id
+
+        return normalized
+
+    @classmethod
+    def _derive_title(cls, content: Any, section: str | None, action: str | None) -> str:
+        if isinstance(content, str):
+            return content
+
+        if isinstance(content, list) and content:
+            first = content[0]
+            if isinstance(first, str):
+                return first
+            if isinstance(first, dict):
+                for key in ("title", "name", "description", "detail", "value", "role"):
+                    derived = first.get(key)
+                    if isinstance(derived, str) and derived.strip():
+                        return derived
+
+        if isinstance(content, dict):
+            for key in ("title", "name", "description", "detail", "value", "role"):
+                derived = content.get(key)
+                if isinstance(derived, str) and derived.strip():
+                    return derived
+
+        normalized_section = (section or "change").replace("_", " ")
+        normalized_action = (action or "update").capitalize()
+        return f"{normalized_action} {normalized_section}"
 
 
 class ProposalOut(ApiModel):

@@ -182,12 +182,25 @@ export interface StructuredPlan {
 export interface ProposedChange {
   id: string;
   action: 'add' | 'update' | 'remove';
-  section: 'tasks' | 'phases' | 'gaps' | 'risks';
+  section:
+    | 'title'
+    | 'description'
+    | 'objectives'
+    | 'stakeholders'
+    | 'tasks'
+    | 'phases'
+    | 'gaps'
+    | 'risks'
+    | 'global_risks';
   targetId: string;
   title: string;
   detail: string;
   confidence?: 'high' | 'medium' | 'low';
   sourceQuote: string;
+  state?: 'pending' | 'applied' | 'rejected' | 'stale';
+  justification?: string;
+  sourceMessageIds?: string[];
+  content?: unknown;
 }
 
 export interface ApiPlanAttachment {

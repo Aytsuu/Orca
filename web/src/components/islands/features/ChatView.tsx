@@ -30,6 +30,11 @@ import {
   useProjectWorkspace
 } from '../../../lib/query/projectWorkspace';
 import {
+  useProjectAiActivity,
+  usePromoteAiActivityItem,
+  usePromoteAllAiActivity,
+} from '../../../lib/query/projectAiActivity';
+import {
   useProjectMessages,
   useSendProjectMessage,
 } from '../../../lib/query/projectMessages';
@@ -68,6 +73,9 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     isLoading: isFilesLoading,
     error: filesError,
   } = useProjectFiles(projectId);
+  const { data: aiActivity } = useProjectAiActivity(projectId);
+  const promoteAiActivityItemMutation = usePromoteAiActivityItem(projectId);
+  const promoteAllAiActivityMutation = usePromoteAllAiActivity(projectId);
   const sendMessageMutation = useSendProjectMessage(projectId);
   const uploadFileMutation = useUploadProjectFile(projectId);
   const currentSessionId = sessionId.get();
@@ -81,10 +89,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const [visibleSuggestionId, setVisibleSuggestionId] = useState<string | null>(null);
 
   const [showTabletFiles, setShowTabletFiles] = useState(false);
-
-  // Edit suggestion state
-  const [editingSugId, setEditingSugId] = useState<string | null>(null);
-  const [editingText, setEditingText] = useState('');
+  const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<string[]>([]);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -95,37 +100,6 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     type: string;
     uploadedAt: string;
   }>>([]);
-
-  const [agentStatus, setAgentStatus] = useState<Record<string, 'active' | 'idle' | 'complete' | 'error'>>({
-    MONITOR: 'idle',
-    ANALYZER: 'idle',
-    PLANNER: 'idle',
-    UPDATER: 'idle',
-  });
-
-  const [panelSuggestions, setPanelSuggestions] = useState<Array<{
-    id: string;
-    type: 'SUGGESTION' | 'GAP' | 'TASK' | 'INSIGHT';
-    content: string;
-  }>>([]);
-
-  // Initialize non-chat mock state when projectId changes
-  useEffect(() => {
-    setAgentStatus({
-      MONITOR: 'idle',
-      ANALYZER: 'idle',
-      PLANNER: 'idle',
-      UPDATER: 'idle',
-    });
-
-    setPanelSuggestions([
-      {
-        id: 'ps_1',
-        type: 'INSIGHT',
-        content: 'No critical path bottlenecks detected.'
-      }
-    ]);
-  }, [projectId]);
 
   useEffect(() => {
     if (projectFiles) {
@@ -145,6 +119,21 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
       setFiles([]);
     }
   }, [projectFiles, isFilesLoading, filesError]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const stored = window.localStorage.getItem(`orca_ai_activity_dismissed_${projectId}`);
+    if (!stored) {
+      setDismissedSuggestionIds([]);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(stored);
+      setDismissedSuggestionIds(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []);
+    } catch {
+      setDismissedSuggestionIds([]);
+    }
+  }, [projectId]);
 
   const isInitialLoad = useRef(true);
 
@@ -255,27 +244,55 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     }
   };
 
-  const handleApproveProposal = (sugId: string) => {
-    setPanelSuggestions(prev =>
-      prev.map(msg =>
-        msg.id === `ps_${sugId}`
-          ? { ...msg, content: `${msg.content} (approved)` }
-          : msg
-      )
-    );
-    addToast('success', 'Plan change approved and applied.');
+  const persistDismissedSuggestionIds = (nextIds: string[]) => {
+    setDismissedSuggestionIds(nextIds);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(`orca_ai_activity_dismissed_${projectId}`, JSON.stringify(nextIds));
+    }
   };
 
-  const handleRejectProposal = (sugId: string) => {
-    setPanelSuggestions(prev =>
-      prev.map(msg =>
-        msg.id === `ps_${sugId}`
-          ? { ...msg, content: `${msg.content} (rejected)` }
-          : msg
-      )
-    );
-    addToast('warning', 'Plan change rejected.');
+  const handleDismissSuggestion = (suggestionId: string) => {
+    if (dismissedSuggestionIds.includes(suggestionId)) return;
+    persistDismissedSuggestionIds([...dismissedSuggestionIds, suggestionId]);
+    addToast('success', 'Suggestion dismissed.');
   };
+
+  const handleKeepSuggestionForNow = (suggestionId: string) => {
+    if (visibleSuggestionId === suggestionId) {
+      setVisibleSuggestionId(null);
+    }
+    addToast('info', 'Suggestion kept for now.');
+  };
+
+  const handlePromoteSuggestion = async (suggestionId: string) => {
+    try {
+      await promoteAiActivityItemMutation.mutateAsync(suggestionId);
+      addToast('success', 'Suggestion moved to pending changes.');
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Unable to send suggestion to review.');
+    }
+  };
+
+  const handlePromoteAllSuggestions = async () => {
+    try {
+      const result = await promoteAllAiActivityMutation.mutateAsync();
+      addToast('success', `${result.change_ids.length} suggestion${result.change_ids.length === 1 ? '' : 's'} moved to pending changes.`);
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Unable to send suggestions to review.');
+    }
+  };
+
+  const agentStatus = aiActivity?.agentStatus || {
+    MONITOR: 'idle',
+    ANALYZER: 'idle',
+    PLANNER: 'idle',
+    UPDATER: 'idle',
+  };
+  const recentOrcaActivity = aiActivity?.recentActivity || null;
+  const panelSuggestions = (aiActivity?.suggestions || []).filter(
+    (suggestion) => !dismissedSuggestionIds.includes(suggestion.id)
+  );
+  const actionableSuggestionCount = panelSuggestions.filter((suggestion) => suggestion.actionable).length;
 
   const renderedMessages = (projectMessages ?? []).map((message) => {
     const teammate = detail.teammates.find((member) => member.sessionId === message.sessionId);
@@ -513,10 +530,10 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
         className={`w-full lg:w-[28%] lg:min-w-[300px] lg:max-w-[380px] border-l border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface p-6 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'ai' ? 'flex absolute inset-0 z-10' : 'hidden'
           }`}
       >
-        <span className="section-label">AI Activity</span>
+        <span className="section-label shrink-0">AI Activity</span>
 
         {/* Agents statuses */}
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 shrink-0">
           <span className="text-xs font-bold text-text-primary tracking-wider uppercase">ORCAS</span>
 
           <div className="relative flex items-center justify-between px-6 py-4 bg-background/50 rounded-xl border border-border-subtle">
@@ -530,15 +547,12 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
 
               const IconComponent = agentInfo.icon;
               const isActive = status === 'active';
-              const isComplete = status === 'complete';
               const isError = status === 'error';
 
               let iconContainerClass = '';
 
               if (isActive) {
                 iconContainerClass = 'border-primary text-primary bg-primary/15 shadow-sm shadow-primary-glow/20';
-              } else if (isComplete) {
-                iconContainerClass = 'border-success/50 text-success bg-success/10';
               } else if (isError) {
                 iconContainerClass = 'border-error/50 text-error bg-error/10';
               } else {
@@ -553,7 +567,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
                       <span className="font-semibold text-text-primary">{agentInfo.name}</span>
                       <span className="mx-1 text-text-muted">•</span>
                       <span className={`uppercase text-[9px] font-bold ${
-                        isActive ? 'text-primary animate-pulse' : isComplete ? 'text-success' : isError ? 'text-error' : 'text-text-muted'
+                        isActive ? 'text-primary animate-pulse' : isError ? 'text-error' : 'text-text-muted'
                       }`}>{status}</span>
                     </div>
                     <div className="w-1.5 h-1.5 bg-surface-raised border-r border-b border-border-subtle transform rotate-45 -mt-1" />
@@ -584,14 +598,33 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
               );
             })}
           </div>
+          {recentOrcaActivity && (
+            <div className="px-1 text-[11px] text-text-muted leading-relaxed select-text">
+              {recentOrcaActivity}
+            </div>
+          )}
         </div>
 
-        <div className="border-t border-border-subtle pt-4 flex flex-col gap-3">
-          <span className="text-xs font-bold text-text-primary tracking-wider uppercase">SUGGESTIONS</span>
+        <div className="border-t border-border-subtle pt-4 flex flex-col gap-3 flex-1 min-h-0 overflow-hidden">
+          <div className="flex items-center justify-between gap-3 shrink-0">
+            <span className="text-xs font-bold text-text-primary tracking-wider uppercase">SUGGESTIONS</span>
+            {actionableSuggestionCount > 1 && (
+              <button
+                type="button"
+                onClick={() => {
+                  void handlePromoteAllSuggestions();
+                }}
+                disabled={promoteAllAiActivityMutation.isPending}
+                className="text-[10px] font-bold text-primary hover:text-primary-hover disabled:opacity-50"
+              >
+                {promoteAllAiActivityMutation.isPending ? 'Sending...' : `Send All (${actionableSuggestionCount})`}
+              </button>
+            )}
+          </div>
 
-          <div className="flex-grow overflow-y-auto flex flex-col gap-3 max-h-[350px]">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-3 pr-1 pb-6">
             {panelSuggestions.map((sug) => {
-              const chatSugId = sug.id === 'ps_2' ? 'sug_1' : (sug.id.startsWith('ps_ch_') ? sug.id.replace('ps_', '') : sug.id);
+              const chatSugId = sug.id;
               const isVisible = visibleSuggestionId === chatSugId;
               let iconNode = <Zap className="w-3.5 h-3.5 text-primary shrink-0" />;
               let color = 'text-primary';
@@ -610,7 +643,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
               return (
                 <div
                   key={sug.id}
-                  className="bg-background/50 border border-border-subtle rounded-xl p-4 flex flex-col gap-2 transition-all"
+                  className="bg-background/50 border border-border-subtle rounded-xl p-4 flex flex-col gap-2 transition-all min-w-0 shrink-0"
                 >
                   <div className="flex justify-between items-center text-xs font-bold">
                     <div className="flex items-center gap-1.5">
@@ -642,14 +675,35 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
                       {sug.content}
                     </p>
                   )}
-                  <div className="flex justify-end mt-1">
-                    <a
-                      href={`/project/${projectId}/plan`}
-                      className="btn-ghost p-0 text-[10px] font-bold text-primary hover:bg-transparent flex items-center gap-1"
-                    >
-                      <span>Go to Plan</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </a>
+                  <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {sug.actionable && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handlePromoteSuggestion(sug.id);
+                          }}
+                          disabled={promoteAiActivityItemMutation.isPending}
+                          className="text-[10px] font-bold text-primary hover:text-primary-hover disabled:opacity-50"
+                        >
+                          {promoteAiActivityItemMutation.isPending ? 'Sending...' : (sug.actionLabel || 'Send to review')}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleKeepSuggestionForNow(chatSugId)}
+                        className="text-[10px] font-bold text-text-muted hover:text-text-primary"
+                      >
+                        Keep
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDismissSuggestion(sug.id)}
+                        className="text-[10px] font-bold text-text-muted hover:text-error"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
                   </div>
                 </div>
               );

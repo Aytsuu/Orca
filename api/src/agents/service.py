@@ -7,6 +7,7 @@ from supabase import AsyncClient
 
 from src.agents.queue import QueueProducer
 from src.config import get_settings
+from src.exceptions import NotFound
 
 AGENT_NAMES = ("monitor", "analyzer", "planner", "updater")
 ACTIVE_RUN_STATUSES = {"queued", "running"}
@@ -245,3 +246,211 @@ async def get_latest_run_artifacts(supabase: AsyncClient, project_id: str) -> li
         .execute()
     ).data
     return artifacts
+
+
+async def _get_pending_proposal(supabase: AsyncClient, project_id: str) -> dict[str, Any] | None:
+    rows = (
+        await supabase.table("plan_proposal")
+        .select("*")
+        .eq("project_id", project_id)
+        .eq("status", "pending")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    ).data
+    return rows[0] if rows else None
+
+
+def _derive_change_title(change: dict[str, Any]) -> str:
+    content = change.get("content")
+    if isinstance(content, str) and content.strip():
+        return content
+    if isinstance(content, list) and content:
+        first = content[0]
+        if isinstance(first, str) and first.strip():
+            return first
+        if isinstance(first, dict):
+            for key in ("title", "name", "description", "detail", "value", "role"):
+                derived = first.get(key)
+                if isinstance(derived, str) and derived.strip():
+                    return derived
+    return str(change.get("title") or f'{change.get("action", "update")} {change.get("section", "change")}')
+
+
+def _normalize_change(change: dict[str, Any], index: int) -> dict[str, Any]:
+    normalized = dict(change)
+    normalized["id"] = str(normalized.get("id") or f"planner-change-{index}")
+    normalized.setdefault("title", _derive_change_title(normalized))
+    normalized.setdefault("detail", normalized.get("justification") or "")
+    return normalized
+
+
+async def append_plan_proposal_changes(
+    supabase: AsyncClient,
+    *,
+    project_id: str,
+    changes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    pending = await _get_pending_proposal(supabase, project_id)
+    normalized_changes = [_normalize_change(change, index) for index, change in enumerate(changes)]
+    if pending:
+        existing_changes = [
+            _normalize_change(change, index) for index, change in enumerate(list(pending.get("changes") or []))
+        ]
+        existing_ids = {change["id"] for change in existing_changes}
+        merged = existing_changes + [change for change in normalized_changes if change["id"] not in existing_ids]
+        updated = (
+            await supabase.table("plan_proposal")
+            .update({"changes": merged})
+            .eq("id", pending["id"])
+            .execute()
+        ).data[0]
+        return updated
+
+    created = (
+        await supabase.table("plan_proposal")
+        .insert({"project_id": project_id, "status": "pending", "changes": normalized_changes})
+        .execute()
+    ).data[0]
+    return created
+
+
+async def get_agent_activity(supabase: AsyncClient, project_id: str) -> list[dict[str, Any]]:
+    artifacts = await get_latest_run_artifacts(supabase, project_id)
+    pending = await _get_pending_proposal(supabase, project_id)
+    pending_change_ids = {
+        str(change.get("id"))
+        for change in list((pending or {}).get("changes") or [])
+        if change.get("id") is not None
+    }
+
+    items: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        payload = artifact.get("payload") or {}
+        created_at = artifact["created_at"]
+        if artifact["agent"] == "planner":
+            for index, change in enumerate(list(payload.get("changes") or [])):
+                normalized_change = _normalize_change(change, index)
+                if normalized_change["id"] in pending_change_ids:
+                    continue
+                items.append(
+                    {
+                        "id": f'planner-change:{artifact["id"]}:{normalized_change["id"]}',
+                        "artifact_id": artifact["id"],
+                        "agent": "planner",
+                        "kind": "proposal_change",
+                        "title": normalized_change["title"],
+                        "detail": normalized_change.get("detail") or "",
+                        "actionable": True,
+                        "proposal_change": normalized_change,
+                        "created_at": created_at,
+                    }
+                )
+            if payload.get("summary"):
+                items.append(
+                    {
+                        "id": f'planner-summary:{artifact["id"]}',
+                        "artifact_id": artifact["id"],
+                        "agent": "planner",
+                        "kind": "insight",
+                        "title": "Planner summary",
+                        "detail": str(payload["summary"]),
+                        "actionable": False,
+                        "proposal_change": None,
+                        "created_at": created_at,
+                    }
+                )
+        elif artifact["agent"] == "analyzer":
+            for gap in list(payload.get("gaps") or []):
+                items.append(
+                    {
+                        "id": f'gap:{artifact["id"]}:{gap.get("title", len(items))}',
+                        "artifact_id": artifact["id"],
+                        "agent": "analyzer",
+                        "kind": "gap",
+                        "title": str(gap.get("title") or "Gap"),
+                        "detail": str(gap.get("detail") or ""),
+                        "actionable": False,
+                        "proposal_change": None,
+                        "created_at": created_at,
+                    }
+                )
+            for risk in list(payload.get("risks") or []):
+                items.append(
+                    {
+                        "id": f'risk:{artifact["id"]}:{risk.get("title", len(items))}',
+                        "artifact_id": artifact["id"],
+                        "agent": "analyzer",
+                        "kind": "risk",
+                        "title": str(risk.get("title") or "Risk"),
+                        "detail": str(risk.get("detail") or ""),
+                        "actionable": False,
+                        "proposal_change": None,
+                        "created_at": created_at,
+                    }
+                )
+            for index, suggestion in enumerate(list(payload.get("panel_suggestions") or [])):
+                items.append(
+                    {
+                        "id": f'panel:{artifact["id"]}:{index}',
+                        "artifact_id": artifact["id"],
+                        "agent": "analyzer",
+                        "kind": "insight",
+                        "title": "Analyzer insight",
+                        "detail": str(suggestion),
+                        "actionable": False,
+                        "proposal_change": None,
+                        "created_at": created_at,
+                    }
+                )
+        elif artifact["agent"] == "monitor" and payload.get("summary_candidate"):
+            items.append(
+                {
+                    "id": f'monitor-summary:{artifact["id"]}',
+                    "artifact_id": artifact["id"],
+                    "agent": "monitor",
+                    "kind": "insight",
+                    "title": "Monitor summary",
+                    "detail": str(payload["summary_candidate"]),
+                    "actionable": False,
+                    "proposal_change": None,
+                    "created_at": created_at,
+                }
+            )
+
+    return items
+
+
+async def promote_activity_item(
+    supabase: AsyncClient,
+    *,
+    project_id: str,
+    item_id: str,
+) -> dict[str, Any]:
+    activity_items = await get_agent_activity(supabase, project_id)
+    item = next((candidate for candidate in activity_items if candidate["id"] == item_id), None)
+    if not item or not item.get("actionable") or not item.get("proposal_change"):
+        raise NotFound("The requested activity item was not found.")
+    proposal = await append_plan_proposal_changes(
+        supabase,
+        project_id=project_id,
+        changes=[item["proposal_change"]],
+    )
+    change_id = str(item["proposal_change"]["id"])
+    return {"proposal_id": proposal["id"], "change_ids": [change_id]}
+
+
+async def promote_all_actionable_activity(
+    supabase: AsyncClient,
+    *,
+    project_id: str,
+) -> dict[str, Any]:
+    activity_items = await get_agent_activity(supabase, project_id)
+    changes = [item["proposal_change"] for item in activity_items if item.get("actionable") and item.get("proposal_change")]
+    if not changes:
+        raise NotFound("There are no actionable activity items to send for review.")
+    proposal = await append_plan_proposal_changes(supabase, project_id=project_id, changes=changes)
+    return {
+        "proposal_id": proposal["id"],
+        "change_ids": [str(change["id"]) for change in changes],
+    }

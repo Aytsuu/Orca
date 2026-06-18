@@ -10,14 +10,8 @@ import {
   MoreHorizontal,
   FileText,
   ExternalLink,
-  ChevronDown,
-  ChevronUp,
-  AlertCircle,
-  HelpCircle,
   Sparkles,
-  Upload,
-  User,
-  Activity
+  Upload
 } from 'lucide-react';
 import { useStore } from '@nanostores/react';
 import {
@@ -40,7 +34,11 @@ import type {
 } from '../../../stores/projectStore';
 import {
   useProjectPlan,
+  usePendingProjectProposal,
   useUpdateProjectPlan,
+  useAcceptProjectProposalChange,
+  useRejectProjectProposalChange,
+  useApproveProjectProposal,
   useCreateProjectPhase,
   useUpdateProjectPhase,
   useDeleteProjectPhase,
@@ -106,12 +104,16 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
 
   // Query plan data and versions
   const { data: activePlan, isLoading: isPlanLoading } = useProjectPlan(projectId);
+  const { data: pendingProposal } = usePendingProjectProposal(projectId);
 
   // Derived properties
   const showReviewPanel = isApprover;
 
   // Mutations
   const updateProjectPlanMutation = useUpdateProjectPlan(projectId);
+  const acceptProjectProposalChangeMutation = useAcceptProjectProposalChange(projectId);
+  const rejectProjectProposalChangeMutation = useRejectProjectProposalChange(projectId);
+  const approveProjectProposalMutation = useApproveProjectProposal(projectId);
   const createProjectPhaseMutation = useCreateProjectPhase(projectId);
   const updateProjectPhaseMutation = useUpdateProjectPhase(projectId);
   const deleteProjectPhaseMutation = useDeleteProjectPhase(projectId);
@@ -124,7 +126,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
   const dismissProjectGapMutation = useDismissProjectGap(projectId);
 
   // Local UI States
-  const [pendingChanges] = useState<ProposedChange[]>(INITIAL_CHANGES);
   const [deletePhaseTarget, setDeletePhaseTarget] = useState<{ id: string; title: string; count: number } | null>(null);
 
   // UI Interactive States
@@ -192,6 +193,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     activePlan.stakeholders.length === 0 &&
     activePlan.phases.length === 0 &&
     activePlan.globalRisks.length === 0;
+  const pendingChanges: ProposedChange[] = pendingProposal?.changes || [];
 
   const persistPlanMeta = async (
     nextValues: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives' | 'stakeholders'>>,
@@ -257,14 +259,30 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
   };
 
   // --- Handlers for Review Panel Action ---
-  const applyChangeState = (changeId: string, accept: boolean) => {
+  const applyChangeState = async (changeId: string, accept: boolean) => {
     const change = pendingChanges.find(c => c.id === changeId);
     if (!change) return;
-    addToast('info', `Pending changes are static for now. "${change.title}" is not wired yet.`);
+    try {
+      if (accept) {
+        await acceptProjectProposalChangeMutation.mutateAsync(changeId);
+        addToast('success', `"${change.title}" accepted.`);
+      } else {
+        await rejectProjectProposalChangeMutation.mutateAsync(changeId);
+        addToast('success', `"${change.title}" rejected.`);
+      }
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to review change.');
+    }
   };
 
-  const handleAcceptAll = () => {
-    addToast('info', 'Pending changes review is a static reference only for now.');
+  const handleAcceptAll = async () => {
+    if (pendingChanges.length === 0) return;
+    try {
+      await approveProjectProposalMutation.mutateAsync(pendingChanges.map((change) => change.id));
+      addToast('success', 'All pending changes accepted.');
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to accept all changes.');
+    }
   };
 
   // --- Inline Edit Committing ---
@@ -636,6 +654,217 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     );
   };
 
+  const getChangesForSection = (...sections: ProposedChange['section'][]) =>
+    pendingChanges.filter((change) => sections.includes(change.section));
+
+  const getChangesForTarget = (sections: ProposedChange['section'][], targetId: string) =>
+    pendingChanges.filter((change) => sections.includes(change.section) && change.targetId === targetId);
+
+  const getAddedChangesForSection = (...sections: ProposedChange['section'][]) =>
+    pendingChanges.filter((change) => sections.includes(change.section) && change.action === 'add');
+
+  const getSectionActionLabel = (change: ProposedChange): string => {
+    if (change.action === 'add') return `Add ${change.section.replace('_', ' ')}`;
+    if (change.action === 'remove') return `Remove ${change.section.replace('_', ' ')}`;
+    return `Update ${change.section.replace('_', ' ')}`;
+  };
+
+  const getProposalCardClasses = (change: ProposedChange): string => {
+    if (change.action === 'remove') {
+      return 'border-error/20 bg-error/5';
+    }
+    if (change.action === 'add') {
+      return 'border-primary/20 bg-primary-muted/10';
+    }
+    return 'border-warning/20 bg-warning/5';
+  };
+
+  const getProposalLabelClasses = (change: ProposedChange): string => {
+    if (change.action === 'remove') return 'text-error';
+    if (change.action === 'add') return 'text-primary';
+    return 'text-warning';
+  };
+
+  const asArray = (value: unknown): Record<string, any>[] => {
+    if (Array.isArray(value)) {
+      return value.filter((item): item is Record<string, any> => typeof item === 'object' && item !== null);
+    }
+    if (typeof value === 'object' && value !== null) {
+      return [value as Record<string, any>];
+    }
+    return [];
+  };
+
+  const renderProposalCards = (
+    changes: ProposedChange[],
+    className = 'mt-3'
+  ) => {
+    if (changes.length === 0) return null;
+
+    return (
+      <div className={`flex flex-col gap-2 ${className}`}>
+        {changes.map((change) => (
+          <div
+            key={change.id}
+            className={`rounded-xl border p-3 transition-all ${getProposalCardClasses(change)}`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span className={`text-[10px] font-bold uppercase tracking-widest ${getProposalLabelClasses(change)}`}>
+                {getSectionActionLabel(change)}
+              </span>
+              {change.confidence && (
+                <span className="text-[10px] text-text-muted uppercase tracking-wider">
+                  {change.confidence}
+                </span>
+              )}
+            </div>
+            <div className="mt-1 text-xs font-semibold text-text-primary leading-snug">
+              {change.title}
+            </div>
+            {change.detail && (
+              <div className="mt-1 text-[11px] text-text-muted leading-relaxed">
+                {change.detail}
+              </div>
+            )}
+            {change.sourceQuote && (
+              <div className="mt-2 border-l border-border-subtle pl-2 text-[10px] italic text-text-muted leading-normal">
+                {change.sourceQuote}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderProposedTaskRows = (phaseId: string) => {
+    const proposedTaskChanges = getChangesForTarget(['tasks'], phaseId).filter((change) => change.action === 'add');
+    if (proposedTaskChanges.length === 0) return null;
+
+    return proposedTaskChanges.map((change) => {
+      const proposedTasks = asArray(change.content);
+      const fallbackTask = proposedTasks.length === 0 ? [{}] : proposedTasks;
+
+      return fallbackTask.map((task, index) => (
+        <div
+          key={`${change.id}-${index}`}
+          className="flex items-start gap-4 transition-all duration-200 p-2 -mx-2 rounded-xl border border-primary/15 bg-primary-muted/10"
+        >
+          <span className="font-mono text-xs text-text-muted mt-1 select-none w-6 text-right shrink-0">
+            ++
+          </span>
+          <div className="flex-grow min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="font-bold text-text-primary text-sm tracking-tight truncate max-w-full">
+                {String(task.title || change.title || 'Proposed task')}
+              </div>
+              <span className="category-badge badge--approver text-[9px] py-0.5 px-1.5 font-bold">
+                NEW
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-text-muted">
+              <span>Owner:</span>
+              <span className="font-semibold text-text-secondary">{String(task.owner || '—')}</span>
+              <span>·</span>
+              <span>Due:</span>
+              <span className="font-semibold text-text-secondary">{String(task.due || '—')}</span>
+              <span>·</span>
+              <span className="font-semibold text-text-secondary capitalize">{String(task.priority || 'medium')}</span>
+            </div>
+            {change.detail && (
+              <div className="mt-2 text-[11px] text-text-muted leading-relaxed">
+                {change.detail}
+              </div>
+            )}
+          </div>
+        </div>
+      ));
+    });
+  };
+
+  const renderProposedPhaseBlocks = () => {
+    const proposedPhaseChanges = getAddedChangesForSection('phases');
+    if (proposedPhaseChanges.length === 0) return null;
+
+    return proposedPhaseChanges.map((change) => {
+      const proposedPhases = asArray(change.content);
+      const fallbackPhases = proposedPhases.length === 0 ? [{}] : proposedPhases;
+
+      return fallbackPhases.map((phase, index) => (
+        <div key={`${change.id}-${index}`} className="flex flex-col gap-4 relative rounded-xl border border-primary/15 bg-primary-muted/10 p-5">
+          <div className="flex items-start justify-between">
+            <div className="flex-1 flex flex-col gap-1.5">
+              <div className="flex items-center gap-3">
+                <span className="text-lg font-bold text-text-primary tracking-tight">
+                  {String(phase.title || change.title || 'Proposed phase')}
+                </span>
+                {phase.timeframe && (
+                  <span className="category-badge badge--viewer text-[11px] py-0.5 px-2 font-semibold bg-surface-raised border border-border">
+                    {String(phase.timeframe)}
+                  </span>
+                )}
+                <span className="category-badge badge--approver text-[9px] py-0.5 px-1.5 font-bold">
+                  NEW
+                </span>
+              </div>
+              {(phase.goal || change.detail) && (
+                <span className="text-sm text-text-secondary italic">
+                  {String(phase.goal || change.detail)}
+                </span>
+              )}
+            </div>
+          </div>
+          {change.sourceQuote && (
+            <div className="border-l border-border-subtle pl-2 text-[10px] italic text-text-muted leading-normal">
+              {change.sourceQuote}
+            </div>
+          )}
+        </div>
+      ));
+    });
+  };
+
+  const renderProposedRiskRows = () => {
+    const proposedRiskChanges = getChangesForSection('risks', 'global_risks').filter((change) => change.action === 'add');
+    if (proposedRiskChanges.length === 0) return null;
+
+    return proposedRiskChanges.map((change) => {
+      const proposedRisks = asArray(change.content);
+      const fallbackRisks = proposedRisks.length === 0 ? [{}] : proposedRisks;
+
+      return fallbackRisks.map((risk, index) => (
+        <div
+          key={`${change.id}-${index}`}
+          className="group/risk flex flex-col gap-1.5 relative border-l border-primary/30 pl-4 py-0.5 bg-primary-muted/10 rounded-r-lg"
+        >
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full shrink-0 bg-warning" />
+            <span className="text-xs font-bold uppercase tracking-widest shrink-0 text-warning">
+              {String(risk.severity || 'proposed')}
+            </span>
+            <span className="category-badge badge--approver text-[9px] py-0.5 px-1.5 font-bold">
+              NEW
+            </span>
+          </div>
+          <div className="text-sm text-text-secondary leading-relaxed">
+            {String(risk.description || change.title || 'Proposed risk')}
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-text-muted select-text mt-1">
+            <span className="font-semibold select-none text-[11px] uppercase tracking-wider">Mitigation:</span>
+            <span className="italic text-text-secondary text-xs">
+              {String(risk.mitigation || 'No mitigation defined.')}
+            </span>
+          </div>
+          {change.detail && (
+            <div className="text-[11px] text-text-muted leading-relaxed">
+              {change.detail}
+            </div>
+          )}
+        </div>
+      ));
+    });
+  };
+
   return (
     <div className="flex-grow flex flex-col bg-background h-[calc(100vh-112px)] overflow-hidden font-body select-none">
 
@@ -677,10 +906,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
 
               {/* 3.1 Plan Header */}
               <div className="flex flex-col gap-3 select-text">
-                <span className="section-label uppercase tracking-widest text-text-muted text-xs">
-                  Project Plan
-                </span>
-
                 {renderEditableText(
                   activePlan.title,
                   'plan-title',
@@ -691,6 +916,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                   "text-display-sm font-bold text-text-primary tracking-tight md:text-3xl",
                   "Untitled project plan"
                 )}
+                {renderProposalCards(getChangesForSection('title'), 'mt-1')}
 
                 {renderEditableText(
                   activePlan.description,
@@ -702,6 +928,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                   "text-sm text-text-secondary leading-relaxed",
                   "Add a short project plan summary..."
                 )}
+                {renderProposalCards(getChangesForSection('description'), 'mt-1')}
 
                 {/* Meta chip row */}
                 <div className="flex flex-wrap gap-2 mt-2 select-none">
@@ -741,6 +968,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                     )}
                   </div>
                   <div className="flex flex-col gap-3 pl-1">
+                    {renderProposalCards(getChangesForSection('objectives'), 'mb-1')}
                     {activePlan.objectives.map((obj, idx) => (
                       <div key={idx} className="group/obj flex items-start gap-2.5">
                         <div className="flex-grow">
@@ -767,6 +995,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
 
                 <div className="flex flex-col gap-3">
                   <div className="flex flex-col gap-3 pl-1">
+                    {renderProposalCards(getChangesForSection('stakeholders'), 'mb-1')}
                     {activePlan.stakeholders.map(stk => (
                       <div key={stk.userId} className="group/stk flex items-center justify-between hover:bg-surface-raised/20 p-1 rounded-lg transition-colors">
                         <div className="flex items-center gap-3">
@@ -807,6 +1036,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                 {activePlan.phases.map((phase: Phase, pIdx: number) => {
                   const hasStandaloneGaps = phase.gaps && phase.gaps.length > 0;
                   const isMenuOpen = activePhaseMenuId === phase.id;
+                  const phaseChanges = getChangesForTarget(['phases'], phase.id);
 
                   return (
                     <div key={phase.id} className="flex flex-col gap-5 relative">
@@ -912,11 +1142,15 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                       {/* Inner dashed divider */}
                       <hr className="border-t border-dashed border-border-subtle" />
 
+                      {renderProposalCards(phaseChanges, 'mt-0')}
+
                       {/* 3.4 Tasks in Phase */}
                       <div className="flex flex-col gap-4 pl-6 ml-3 select-none">
+                        {renderProposedTaskRows(phase.id)}
                         {phase.tasks.map((task: Task, tIdx: number) => {
                           const stepNum = String(tIdx + 1).padStart(2, '0');
                           const isExpanded = expandedTaskId === task.id;
+                          const taskChanges = getChangesForTarget(['tasks'], task.id);
 
                           // Left Border & Bg matrix styles based on status
                           let rowStyle = 'border-l-2 border-transparent hover:bg-surface-raised/40';
@@ -958,6 +1192,9 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                                 ? Rejected
                               </span>
                             );
+                          }
+                          if (taskChanges.length > 0) {
+                            rowStyle = `${rowStyle} ring-1 ring-primary/20 rounded-xl`;
                           }
 
                           // Priority Dot selector mapping
@@ -1090,6 +1327,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                                   className="bg-surface-raised/20 border border-border-subtle rounded-xl p-5 ml-10 flex flex-col gap-4 fade-up select-text"
                                   onClick={(e) => e.stopPropagation()}
                                 >
+                                  {renderProposalCards(taskChanges, 'mt-0')}
                                   {/* Description section */}
                                   <div className="flex flex-col gap-1.5">
                                     <label className="text-[10px] text-text-muted uppercase tracking-widest font-bold">
@@ -1422,6 +1660,8 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                   );
                 })}
 
+                {renderProposedPhaseBlocks()}
+
                 {/* + Add Phase button below last phase block */}
                 {isApprover && !isAddingPhase && (
                   <button
@@ -1545,130 +1785,141 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                       />
                     </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="flex flex-col gap-1">
-                          <label className="text-[10px] text-text-muted uppercase tracking-widest font-bold">Severity</label>
-                          <select
-                            className="bg-background border border-border rounded-md p-2 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-primary font-semibold"
-                            value={newRiskForm.severity}
-                            onChange={(e) => setNewRiskForm({ ...newRiskForm, severity: e.target.value as any })}
-                          >
-                            <option value="critical">Critical</option>
-                            <option value="major">Major</option>
-                            <option value="minor">Minor</option>
-                          </select>
-                        </div>
-                        <div className="flex flex-col gap-1">
-                          <label className="text-[10px] text-text-muted uppercase tracking-widest font-bold">Mitigation (optional)</label>
-                          <input
-                            type="text"
-                            placeholder="Describe how to mitigate..."
-                            className="bg-background border border-border rounded-md p-2 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                            value={newRiskForm.mitigation}
-                            onChange={(e) => setNewRiskForm({ ...newRiskForm, mitigation: e.target.value })}
-                          />
-                        </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] text-text-muted uppercase tracking-widest font-bold">Severity</label>
+                        <select
+                          className="bg-background border border-border rounded-md p-2 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-primary font-semibold"
+                          value={newRiskForm.severity}
+                          onChange={(e) => setNewRiskForm({ ...newRiskForm, severity: e.target.value as any })}
+                        >
+                          <option value="critical">Critical</option>
+                          <option value="major">Major</option>
+                          <option value="minor">Minor</option>
+                        </select>
                       </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] text-text-muted uppercase tracking-widest font-bold">Mitigation (optional)</label>
+                        <input
+                          type="text"
+                          placeholder="Describe how to mitigate..."
+                          className="bg-background border border-border rounded-md p-2 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                          value={newRiskForm.mitigation}
+                          onChange={(e) => setNewRiskForm({ ...newRiskForm, mitigation: e.target.value })}
+                        />
+                      </div>
+                    </div>
 
-                      <div className="flex justify-end gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => setIsAddingRisk(false)}
-                          className="btn-secondary py-1 px-3 text-xs select-none"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="submit"
-                          className="btn-primary py-1 px-3 text-xs select-none"
-                          disabled={!newRiskForm.description.trim()}
-                        >
-                          Create Flag
-                        </button>
-                      </div>
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingRisk(false)}
+                        className="btn-secondary py-1 px-3 text-xs select-none"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="btn-primary py-1 px-3 text-xs select-none"
+                        disabled={!newRiskForm.description.trim()}
+                      >
+                        Create Flag
+                      </button>
+                    </div>
                   </form>
                 )}
 
                 {/* Risks List */}
                 <div className="flex flex-col gap-6 pl-1">
+                  {renderProposalCards(
+                    getChangesForSection('risks', 'global_risks').filter((change) => change.action !== 'add' && !change.targetId),
+                    'mb-0'
+                  )}
+                  {renderProposedRiskRows()}
                   {activePlan.globalRisks.map((risk) => {
-                      // Severity colors map
-                      const dotClassMap = {
-                        critical: 'bg-error',
-                        major: 'bg-warning',
-                        minor: 'bg-text-muted'
-                      };
-                      const dotColor = dotClassMap[risk.severity] || 'bg-text-muted';
+                    const riskChanges = getChangesForTarget(['risks', 'global_risks'], risk.id);
+                    // Severity colors map
+                    const dotClassMap = {
+                      critical: 'bg-error',
+                      major: 'bg-warning',
+                      minor: 'bg-text-muted'
+                    };
+                    const dotColor = dotClassMap[risk.severity] || 'bg-text-muted';
 
-                      return (
-                        <div key={risk.id} className="group/risk flex flex-col gap-1.5 relative border-l border-border-subtle pl-4 py-0.5">
+                    return (
+                      <div
+                        key={risk.id}
+                        className={`group/risk flex flex-col gap-1.5 relative border-l border-border-subtle pl-4 py-0.5 ${riskChanges.length > 0 ? 'rounded-r-lg bg-warning/5 pr-3' : ''}`}
+                      >
 
-                          {/* Deletion icon on hover */}
-                          {isApprover && (
-                            <button
-                              onClick={() => handleDeleteRisk(risk.id)}
-                              className="absolute top-0 right-0 opacity-0 group-hover/risk:opacity-100 text-text-muted hover:text-error transition-all p-1 hover:bg-surface-raised rounded select-none"
-                              title="Delete Risk Flag"
+                        {/* Deletion icon on hover */}
+                        {isApprover && (
+                          <button
+                            onClick={() => handleDeleteRisk(risk.id)}
+                            className="absolute top-0 right-0 opacity-0 group-hover/risk:opacity-100 text-text-muted hover:text-error transition-all p-1 hover:bg-surface-raised rounded select-none"
+                            title="Delete Risk Flag"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
+                          {isApprover ? (
+                            <select
+                              className="bg-transparent text-xs font-bold uppercase tracking-widest focus:outline-none border-b border-transparent hover:border-text-muted cursor-pointer pr-1"
+                              style={{
+                                color: risk.severity === 'critical' ? 'var(--color-error)' : risk.severity === 'major' ? 'var(--color-warning)' : 'var(--color-text-muted)'
+                              }}
+                              value={risk.severity}
+                              onChange={(e) => {
+                                void updateRiskViaApi(risk.id, { severity: e.target.value as RiskItem['severity'] }, 'Field updated.');
+                              }}
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                              <option value="critical" className="bg-surface text-error">Critical</option>
+                              <option value="major" className="bg-surface text-warning">Major</option>
+                              <option value="minor" className="bg-surface text-text-muted">Minor</option>
+                            </select>
+                          ) : (
+                            <span
+                              className="text-xs font-bold uppercase tracking-widest shrink-0"
+                              style={{
+                                color: risk.severity === 'critical' ? 'var(--color-error)' : risk.severity === 'major' ? 'var(--color-warning)' : 'var(--color-text-muted)'
+                              }}
+                            >
+                              {risk.severity}
+                            </span>
                           )}
+                        </div>
 
-                          <div className="flex items-center gap-2">
-                            <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
-                            {isApprover ? (
-                              <select
-                                className="bg-transparent text-xs font-bold uppercase tracking-widest focus:outline-none border-b border-transparent hover:border-text-muted cursor-pointer pr-1"
-                                style={{
-                                  color: risk.severity === 'critical' ? 'var(--color-error)' : risk.severity === 'major' ? 'var(--color-warning)' : 'var(--color-text-muted)'
-                                }}
-                                value={risk.severity}
-                                onChange={(e) => {
-                                  void updateRiskViaApi(risk.id, { severity: e.target.value as RiskItem['severity'] }, 'Field updated.');
-                                }}
-                              >
-                                <option value="critical" className="bg-surface text-error">Critical</option>
-                                <option value="major" className="bg-surface text-warning">Major</option>
-                                <option value="minor" className="bg-surface text-text-muted">Minor</option>
-                              </select>
-                            ) : (
-                              <span
-                                className="text-xs font-bold uppercase tracking-widest shrink-0"
-                                style={{
-                                  color: risk.severity === 'critical' ? 'var(--color-error)' : risk.severity === 'major' ? 'var(--color-warning)' : 'var(--color-text-muted)'
-                                }}
-                              >
-                                {risk.severity}
-                              </span>
-                            )}
-                          </div>
+                        {renderEditableText(
+                          risk.description,
+                          'risk-desc',
+                          risk.id,
+                          undefined,
+                          undefined,
+                          true,
+                          "text-sm text-text-secondary leading-relaxed"
+                        )}
 
+                        <div className="flex items-center gap-1.5 text-xs text-text-muted select-text mt-1">
+                          <span className="font-semibold select-none text-[11px] uppercase tracking-wider">Mitigation:</span>
                           {renderEditableText(
-                            risk.description,
-                            'risk-desc',
+                            risk.mitigation || '',
+                            'risk-mitigation',
                             risk.id,
                             undefined,
                             undefined,
-                            true,
-                            "text-sm text-text-secondary leading-relaxed"
+                            false,
+                            "italic text-text-secondary text-xs",
+                            "No mitigation defined. Click to define..."
                           )}
-
-                          <div className="flex items-center gap-1.5 text-xs text-text-muted select-text mt-1">
-                            <span className="font-semibold select-none text-[11px] uppercase tracking-wider">Mitigation:</span>
-                            {renderEditableText(
-                              risk.mitigation || '',
-                              'risk-mitigation',
-                              risk.id,
-                              undefined,
-                              undefined,
-                              false,
-                              "italic text-text-secondary text-xs",
-                              "No mitigation defined. Click to define..."
-                            )}
-                          </div>
                         </div>
-                      );
-                    })}
+
+                        {renderProposalCards(riskChanges, 'mt-1')}
+                      </div>
+                    );
+                  })}
 
                   {activePlan.globalRisks.length === 0 && (
                     <span className="text-xs text-text-muted italic pl-1">

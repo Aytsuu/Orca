@@ -88,7 +88,10 @@ def main() -> None:
             select_death_penalty_class(),
         )
         worker = worker_class([settings.agent_queue_name])
-        worker.work(with_scheduler=True)
+        try:
+            worker.work(with_scheduler=True)
+        except KeyboardInterrupt:
+            print("RQ worker interrupted. Shutting down.")
 
 
 if __name__ == "__main__":

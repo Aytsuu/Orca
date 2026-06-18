@@ -36,6 +36,11 @@ export async function proxyApiRequest(
     headers.set('Accept', 'application/json');
   }
 
+  const contentType = requestHeaders.get('content-type');
+  if (init.body !== undefined && contentType && !headers.has('Content-Type')) {
+    headers.set('Content-Type', contentType);
+  }
+
   if (sessionId && !headers.has('X-Session-Id')) {
     headers.set('X-Session-Id', sessionId);
   }

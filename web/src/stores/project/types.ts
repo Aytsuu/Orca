@@ -98,3 +98,180 @@ export interface ApiMemberInvitation {
   redeemed_at: string | null;
   redeemed_by_session_id: string | null;
 }
+
+export interface FileAttachment {
+  id: string;
+  name: string;
+  type: 'image' | 'video' | 'audio' | 'document' | 'other';
+  sizeBytes: number;
+  url: string;
+  uploadedBy: string;
+  uploadedAt: string;
+}
+
+export interface GapItem {
+  id: string;
+  description: string;
+  severity: 'critical' | 'major' | 'minor';
+  relatedTaskId?: string;
+  sourceMessageIds: string[];
+  sourceExcerpt?: string;
+}
+
+export interface Task {
+  id: string;
+  title: string;
+  description?: string;
+  acceptanceCriteria?: string[];
+  owner?: string;
+  ownerUserId?: string;
+  due?: string;
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  originalPriority?: 'critical' | 'high' | 'medium' | 'low';
+  status: 'proposed' | 'accepted' | 'rejected' | 'gap';
+  attachments: FileAttachment[];
+  sourceMessageIds: string[];
+  sourceExcerpt?: string;
+  confidence: 'high' | 'medium' | 'low';
+  isNew?: boolean;
+  isModified?: boolean;
+  isRemoved?: boolean;
+}
+
+export interface Phase {
+  id: string;
+  title: string;
+  goal: string;
+  timeframe: string;
+  tasks: Task[];
+  gaps: GapItem[];
+}
+
+export interface Stakeholder {
+  userId: string;
+  name: string;
+  role: string;
+  initials: string;
+}
+
+export interface RiskItem {
+  id: string;
+  description: string;
+  severity: 'critical' | 'major' | 'minor';
+  mitigation?: string;
+  sourceMessageIds?: string[];
+  sourceExcerpt?: string;
+}
+
+export interface StructuredPlan {
+  id: string;
+  projectId: string;
+  title: string;
+  description: string;
+  status: 'draft' | 'pending_review' | 'finalized' | 'reverted';
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  finalizedAt?: string;
+  objectives: string[];
+  stakeholders: Stakeholder[];
+  phases: Phase[];
+  globalRisks: RiskItem[];
+}
+
+export interface ProposedChange {
+  id: string;
+  action: 'add' | 'update' | 'remove';
+  section: 'tasks' | 'phases' | 'gaps' | 'risks';
+  targetId: string;
+  title: string;
+  detail: string;
+  confidence?: 'high' | 'medium' | 'low';
+  sourceQuote: string;
+}
+
+export interface ApiPlanAttachment {
+  id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  storage_path: string;
+  uploaded_by_session_id: string;
+  uploaded_at: string;
+}
+
+export interface ApiPlanTask {
+  id: string;
+  title: string;
+  description?: string | null;
+  acceptance_criteria?: string[];
+  owner?: string | null;
+  due?: string | null;
+  priority?: 'critical' | 'high' | 'medium' | 'low';
+  status?: string | null;
+  attachments?: ApiPlanAttachment[];
+  source_message_ids?: string[];
+  source_excerpt?: string | null;
+  confidence?: 'high' | 'medium' | 'low' | null;
+}
+
+export interface ApiPlanGap {
+  id: string;
+  description: string;
+  severity?: 'critical' | 'major' | 'minor';
+  source_message_ids?: string[];
+  source_excerpt?: string | null;
+}
+
+export interface ApiPlanPhase {
+  id: string;
+  title: string;
+  goal?: string | null;
+  timeframe?: string | null;
+  tasks?: ApiPlanTask[];
+  gaps?: ApiPlanGap[];
+}
+
+export interface ApiPlanRisk {
+  id: string;
+  description: string;
+  severity?: 'critical' | 'major' | 'minor';
+  mitigation?: string | null;
+  source_message_ids?: string[];
+  source_excerpt?: string | null;
+}
+
+export interface ApiPlanStakeholder {
+  user_id: string;
+  name: string;
+  role: string;
+  initials: string;
+}
+
+export interface ApiProjectPlan {
+  id: string;
+  project_id: string;
+  version: number;
+  finalized_at?: string | null;
+  created_at?: string;
+  title?: string;
+  description?: string;
+  objectives?: string[];
+  stakeholders?: ApiPlanStakeholder[];
+  phases?: ApiPlanPhase[];
+  global_risks?: ApiPlanRisk[];
+}
+
+export interface ApiPlanVersion {
+  id: string;
+  version: number;
+  created_at: string;
+  status: 'current' | 'archived';
+}
+
+export interface PlanVersion {
+  id: string;
+  version: number;
+  createdAt: string;
+  status: 'current' | 'archived';
+}

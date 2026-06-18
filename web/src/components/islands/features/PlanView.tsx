@@ -1,13 +1,8 @@
 // src/components/islands/features/PlanView.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  ChevronLeft,
-  ChevronRight,
   AlertTriangle,
-  RotateCcw,
   Check,
-  ArrowRight,
-  Info,
   X,
   Plus,
   Trash2,
@@ -30,288 +25,42 @@ import {
   projectMembersByProject,
   ensureProjectMembersLoaded,
   getProjectMembers,
-  sessionId
+  sessionId,
+  formatBytes,
+  formatDisplayDate,
 } from '../../../stores/projectStore';
+import type {
+  StructuredPlan,
+  Phase,
+  Task,
+  GapItem,
+  Stakeholder,
+  RiskItem,
+  ProposedChange,
+} from '../../../stores/projectStore';
+import {
+  useProjectPlan,
+  useUpdateProjectPlan,
+  useCreateProjectPhase,
+  useUpdateProjectPhase,
+  useDeleteProjectPhase,
+  useCreateProjectTask,
+  useUpdateProjectTask,
+  useDeleteProjectTask,
+  useCreateProjectRisk,
+  useUpdateProjectRisk,
+  useDeleteProjectRisk,
+  useDismissProjectGap,
+} from '../../../lib/query/projectPlan';
 import { QueryProvider } from '../providers/QueryProvider';
 import { Modal } from '../ui/Modal';
 
-// --- Type Definitions ---
-interface FileAttachment {
-  id: string;
-  name: string;
-  type: 'image' | 'video' | 'audio' | 'document' | 'other';
-  sizeBytes: number;
-  url: string;
-  uploadedBy: string;
-  uploadedAt: string;
-}
-
-interface GapItem {
-  id: string;
-  description: string;
-  severity: 'critical' | 'major' | 'minor';
-  relatedTaskId?: string;
-  sourceMessageIds: string[];
-  sourceExcerpt?: string;
-}
-
-interface Task {
-  id: string;
-  title: string;
-  description?: string;
-  acceptanceCriteria?: string[];
-  owner?: string;
-  ownerUserId?: string;
-  due?: string;
-  priority: 'critical' | 'high' | 'medium' | 'low';
-  originalPriority?: 'critical' | 'high' | 'medium' | 'low';
-  status: 'proposed' | 'accepted' | 'rejected' | 'gap';
-  attachments: FileAttachment[];
-  sourceMessageIds: string[];
-  sourceExcerpt?: string;
-  confidence: 'high' | 'medium' | 'low';
-  isNew?: boolean;
-  isModified?: boolean;
-  isRemoved?: boolean;
-}
-
-interface Phase {
-  id: string;
-  title: string;
-  goal: string;
-  timeframe: string;
-  tasks: Task[];
-  gaps: GapItem[];
-}
-
-interface Stakeholder {
-  userId: string;
-  name: string;
-  role: string;
-  initials: string;
-}
-
-interface RiskItem {
-  id: string;
-  description: string;
-  severity: 'critical' | 'major' | 'minor';
-  mitigation?: string;
-  sourceMessageIds?: string[];
-  sourceExcerpt?: string;
-}
-
-interface StructuredPlan {
-  id: string;
-  projectId: string;
-  title: string;
-  description: string;
-  status: 'draft' | 'pending_review' | 'finalized' | 'reverted';
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-  finalizedAt?: string;
-  objectives: string[];
-  stakeholders: Stakeholder[];
-  phases: Phase[];
-  globalRisks: RiskItem[];
-}
-
-interface ProposedChange {
-  id: string;
-  action: 'add' | 'update' | 'remove';
-  section: 'tasks' | 'phases' | 'gaps' | 'risks';
-  targetId: string;
-  title: string;
-  detail: string;
-  confidence?: 'high' | 'medium' | 'low';
-  sourceQuote: string;
-}
-
+// --- Types ---
 interface PlanViewProps {
   projectId: string;
 }
 
-// --- Formatting Helpers ---
-export const formatBytes = (bytes: number): string => {
-  if (bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-};
-
-// --- Mock Data Templates ---
-const MOCK_STAKEHOLDERS: Stakeholder[] = [
-  { userId: 'u1', name: 'Jan Doe', role: 'Tech Lead', initials: 'JD' },
-  { userId: 'u2', name: 'Ryu Lee', role: 'Designer', initials: 'RY' },
-  { userId: 'u3', name: 'Sam K.', role: 'QA', initials: 'SK' }
-];
-
-const createInitialHistory = (projectId: string): StructuredPlan[] => {
-  // Only one version (pending review / active draft)
-  const v1: StructuredPlan = {
-    id: `v1-${projectId}`,
-    projectId,
-    title: 'Runway Q3 Launch',
-    description: 'AI-generated plan based on 3 days of team discussion.',
-    status: 'pending_review',
-    version: 1,
-    createdAt: '2026-06-14T09:00:00Z',
-    updatedAt: '2026-06-17T16:45:00Z',
-    objectives: [
-      'Launch redesigned checkout flow before Q3 ends',
-      'Reduce checkout drop-off rate by 15%',
-      'Pass WCAG AA accessibility audit'
-    ],
-    stakeholders: [...MOCK_STAKEHOLDERS],
-    phases: [
-      {
-        id: 'p1',
-        title: 'Phase 1 — Foundation',
-        goal: 'Set up the technical foundation for the project.',
-        timeframe: 'Day 1–2',
-        tasks: [
-          {
-            id: 't1',
-            title: 'Define product requirements',
-            description: 'Define the full requirements for the redesigned checkout flow: user stories, API contract, and acceptance criteria aligned with the Q3 goal.',
-            acceptanceCriteria: [
-              'PRD document shared with the team',
-              'API contract reviewed by @ryu',
-              'Acceptance criteria signed off by @jan'
-            ],
-            owner: '@jan',
-            ownerUserId: 'u1',
-            due: 'Jun 14',
-            priority: 'high',
-            status: 'accepted',
-            attachments: [
-              { id: 'f1', name: 'design-brief.pdf', type: 'document', sizeBytes: 2516582, url: '#', uploadedBy: 'Jan Doe', uploadedAt: 'Jun 12' },
-              { id: 'f2', name: 'wireframes.fig', type: 'other', sizeBytes: 14680064, url: '#', uploadedBy: 'Ryu Lee', uploadedAt: 'Jun 12' }
-            ],
-            sourceMessageIds: ['m1'],
-            sourceExcerpt: "Let's make sure we document the API before we build anything.",
-            confidence: 'high'
-          },
-          {
-            id: 't2',
-            title: 'Deploy staging environment',
-            description: 'Deploy a staging environment connected to the test database for the checkout flow demonstration.',
-            acceptanceCriteria: [
-              'CI/CD pipeline configured for automated deploy to staging',
-              'Verify database credentials are encrypted and stored in Doppler'
-            ],
-            owner: '@ryu',
-            ownerUserId: 'u2',
-            due: 'Jun 15',
-            priority: 'high',
-            status: 'proposed',
-            isNew: true,
-            attachments: [],
-            sourceMessageIds: ['m2'],
-            sourceExcerpt: 'we need a staging env before the demo',
-            confidence: 'high'
-          }
-        ],
-        gaps: [
-          {
-            id: 'g1',
-            description: "No deployment timeline defined for Phase 2. The team discussed 'we'll figure out staging later' — a concrete date must be set before Phase 1 ends.",
-            severity: 'critical',
-            sourceMessageIds: ['m4'],
-            sourceExcerpt: "We'll figure out staging later."
-          }
-        ]
-      },
-      {
-        id: 'p2',
-        title: 'Phase 2 — API & Integration',
-        goal: 'Integrate core services and payment APIs.',
-        timeframe: 'Day 3–4',
-        tasks: [
-          {
-            id: 't3',
-            title: 'API integration',
-            description: 'Integrate checkout services with the third-party payment gateway API.',
-            acceptanceCriteria: [
-              'API endpoints return consistent envelope format',
-              'Support webhook events for payment success and failure'
-            ],
-            owner: '@jan',
-            ownerUserId: 'u1',
-            due: 'Jun 16',
-            priority: 'high',
-            originalPriority: 'low',
-            status: 'proposed',
-            isModified: true,
-            attachments: [],
-            sourceMessageIds: ['m3'],
-            sourceExcerpt: 'this is now the main blocker',
-            confidence: 'medium'
-          },
-          {
-            id: 't4',
-            title: 'Write test suite',
-            description: 'Write unit and integration tests to ensure checkout API reliability.',
-            acceptanceCriteria: [
-              'Achieve 80%+ code coverage for checkout service logic'
-            ],
-            owner: '—',
-            due: 'Jun 17',
-            priority: 'medium',
-            status: 'gap',
-            attachments: [],
-            sourceMessageIds: ['m5'],
-            sourceExcerpt: "Let's make sure we have robust coverage before final deployment",
-            confidence: 'medium'
-          },
-          {
-            id: 't5',
-            title: 'Migrate legacy data',
-            description: 'Migrate older order databases to the new schema.',
-            acceptanceCriteria: [
-              'Migrate 100% of orders from last 12 months'
-            ],
-            owner: '@sam',
-            ownerUserId: 'u3',
-            due: 'Jun 17',
-            priority: 'low',
-            status: 'proposed',
-            isRemoved: true,
-            attachments: [],
-            sourceMessageIds: ['m6'],
-            sourceExcerpt: "we should migrate old tables as part of the launch",
-            confidence: 'high'
-          }
-        ],
-        gaps: []
-      }
-    ],
-    globalRisks: [
-      {
-        id: 'r1',
-        description: 'No fallback if the external payment API goes down during launch week.',
-        severity: 'critical',
-        mitigation: 'mock the API for staging; build a retry circuit.'
-      },
-      {
-        id: 'r2',
-        description: 'Context window limits may degrade AI plan quality on conversations longer than ~100 messages.',
-        severity: 'major',
-        mitigation: 'rolling summaries + project memory.'
-      },
-      {
-        id: 'r3',
-        description: 'Two team members share the same timezone, which may slow async review cycles.',
-        severity: 'minor',
-        mitigation: 'set async review SLA of 4 hours.'
-      }
-    ]
-  };
-
-  return [v1];
-};
-
+// --- Constants & Stubs ---
 const INITIAL_CHANGES: ProposedChange[] = [
   {
     id: 'c1',
@@ -328,7 +77,7 @@ const INITIAL_CHANGES: ProposedChange[] = [
     section: 'tasks',
     targetId: 't3',
     title: 'API integration',
-    detail: 'Priority changed: Low → High · Owner @jan',
+    detail: 'Priority changed: Low ? High · Owner @jan',
     sourceQuote: '"this is now the main blocker" — @jan, Jun 13'
   },
   {
@@ -344,7 +93,7 @@ const INITIAL_CHANGES: ProposedChange[] = [
 
 // --- Inner PlanView component ---
 const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
-  // --- States ---
+  // --- States & React Query Hooks ---
   const teammates = useStore(projectMembersByProject)[projectId] || getProjectMembers(projectId);
   const activeSessionId = useStore(sessionId);
 
@@ -354,14 +103,28 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
 
   const currentUserMember = teammates.find(t => t.sessionId === activeSessionId);
   const isApprover = currentUserMember ? currentUserMember.role === 'APPROVER' : true;
-  const [planHistory, setPlanHistory] = useState<StructuredPlan[]>([]);
-  const [activePlanIndex, setActivePlanIndex] = useState(0); // Start at v1
-  const [pendingChanges, setPendingChanges] = useState<ProposedChange[]>([]);
-  const [revertsRemaining, setRevertsRemaining] = useState<number>(3);
 
-  // Modal dialog toggles
-  const [isRevertOpen, setIsRevertOpen] = useState(false);
-  const [isFinalizeOpen, setIsFinalizeOpen] = useState(false);
+  // Query plan data and versions
+  const { data: activePlan, isLoading: isPlanLoading } = useProjectPlan(projectId);
+
+  // Derived properties
+  const showReviewPanel = isApprover;
+
+  // Mutations
+  const updateProjectPlanMutation = useUpdateProjectPlan(projectId);
+  const createProjectPhaseMutation = useCreateProjectPhase(projectId);
+  const updateProjectPhaseMutation = useUpdateProjectPhase(projectId);
+  const deleteProjectPhaseMutation = useDeleteProjectPhase(projectId);
+  const createProjectTaskMutation = useCreateProjectTask(projectId);
+  const updateProjectTaskMutation = useUpdateProjectTask(projectId);
+  const deleteProjectTaskMutation = useDeleteProjectTask(projectId);
+  const createProjectRiskMutation = useCreateProjectRisk(projectId);
+  const updateProjectRiskMutation = useUpdateProjectRisk(projectId);
+  const deleteProjectRiskMutation = useDeleteProjectRisk(projectId);
+  const dismissProjectGapMutation = useDismissProjectGap(projectId);
+
+  // Local UI States
+  const [pendingChanges] = useState<ProposedChange[]>(INITIAL_CHANGES);
   const [deletePhaseTarget, setDeletePhaseTarget] = useState<{ id: string; title: string; count: number } | null>(null);
 
   // UI Interactive States
@@ -378,9 +141,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
   const [isAddingRisk, setIsAddingRisk] = useState(false);
   const [newRiskForm, setNewRiskForm] = useState({ description: '', severity: 'minor' as any, mitigation: '' });
 
-  const [isAddingStakeholder, setIsAddingStakeholder] = useState(false);
-  const [newStakeholderForm, setNewStakeholderForm] = useState({ name: '', role: '', initials: '' });
-
   // Field Edit States (Click to Edit)
   const [editingField, setEditingField] = useState<{
     type: string;
@@ -389,26 +149,16 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     subIndex?: number;
     field?: string;
     value: string;
-    subValue?: string; // used for fields with two text values like risks
+    subValue?: string;
   } | null>(null);
 
-  // Gap Notices confirmation popups (to avoid standard confirmation alerts)
+  // Gap Notices confirmation popups
   const [gapDismissConfirmId, setGapDismissConfirmId] = useState<string | null>(null);
   const [taskDeleteConfirmId, setTaskDeleteConfirmId] = useState<string | null>(null);
 
   // Dropdown menu state
   const [activePhaseMenuId, setActivePhaseMenuId] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Load Initial Data
-  useEffect(() => {
-    setPlanHistory(createInitialHistory(projectId));
-    setPendingChanges(INITIAL_CHANGES);
-    setRevertsRemaining(3);
-    setActivePlanIndex(0); // index 0 is v1
-    setExpandedTaskId(null);
-    setIsReviewDrawerOpen(false);
-  }, [projectId]);
 
   // Click outside phase menu handler
   useEffect(() => {
@@ -423,8 +173,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     };
   }, []);
 
-  const activePlan = planHistory[activePlanIndex];
-  if (!activePlan) {
+  if (isPlanLoading || !activePlan) {
     return (
       <div className="flex-grow flex items-center justify-center bg-background text-text-muted text-sm py-16">
         Loading project plan...
@@ -432,544 +181,364 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     );
   }
 
-  const isLatestVersion = activePlanIndex === planHistory.length - 1;
-  const showReviewPanel = isApprover && isLatestVersion && activePlan.status !== 'finalized';
-
   // Calculate gaps count for controls bar (only gaps that aren't dismissed)
   const currentGapCount = activePlan.phases.reduce((sum, phase) => {
     const taskGaps = phase.tasks.filter(t => t.status === 'gap').length;
     const phaseGaps = phase.gaps.length;
     return sum + taskGaps + phaseGaps;
   }, 0);
+  const hasNoPlanBody =
+    activePlan.objectives.length === 0 &&
+    activePlan.stakeholders.length === 0 &&
+    activePlan.phases.length === 0 &&
+    activePlan.globalRisks.length === 0;
+
+  const persistPlanMeta = async (
+    nextValues: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives' | 'stakeholders'>>,
+    successMessage: string
+  ) => {
+    try {
+      await updateProjectPlanMutation.mutateAsync(nextValues);
+      addToast('success', successMessage);
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to update plan.');
+    }
+  };
+
+  const findTaskById = (taskId: string): { phase: Phase; task: Task } | null => {
+    for (const phase of activePlan.phases) {
+      const task = phase.tasks.find((item) => item.id === taskId);
+      if (task) return { phase, task };
+    }
+    return null;
+  };
+
+  const updateTaskViaApi = async (
+    taskId: string,
+    updates: Partial<Pick<Task, 'title' | 'description' | 'owner' | 'due' | 'priority' | 'acceptanceCriteria'>>,
+    successMessage: string
+  ) => {
+    const taskContext = findTaskById(taskId);
+    if (!taskContext) {
+      addToast('error', 'Task not found.');
+      return;
+    }
+    try {
+      await updateProjectTaskMutation.mutateAsync({
+        phaseId: taskContext.phase.id,
+        taskId,
+        updates
+      });
+      addToast('success', successMessage);
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to update task.');
+    }
+  };
+
+  const updateRiskViaApi = async (
+    riskId: string,
+    updates: Partial<Pick<RiskItem, 'description' | 'severity' | 'mitigation'>>,
+    successMessage: string
+  ) => {
+    const risk = activePlan.globalRisks.find((item) => item.id === riskId);
+    if (!risk) {
+      addToast('error', 'Risk not found.');
+      return;
+    }
+    try {
+      await updateProjectRiskMutation.mutateAsync({
+        riskId,
+        updates
+      });
+      addToast('success', successMessage);
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to update risk.');
+    }
+  };
 
   // --- Handlers for Review Panel Action ---
   const applyChangeState = (changeId: string, accept: boolean) => {
     const change = pendingChanges.find(c => c.id === changeId);
     if (!change) return;
-
-    // Mutate state in a clean immutable React way
-    setPlanHistory(prevHistory => {
-      const updatedHistory = [...prevHistory];
-      const plan = { ...updatedHistory[activePlanIndex] };
-      plan.phases = plan.phases.map(phase => {
-        const updatedPhase = { ...phase };
-
-        if (change.section === 'tasks') {
-          if (change.action === 'add') {
-            if (accept) {
-              // Mark task as accepted and remove proposed flag
-              updatedPhase.tasks = updatedPhase.tasks.map(t =>
-                t.id === change.targetId ? { ...t, status: 'accepted', isNew: false } : t
-              );
-            } else {
-              // Reject addition -> remove task completely
-              updatedPhase.tasks = updatedPhase.tasks.filter(t => t.id !== change.targetId);
-            }
-          } else if (change.action === 'update') {
-            updatedPhase.tasks = updatedPhase.tasks.map(t => {
-              if (t.id === change.targetId) {
-                if (accept) {
-                  // Keep priority high (it is already updated in draft state), clear modified flag
-                  return { ...t, isModified: false, originalPriority: undefined };
-                } else {
-                  // Reject update -> revert priority back to original
-                  return { ...t, isModified: false, priority: t.originalPriority || t.priority, originalPriority: undefined };
-                }
-              }
-              return t;
-            });
-          } else if (change.action === 'remove') {
-            if (accept) {
-              // Accept removal -> remove task completely
-              updatedPhase.tasks = updatedPhase.tasks.filter(t => t.id !== change.targetId);
-            } else {
-              // Reject removal -> restore task to accepted (clear isRemoved)
-              updatedPhase.tasks = updatedPhase.tasks.map(t =>
-                t.id === change.targetId ? { ...t, status: 'accepted', isRemoved: false } : t
-              );
-            }
-          }
-        }
-        return updatedPhase;
-      });
-
-      updatedPlanMeta(plan);
-      updatedHistory[activePlanIndex] = plan;
-      return updatedHistory;
-    });
-
-    // Remove change card
-    setPendingChanges(prev => prev.filter(c => c.id !== changeId));
-    addToast('success', `Proposed change ${accept ? 'accepted' : 'rejected'}.`);
+    addToast('info', `Pending changes are static for now. "${change.title}" is not wired yet.`);
   };
 
   const handleAcceptAll = () => {
-    setPlanHistory(prevHistory => {
-      const updatedHistory = [...prevHistory];
-      const plan = { ...updatedHistory[activePlanIndex] };
-
-      plan.phases = plan.phases.map(phase => {
-        const updatedPhase = { ...phase };
-        // Process additions & modifications
-        updatedPhase.tasks = updatedPhase.tasks
-          .filter(t => {
-            // Remove tasks accepted for removal
-            const removalChange = pendingChanges.find(c => c.targetId === t.id && c.action === 'remove');
-            return !removalChange;
-          })
-          .map(t => {
-            const addOrUpdateChange = pendingChanges.find(c => c.targetId === t.id && (c.action === 'add' || c.action === 'update'));
-            if (addOrUpdateChange) {
-              return { ...t, status: 'accepted', isNew: false, isModified: false, originalPriority: undefined };
-            }
-            return t;
-          });
-        return updatedPhase;
-      });
-
-      updatedPlanMeta(plan);
-      updatedHistory[activePlanIndex] = plan;
-      return updatedHistory;
-    });
-
-    setPendingChanges([]);
-    addToast('success', 'All proposed changes accepted.');
-  };
-
-  // Re-calculate plan timestamps
-  const updatedPlanMeta = (plan: StructuredPlan) => {
-    plan.updatedAt = new Date().toISOString();
-  };
-
-  // --- Manual Actions: Revert, Finalize ---
-  const handleRevertConfirm = () => {
-    if (revertsRemaining <= 0) {
-      addToast('error', 'Revert limit reached! Max 3 reverts allowed.');
-      setIsRevertOpen(false);
-      return;
-    }
-    if (planHistory.length <= 1) {
-      addToast('warning', 'No older version of the plan exists.');
-      setIsRevertOpen(false);
-      return;
-    }
-
-    // Restore version 1 as current version, but keeping version indexing correct
-    setPlanHistory(prev => {
-      const v1Copy = JSON.parse(JSON.stringify(prev[0]));
-      v1Copy.version = prev.length + 1;
-      v1Copy.status = 'reverted';
-      v1Copy.updatedAt = new Date().toISOString();
-      return [...prev, v1Copy];
-    });
-
-    setRevertsRemaining(prev => prev - 1);
-    setIsRevertOpen(false);
-    setActivePlanIndex(planHistory.length); // go to the newly created reverted version
-    addToast('success', `Plan reverted. Reverts remaining: ${revertsRemaining - 1}`);
-  };
-
-  const handleFinalizeConfirm = () => {
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      plan.status = 'finalized';
-      plan.finalizedAt = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      plan.updatedAt = new Date().toISOString();
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-    setIsFinalizeOpen(false);
-    addToast('success', 'Plan finalized and synced. All members notified.');
+    addToast('info', 'Pending changes review is a static reference only for now.');
   };
 
   // --- Inline Edit Committing ---
-  const commitFieldEdit = () => {
+  const commitFieldEdit = async () => {
     if (!editingField) return;
-    const { type, id, index, subIndex, value, subValue } = editingField;
+    const currentEdit = editingField;
+    const { type, id, index, subIndex, value, subValue } = currentEdit;
 
     if (value.trim() === '' && type !== 'task-desc' && type !== 'phase-goal' && type !== 'risk-mitigation') {
       addToast('error', 'Title/text field cannot be blank.');
       return;
     }
 
-    setPlanHistory(prev => {
-      const updatedHistory = [...prev];
-      const plan = { ...updatedHistory[activePlanIndex] };
-
-      if (type === 'plan-title') {
-        plan.title = value;
-      } else if (type === 'plan-desc') {
-        plan.description = value;
-      } else if (type === 'objective' && typeof index === 'number') {
-        plan.objectives = plan.objectives.map((o, idx) => idx === index ? value : o);
-      } else if (type === 'stakeholder' && id) {
-        plan.stakeholders = plan.stakeholders.map(s => {
-          if (s.userId === id) {
-            if (editingField.field === 'name') return { ...s, name: value };
-            if (editingField.field === 'role') return { ...s, role: value };
-            if (editingField.field === 'initials') return { ...s, initials: value.toUpperCase().slice(0, 2) };
-          }
-          return s;
-        });
-      } else if (type === 'phase-title' && id) {
-        plan.phases = plan.phases.map(p => p.id === id ? { ...p, title: value } : p);
-      } else if (type === 'phase-goal' && id) {
-        plan.phases = plan.phases.map(p => p.id === id ? { ...p, goal: value } : p);
-      } else if (type === 'phase-timeframe' && id) {
-        plan.phases = plan.phases.map(p => p.id === id ? { ...p, timeframe: value } : p);
-      } else if (type === 'task-title' && id) {
-        plan.phases = plan.phases.map(p => ({
-          ...p,
-          tasks: p.tasks.map(t => t.id === id ? { ...t, title: value } : t)
-        }));
-      } else if (type === 'task-desc' && id) {
-        plan.phases = plan.phases.map(p => ({
-          ...p,
-          tasks: p.tasks.map(t => t.id === id ? { ...t, description: value } : t)
-        }));
-      } else if (type === 'task-owner' && id) {
-        plan.phases = plan.phases.map(p => ({
-          ...p,
-          tasks: p.tasks.map(t => t.id === id ? { ...t, owner: value } : t)
-        }));
-      } else if (type === 'task-due' && id) {
-        plan.phases = plan.phases.map(p => ({
-          ...p,
-          tasks: p.tasks.map(t => t.id === id ? { ...t, due: value } : t)
-        }));
-      } else if (type === 'task-priority' && id) {
-        plan.phases = plan.phases.map(p => ({
-          ...p,
-          tasks: p.tasks.map(t => t.id === id ? { ...t, priority: value as any } : t)
-        }));
-      } else if (type === 'task-criteria' && id && typeof index === 'number') {
-        plan.phases = plan.phases.map(p => ({
-          ...p,
-          tasks: p.tasks.map(t => {
-            if (t.id === id && t.acceptanceCriteria) {
-              const updatedCriteria = [...t.acceptanceCriteria];
-              updatedCriteria[index] = value;
-              return { ...t, acceptanceCriteria: updatedCriteria };
-            }
-            return t;
-          })
-        }));
-      } else if (type === 'risk-desc' && id) {
-        plan.globalRisks = plan.globalRisks.map(r => r.id === id ? { ...r, description: value } : r);
-      } else if (type === 'risk-mitigation' && id) {
-        plan.globalRisks = plan.globalRisks.map(r => r.id === id ? { ...r, mitigation: value } : r);
-      } else if (type === 'risk-severity' && id) {
-        plan.globalRisks = plan.globalRisks.map(r => r.id === id ? { ...r, severity: value as any } : r);
-      }
-
-      updatedPlanMeta(plan);
-      updatedHistory[activePlanIndex] = plan;
-      return updatedHistory;
-    });
-
+    // Close the inline editor immediately so optimistic cache updates are visible at once.
     setEditingField(null);
-    addToast('success', 'Field updated.');
+
+    try {
+      if (type === 'plan-title') {
+        await persistPlanMeta({ title: value }, 'Field updated.');
+      } else if (type === 'plan-desc') {
+        await persistPlanMeta({ description: value }, 'Field updated.');
+      } else if (type === 'objective' && typeof index === 'number') {
+        const nextObjectives = activePlan.objectives.map((objective, objectiveIndex) =>
+          objectiveIndex === index ? value : objective
+        );
+        await persistPlanMeta({ objectives: nextObjectives }, 'Field updated.');
+      } else if (type === 'stakeholder' && id) {
+        const nextStakeholders = activePlan.stakeholders.map((stakeholder) => {
+          if (stakeholder.userId !== id) return stakeholder;
+          if (currentEdit.field === 'name') return { ...stakeholder, name: value };
+          if (currentEdit.field === 'role') return { ...stakeholder, role: value };
+          if (currentEdit.field === 'initials') return { ...stakeholder, initials: value.toUpperCase().slice(0, 2) };
+          return stakeholder;
+        });
+        await persistPlanMeta({ stakeholders: nextStakeholders }, 'Field updated.');
+      } else if (type === 'phase-title' && id) {
+        const phase = activePlan.phases.find((item) => item.id === id);
+        if (!phase) return;
+        await updateProjectPhaseMutation.mutateAsync({
+          phaseId: id,
+          title: value,
+          goal: phase.goal,
+          timeframe: phase.timeframe
+        });
+        addToast('success', 'Field updated.');
+      } else if (type === 'phase-goal' && id) {
+        const phase = activePlan.phases.find((item) => item.id === id);
+        if (!phase) return;
+        await updateProjectPhaseMutation.mutateAsync({
+          phaseId: id,
+          title: phase.title,
+          goal: value,
+          timeframe: phase.timeframe
+        });
+        addToast('success', 'Field updated.');
+      } else if (type === 'phase-timeframe' && id) {
+        const phase = activePlan.phases.find((item) => item.id === id);
+        if (!phase) return;
+        await updateProjectPhaseMutation.mutateAsync({
+          phaseId: id,
+          title: phase.title,
+          goal: phase.goal,
+          timeframe: value
+        });
+        addToast('success', 'Field updated.');
+      } else if (type === 'task-title' && id) {
+        await updateTaskViaApi(id, { title: value }, 'Field updated.');
+      } else if (type === 'task-desc' && id) {
+        await updateTaskViaApi(id, { description: value }, 'Field updated.');
+      } else if (type === 'task-owner' && id) {
+        await updateTaskViaApi(id, { owner: value }, 'Field updated.');
+      } else if (type === 'task-due' && id) {
+        await updateTaskViaApi(id, { due: value }, 'Field updated.');
+      } else if (type === 'task-priority' && id) {
+        await updateTaskViaApi(id, { priority: value as Task['priority'] }, 'Field updated.');
+      } else if (type === 'task-criteria' && id && typeof index === 'number') {
+        const taskContext = findTaskById(id);
+        if (!taskContext) return;
+        const nextCriteria = [...(taskContext.task.acceptanceCriteria || [])];
+        nextCriteria[index] = value;
+        await updateTaskViaApi(id, { acceptanceCriteria: nextCriteria }, 'Field updated.');
+      } else if (type === 'risk-desc' && id) {
+        await updateRiskViaApi(id, { description: value }, 'Field updated.');
+      } else if (type === 'risk-mitigation' && id) {
+        await updateRiskViaApi(id, { mitigation: value }, 'Field updated.');
+      } else if (type === 'risk-severity' && id) {
+        await updateRiskViaApi(id, { severity: value as RiskItem['severity'] }, 'Field updated.');
+      }
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to update field.');
+    }
   };
 
   // --- Manual Actions: Adding Entities ---
-  const handleAddPhase = (e: React.FormEvent) => {
+  const handleAddPhase = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPhaseForm.title.trim()) return;
-
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      const newPhase: Phase = {
-        id: `p-${Math.random().toString(36).slice(2, 9)}`,
+    try {
+      await createProjectPhaseMutation.mutateAsync({
         title: newPhaseForm.title,
         goal: newPhaseForm.goal,
-        timeframe: newPhaseForm.timeframe || 'TBD',
-        tasks: [],
-        gaps: []
-      };
-      plan.phases.push(newPhase);
-      updatedPlanMeta(plan);
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-
-    setIsAddingPhase(false);
-    setNewPhaseForm({ title: '', goal: '', timeframe: '' });
-    addToast('success', 'New phase added successfully.');
+        timeframe: newPhaseForm.timeframe
+      });
+      setIsAddingPhase(false);
+      setNewPhaseForm({ title: '', goal: '', timeframe: '' });
+      addToast('success', 'New phase added successfully.');
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to add phase.');
+    }
   };
 
-  const handleAddTask = (e: React.FormEvent) => {
+  const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTaskForm.title.trim() || !addingTaskPhaseId) return;
-
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      plan.phases = plan.phases.map(p => {
-        if (p.id === addingTaskPhaseId) {
-          const newTask: Task = {
-            id: `t-${Math.random().toString(36).slice(2, 9)}`,
-            title: newTaskForm.title,
-            owner: newTaskForm.owner || '—',
-            due: newTaskForm.due || 'TBD',
-            priority: newTaskForm.priority,
-            status: 'accepted', // Manual adds are direct
-            attachments: [],
-            sourceMessageIds: [],
-            confidence: 'high',
-            description: 'Provide context and rationale for this task...',
-            acceptanceCriteria: ['Task criteria 1']
-          };
-          return { ...p, tasks: [...p.tasks, newTask] };
-        }
-        return p;
+    try {
+      await createProjectTaskMutation.mutateAsync({
+        phaseId: addingTaskPhaseId,
+        title: newTaskForm.title,
+        owner: newTaskForm.owner,
+        due: newTaskForm.due,
+        priority: newTaskForm.priority
       });
-
-      updatedPlanMeta(plan);
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-
-    setAddingTaskPhaseId(null);
-    setNewTaskForm({ title: '', owner: '', due: '', priority: 'medium' });
-    addToast('success', 'Task created. Click on it to expand and edit details.');
+      setAddingTaskPhaseId(null);
+      setNewTaskForm({ title: '', owner: '', due: '', priority: 'medium' as any });
+      addToast('success', 'Task created. Click on it to expand and edit details.');
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to create task.');
+    }
   };
 
-  const handleAddRisk = (e: React.FormEvent) => {
+  const handleAddRisk = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRiskForm.description.trim()) return;
-
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      const newRisk: RiskItem = {
-        id: `r-${Math.random().toString(36).slice(2, 9)}`,
+    try {
+      await createProjectRiskMutation.mutateAsync({
         description: newRiskForm.description,
         severity: newRiskForm.severity,
-        mitigation: newRiskForm.mitigation || undefined,
-        sourceMessageIds: []
-      };
-      plan.globalRisks.push(newRisk);
-      updatedPlanMeta(plan);
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-
-    setIsAddingRisk(false);
-    setNewRiskForm({ description: '', severity: 'minor', mitigation: '' });
-    addToast('success', 'New risk item created.');
-  };
-
-  const handleAddStakeholder = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newStakeholderForm.name.trim() || !newStakeholderForm.role.trim()) return;
-
-    const initials = newStakeholderForm.initials.trim() ||
-      newStakeholderForm.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      const newStk: Stakeholder = {
-        userId: `u-${Math.random().toString(36).slice(2, 9)}`,
-        name: newStakeholderForm.name,
-        role: newStakeholderForm.role,
-        initials
-      };
-      plan.stakeholders.push(newStk);
-      updatedPlanMeta(plan);
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-
-    setIsAddingStakeholder(false);
-    setNewStakeholderForm({ name: '', role: '', initials: '' });
-    addToast('success', 'Team member added.');
+        mitigation: newRiskForm.mitigation
+      });
+      setIsAddingRisk(false);
+      setNewRiskForm({ description: '', severity: 'minor' as any, mitigation: '' });
+      addToast('success', 'New risk item created.');
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to create risk.');
+    }
   };
 
   // --- Deletion Actions ---
-  const handleRemoveObjective = (index: number) => {
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      plan.objectives = plan.objectives.filter((_, idx) => idx !== index);
-      updatedPlanMeta(plan);
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-    addToast('success', 'Objective removed.');
-  };
-
-  const handleAddObjectiveBullet = () => {
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      plan.objectives.push('New objective bullet...');
-      updatedPlanMeta(plan);
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-    addToast('success', 'Objective bullet added. Click to edit.');
-  };
-
-  const handleDeleteStakeholder = (userId: string) => {
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      plan.stakeholders = plan.stakeholders.filter(s => s.userId !== userId);
-      updatedPlanMeta(plan);
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-    addToast('success', 'Team member removed.');
-  };
-
-  const handleDeletePhase = (phaseId: string) => {
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      plan.phases = plan.phases.filter(p => p.id !== phaseId);
-      updatedPlanMeta(plan);
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-    setDeletePhaseTarget(null);
-    addToast('success', 'Phase and all tasks inside deleted.');
-  };
-
-  const handleDeleteTask = (taskId: string) => {
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      plan.phases = plan.phases.map(p => ({
-        ...p,
-        tasks: p.tasks.filter(t => t.id !== taskId)
-      }));
-      updatedPlanMeta(plan);
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-    setTaskDeleteConfirmId(null);
-    if (expandedTaskId === taskId) {
-      setExpandedTaskId(null);
+  const handleRemoveObjective = async (index: number) => {
+    try {
+      await persistPlanMeta(
+        { objectives: activePlan.objectives.filter((_, objectiveIndex) => objectiveIndex !== index) },
+        'Objective removed.'
+      );
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to remove objective.');
     }
-    addToast('success', 'Task deleted.');
   };
 
-  const handleDeleteRisk = (riskId: string) => {
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      plan.globalRisks = plan.globalRisks.filter(r => r.id !== riskId);
-      updatedPlanMeta(plan);
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-    addToast('success', 'Risk item deleted.');
+  const handleAddObjectiveBullet = async () => {
+    try {
+      await persistPlanMeta(
+        { objectives: [...activePlan.objectives, 'New objective bullet...'] },
+        'Objective bullet added. Click to edit.'
+      );
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to add objective.');
+    }
   };
 
-  const handleDismissGap = (phaseId: string, gapId: string) => {
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      plan.phases = plan.phases.map(p => {
-        if (p.id === phaseId) {
-          return { ...p, gaps: p.gaps.filter(g => g.id !== gapId) };
-        }
-        return p;
+  const handleDeleteStakeholder = async (userId: string) => {
+    try {
+      await persistPlanMeta(
+        { stakeholders: activePlan.stakeholders.filter((stakeholder) => stakeholder.userId !== userId) },
+        'Team member removed.'
+      );
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to remove team member.');
+    }
+  };
+
+  const handleDeletePhase = async (phaseId: string) => {
+    try {
+      await deleteProjectPhaseMutation.mutateAsync(phaseId);
+      setDeletePhaseTarget(null);
+      addToast('success', 'Phase and all tasks inside deleted.');
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to delete phase.');
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    const taskContext = findTaskById(taskId);
+    if (!taskContext) {
+      addToast('error', 'Task not found.');
+      return;
+    }
+    try {
+      await deleteProjectTaskMutation.mutateAsync({
+        phaseId: taskContext.phase.id,
+        taskId
       });
-      updatedPlanMeta(plan);
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-    setGapDismissConfirmId(null);
-    addToast('success', 'Gap notice dismissed.');
+      setTaskDeleteConfirmId(null);
+      if (expandedTaskId === taskId) {
+        setExpandedTaskId(null);
+      }
+      addToast('success', 'Task deleted.');
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to delete task.');
+    }
+  };
+
+  const handleDeleteRisk = async (riskId: string) => {
+    try {
+      await deleteProjectRiskMutation.mutateAsync(riskId);
+      addToast('success', 'Risk item deleted.');
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to delete risk.');
+    }
+  };
+
+  const handleDismissGap = async (phaseId: string, gapId: string) => {
+    try {
+      await dismissProjectGapMutation.mutateAsync({
+        phaseId,
+        gapId
+      });
+      setGapDismissConfirmId(null);
+      addToast('success', 'Gap notice dismissed.');
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to dismiss gap.');
+    }
   };
 
   // --- Task Detail Specific Controls ---
-  const handleAddCriteria = (taskId: string) => {
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      plan.phases = plan.phases.map(p => ({
-        ...p,
-        tasks: p.tasks.map(t => {
-          if (t.id === taskId) {
-            const currentCriteria = t.acceptanceCriteria || [];
-            return { ...t, acceptanceCriteria: [...currentCriteria, 'New acceptance criterion...'] };
-          }
-          return t;
-        })
-      }));
-      updatedPlanMeta(plan);
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-    addToast('success', 'Acceptance criterion added.');
+  const handleAddCriteria = async (taskId: string) => {
+    const taskContext = findTaskById(taskId);
+    if (!taskContext) {
+      addToast('error', 'Task not found.');
+      return;
+    }
+    try {
+      await updateTaskViaApi(
+        taskId,
+        { acceptanceCriteria: [...(taskContext.task.acceptanceCriteria || []), 'New acceptance criterion...'] },
+        'Acceptance criterion added.'
+      );
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to add criterion.');
+    }
   };
 
-  const handleRemoveCriteria = (taskId: string, criteriaIndex: number) => {
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      plan.phases = plan.phases.map(p => ({
-        ...p,
-        tasks: p.tasks.map(t => {
-          if (t.id === taskId && t.acceptanceCriteria) {
-            return {
-              ...t,
-              acceptanceCriteria: t.acceptanceCriteria.filter((_, idx) => idx !== criteriaIndex)
-            };
-          }
-          return t;
-        })
-      }));
-      updatedPlanMeta(plan);
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-    addToast('success', 'Acceptance criterion removed.');
+  const handleRemoveCriteria = async (taskId: string, criteriaIndex: number) => {
+    const taskContext = findTaskById(taskId);
+    if (!taskContext) {
+      addToast('error', 'Task not found.');
+      return;
+    }
+    try {
+      await updateTaskViaApi(
+        taskId,
+        {
+          acceptanceCriteria: (taskContext.task.acceptanceCriteria || []).filter((_, index) => index !== criteriaIndex)
+        },
+        'Acceptance criterion removed.'
+      );
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to remove criterion.');
+    }
   };
 
   const handleSimulateAttachFile = (taskId: string) => {
-    const fileNames = ['api-spec-v2.json', 'user-journey-map.png', 'checkout-styles.css', 'test-plan.md'];
-    const selectedName = fileNames[Math.floor(Math.random() * fileNames.length)];
-    const extensionsMap: Record<string, 'image' | 'document' | 'other'> = {
-      'api-spec-v2.json': 'document',
-      'user-journey-map.png': 'image',
-      'checkout-styles.css': 'other',
-      'test-plan.md': 'document'
-    };
-
-    const newAttachment: FileAttachment = {
-      id: `f-${Math.random().toString(36).slice(2, 9)}`,
-      name: selectedName,
-      type: extensionsMap[selectedName] || 'other',
-      sizeBytes: Math.floor(Math.random() * 5000000) + 100000,
-      url: '#',
-      uploadedBy: 'Jan Doe',
-      uploadedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    };
-
-    setPlanHistory(prev => {
-      const updated = [...prev];
-      const plan = { ...updated[activePlanIndex] };
-      plan.phases = plan.phases.map(p => ({
-        ...p,
-        tasks: p.tasks.map(t => {
-          if (t.id === taskId) {
-            return { ...t, attachments: [...t.attachments, newAttachment] };
-          }
-          return t;
-        })
-      }));
-      updatedPlanMeta(plan);
-      updated[activePlanIndex] = plan;
-      return updated;
-    });
-
-    addToast('success', `File "${selectedName}" attached successfully.`);
+    void taskId;
+    addToast('info', 'Attachment uploads are not wired in PlanView yet.');
   };
 
   // --- Render Inline Edit Component Helper ---
@@ -1077,99 +646,30 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
         <div className="flex-1 min-w-0 flex flex-col border-r border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface relative overflow-hidden shadow-sm">
 
           {/* Plan Controls Bar */}
-          {isApprover ? (
-            <div className="h-[52px] px-8 bg-surface border-b border-border-subtle flex items-center justify-between shrink-0">
-
-              {/* Version Selector */}
-              <div className="flex items-center gap-3">
-                <button
-                  disabled={activePlanIndex <= 0}
-                  onClick={() => {
-                    setActivePlanIndex(prev => prev - 1);
-                    setExpandedTaskId(null);
-                  }}
-                  className="btn-ghost p-1 h-8 w-8 rounded-md disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center border border-border-subtle hover:border-border"
-                  title="Previous Version"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <span className="text-sm text-text-primary font-semibold select-text">
-                  Version {activePlan.version} of {planHistory.length}
-                </span>
-                <button
-                  disabled={activePlanIndex >= planHistory.length - 1}
-                  onClick={() => {
-                    setActivePlanIndex(prev => prev + 1);
-                    setExpandedTaskId(null);
-                  }}
-                  className="btn-ghost p-1 h-8 w-8 rounded-md disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center border border-border-subtle hover:border-border"
-                  title="Newer Version"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Center/Right Action Badges / Controls */}
-              <div className="flex items-center gap-3">
-                {currentGapCount > 0 && isLatestVersion && activePlan.status !== 'finalized' && (
-                  <span className="category-badge badge--editor text-xs py-1 px-3 flex items-center gap-1.5 font-semibold">
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    <span>{currentGapCount} gaps flagged</span>
-                  </span>
-                )}
-
-                {/* Revert Trigger */}
-                <button
-                  onClick={() => setIsRevertOpen(true)}
-                  disabled={revertsRemaining <= 0 || planHistory.length <= 1 || !isLatestVersion}
-                  className="btn-secondary py-1 px-3.5 text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Revert</span>
-                </button>
-
-                {/* Finalize Trigger */}
-                <button
-                  onClick={() => setIsFinalizeOpen(true)}
-                  disabled={activePlan.status === 'finalized' || !isLatestVersion}
-                  className="btn-primary py-1 px-3.5 text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {activePlan.status === 'finalized' ? (
-                    <>
-                      <span>Finalized</span>
-                      <Check className="w-3.5 h-3.5 text-success" />
-                    </>
-                  ) : (
-                    <>
-                      <span>Finalize & Sync</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </>
-                  )}
-                </button>
-
-                {/* Review Toggle for Tablet/Mobile */}
-                {pendingChanges.length > 0 && isLatestVersion && activePlan.status !== 'finalized' && (
-                  <button
-                    onClick={() => setIsReviewDrawerOpen(true)}
-                    className="lg:hidden flex items-center gap-1 px-3 py-1 rounded-md bg-primary text-text-inverse text-xs font-bold"
-                  >
-                    <Sparkles className="w-3 h-3" />
-                    <span>Review ({pendingChanges.length})</span>
-                  </button>
-                )}
-              </div>
+          <div className="h-[52px] px-8 bg-surface border-b border-border-subtle flex items-center justify-between shrink-0">
+            <div className="text-sm text-text-primary font-semibold select-text">
+              Project plan
             </div>
-          ) : (
-            /* Read Only view notice for Viewer */
-            <div className="bg-primary-muted/20 border-b border-primary/20 px-8 py-3 flex items-center shrink-0">
-              <div className="flex items-center gap-3">
-                <Info className="w-4 h-4 text-primary shrink-0" />
-                <span className="text-xs font-semibold text-text-primary tracking-wide">
-                  This plan was finalized on {activePlan.finalizedAt || 'Jun 12'}. Comment via chat.
+
+            <div className="flex items-center gap-3">
+              {currentGapCount > 0 && (
+                <span className="category-badge badge--editor text-xs py-1 px-3 flex items-center gap-1.5 font-semibold">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>{currentGapCount} gaps flagged</span>
                 </span>
-              </div>
+              )}
+
+              {pendingChanges.length > 0 && isApprover && (
+                <button
+                  onClick={() => setIsReviewDrawerOpen(true)}
+                  className="lg:hidden flex items-center gap-1 px-3 py-1 rounded-md bg-primary text-text-inverse text-xs font-bold"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>Review ({pendingChanges.length})</span>
+                </button>
+              )}
             </div>
-          )}
+          </div>
 
           {/* Timeline Scrollable Content */}
           <div className="flex-1 overflow-y-auto px-6 sm:px-10 py-12 flex justify-center">
@@ -1188,7 +688,8 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                   undefined,
                   undefined,
                   false,
-                  "text-display-sm font-bold text-text-primary tracking-tight md:text-3xl"
+                  "text-display-sm font-bold text-text-primary tracking-tight md:text-3xl",
+                  "Untitled project plan"
                 )}
 
                 {renderEditableText(
@@ -1198,38 +699,18 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                   undefined,
                   undefined,
                   true,
-                  "text-sm text-text-secondary leading-relaxed"
+                  "text-sm text-text-secondary leading-relaxed",
+                  "Add a short project plan summary..."
                 )}
 
                 {/* Meta chip row */}
                 <div className="flex flex-wrap gap-2 mt-2 select-none">
                   <span className="category-badge badge--viewer text-xs py-0.5 px-2 font-semibold bg-surface-raised text-text-muted">
-                    Jun 12
+                    {formatDisplayDate(activePlan.updatedAt || activePlan.createdAt)}
                   </span>
-                  <span className="category-badge badge--viewer text-xs py-0.5 px-2 font-semibold bg-surface-raised text-text-muted">
-                    v{activePlan.version} of {planHistory.length}
+                  <span className="category-badge text-xs py-0.5 px-2 font-semibold bg-text-muted/10 text-text-muted border border-text-muted/20">
+                    Live
                   </span>
-
-                  {activePlan.status === 'pending_review' && (
-                    <span className="category-badge text-xs py-0.5 px-2 font-semibold bg-warning/10 text-warning border border-warning/20">
-                      Pending Review
-                    </span>
-                  )}
-                  {activePlan.status === 'finalized' && (
-                    <span className="category-badge text-xs py-0.5 px-2 font-semibold bg-success/10 text-success border border-success/20">
-                      Finalized
-                    </span>
-                  )}
-                  {activePlan.status === 'draft' && (
-                    <span className="category-badge text-xs py-0.5 px-2 font-semibold bg-text-muted/10 text-text-muted border border-text-muted/20">
-                      Draft
-                    </span>
-                  )}
-                  {activePlan.status === 'reverted' && (
-                    <span className="category-badge text-xs py-0.5 px-2 font-semibold bg-text-muted/10 text-text-muted border border-text-muted/20">
-                      Reverted
-                    </span>
-                  )}
                 </div>
               </div>
 
@@ -1277,86 +758,14 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                       </div>
                     ))}
                     {activePlan.objectives.length === 0 && (
-                      <span className="text-xs text-text-muted italic">No objectives defined.</span>
+                      <span className="text-xs text-text-muted italic">
+                        {hasNoPlanBody ? 'No plan yet, start your brainstorming conversation.' : 'No objectives defined.'}
+                      </span>
                     )}
                   </div>
                 </div>
 
-                {/* Stakeholder Team */}
                 <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs uppercase tracking-widest text-text-muted font-bold">
-                      Team
-                    </span>
-                    {isApprover && (
-                      <button
-                        onClick={() => setIsAddingStakeholder(true)}
-                        className="text-[11px] text-primary hover:text-primary-hover flex items-center gap-1 font-semibold"
-                      >
-                        <Plus className="w-3 h-3" />
-                        <span>Add Member</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Inline Stakeholder Add Form */}
-                  {isAddingStakeholder && (
-                    <form onSubmit={handleAddStakeholder} className="bg-surface border border-border p-4 rounded-xl flex flex-col gap-3 mb-2 select-text" onClick={(e) => e.stopPropagation()}>
-                      <h4 className="text-xs font-bold text-text-primary uppercase tracking-widest">New Team Member</h4>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="flex flex-col gap-1">
-                          <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Name *</label>
-                          <input
-                            type="text"
-                            placeholder="e.g. Sam K."
-                            className="bg-background border border-border rounded-md p-2 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                            value={newStakeholderForm.name}
-                            onChange={(e) => setNewStakeholderForm({ ...newStakeholderForm, name: e.target.value })}
-                            required
-                          />
-                        </div>
-                        <div className="flex flex-col gap-1">
-                          <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Role *</label>
-                          <input
-                            type="text"
-                            placeholder="e.g. QA"
-                            className="bg-background border border-border rounded-md p-2 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                            value={newStakeholderForm.role}
-                            onChange={(e) => setNewStakeholderForm({ ...newStakeholderForm, role: e.target.value })}
-                            required
-                          />
-                        </div>
-                        <div className="flex flex-col gap-1">
-                          <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Initials (optional)</label>
-                          <input
-                            type="text"
-                            placeholder="e.g. SK"
-                            maxLength={2}
-                            className="bg-background border border-border rounded-md p-2 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                            value={newStakeholderForm.initials}
-                            onChange={(e) => setNewStakeholderForm({ ...newStakeholderForm, initials: e.target.value })}
-                          />
-                        </div>
-                      </div>
-                      <div className="flex justify-end gap-2 mt-1">
-                        <button
-                          type="button"
-                          onClick={() => setIsAddingStakeholder(false)}
-                          className="btn-secondary py-1 px-3 text-xs"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="submit"
-                          className="btn-primary py-1 px-3 text-xs"
-                          disabled={!newStakeholderForm.name.trim() || !newStakeholderForm.role.trim()}
-                        >
-                          Add Member
-                        </button>
-                      </div>
-                    </form>
-                  )}
-
                   <div className="flex flex-col gap-3 pl-1">
                     {activePlan.stakeholders.map(stk => (
                       <div key={stk.userId} className="group/stk flex items-center justify-between hover:bg-surface-raised/20 p-1 rounded-lg transition-colors">
@@ -1383,7 +792,9 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                       </div>
                     ))}
                     {activePlan.stakeholders.length === 0 && (
-                      <span className="text-xs text-text-muted italic">No team members assigned.</span>
+                      <span className="text-xs text-text-muted italic">
+                        {hasNoPlanBody ? 'No plan yet, start your brainstorming conversation.' : 'No team members assigned.'}
+                      </span>
                     )}
                   </div>
                 </div>
@@ -1515,7 +926,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                             rowStyle = 'border-l-2 border-transparent bg-error/5 opacity-50 hover:bg-error/10';
                             badge = (
                               <span className="category-badge text-[9px] py-0.5 px-1.5 font-bold bg-error/10 text-error border border-error/20">
-                                ✕ Removed
+                                ? Removed
                               </span>
                             );
                           } else if (task.isNew) {
@@ -1537,14 +948,14 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                             badge = (
                               <span className="text-warning text-xs font-semibold flex items-center gap-1 shrink-0 select-none">
                                 <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
-                                <span>⚠ Missing Owner</span>
+                                <span>? Missing Owner</span>
                               </span>
                             );
                           } else if (task.status === 'rejected') {
                             rowStyle = 'border-l-2 border-transparent hover:bg-surface-raised/40 opacity-40';
                             badge = (
                               <span className="category-badge text-[9px] py-0.5 px-1.5 font-bold bg-error/10 text-error border border-error/20">
-                                ✕ Rejected
+                                ? Rejected
                               </span>
                             );
                           }
@@ -1609,19 +1020,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                                           className="bg-transparent text-xs text-text-secondary font-semibold focus:outline-none border-b border-transparent hover:border-text-muted cursor-pointer pr-1"
                                           value={task.priority}
                                           onChange={(e) => {
-                                            const val = e.target.value as any;
-                                            setPlanHistory(prev => {
-                                              const updated = [...prev];
-                                              const plan = { ...updated[activePlanIndex] };
-                                              plan.phases = plan.phases.map(p => ({
-                                                ...p,
-                                                tasks: p.tasks.map(t => t.id === task.id ? { ...t, priority: val } : t)
-                                              }));
-                                              updatedPlanMeta(plan);
-                                              updated[activePlanIndex] = plan;
-                                              return updated;
-                                            });
-                                            addToast('success', `Priority changed to ${val}.`);
+                                            void updateTaskViaApi(task.id, { priority: e.target.value as Task['priority'] }, `Priority changed to ${e.target.value}.`);
                                           }}
                                         >
                                           <option value="critical" className="bg-surface text-error">Critical</option>
@@ -1657,7 +1056,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                                     onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
                                     className="text-text-muted hover:text-text-primary text-[10px] transition-colors font-mono"
                                   >
-                                    {isExpanded ? '[▲ Hide]' : <span className="opacity-0 group-hover/task-row:opacity-100 font-mono">[▼ Expand]</span>}
+                                    {isExpanded ? '[? Hide]' : <span className="opacity-0 group-hover/task-row:opacity-100 font-mono">[? Expand]</span>}
                                   </button>
                                 </div>
                               </div>
@@ -2102,10 +1501,9 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                 {activePlan.phases.length === 0 && !isAddingPhase && (
                   /* 7. No Plan generated empty state */
                   <div className="flex flex-col items-center justify-center text-center p-12 bg-surface border border-border rounded-xl">
-                    <Sparkles className="w-10 h-10 text-text-muted mb-4" />
-                    <h2 className="text-lg font-bold text-text-primary mb-2">No plan generated yet</h2>
+                    <h2 className="text-lg font-bold text-text-primary mb-2">No plan yet</h2>
                     <p className="text-sm text-text-secondary max-w-[400px] mb-6 leading-relaxed">
-                      Start chatting with your team — the AI will generate a structured plan from your discussions.
+                      Start your brainstorming conversation with the team to shape the project plan.
                     </p>
                     <a href={`/project/${projectId}/chat`} className="btn-primary flex items-center gap-2">
                       <span>Go to Chat</span>
@@ -2115,38 +1513,37 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
               </div>
 
               {/* 3.9 Risk Summary Block */}
-              {(activePlan.status === 'finalized' || isApprover) && (
-                <div className="flex flex-col gap-6 mt-16 select-text">
-                  <div className="flex items-center justify-between border-b border-border pb-2">
-                    <span className="section-label uppercase tracking-widest text-text-muted text-xs">
-                      Risks & Flags
-                    </span>
-                    {isApprover && (
-                      <button
-                        onClick={() => setIsAddingRisk(prev => !prev)}
-                        className="text-[11px] text-primary hover:text-primary-hover flex items-center gap-1 font-semibold select-none"
-                      >
-                        <Plus className="w-3 h-3" />
-                        <span>Add Risk</span>
-                      </button>
-                    )}
-                  </div>
+              <div className="flex flex-col gap-6 mt-16 select-text">
+                <div className="flex items-center justify-between border-b border-border pb-2">
+                  <span className="section-label uppercase tracking-widest text-text-muted text-xs">
+                    Risks & Flags
+                  </span>
+                  {isApprover && (
+                    <button
+                      onClick={() => setIsAddingRisk(prev => !prev)}
+                      className="text-[11px] text-primary hover:text-primary-hover flex items-center gap-1 font-semibold select-none"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Add Risk</span>
+                    </button>
+                  )}
+                </div>
 
-                  {/* Add Risk Form inline */}
-                  {isAddingRisk && (
-                    <form onSubmit={handleAddRisk} className="bg-surface border border-border p-5 rounded-xl flex flex-col gap-4 mb-2 select-text" onClick={(e) => e.stopPropagation()}>
-                      <h4 className="text-xs font-bold text-text-primary uppercase tracking-widest border-b border-border-subtle pb-1.5">New Risk Flag</h4>
+                {/* Add Risk Form inline */}
+                {isAddingRisk && (
+                  <form onSubmit={handleAddRisk} className="bg-surface border border-border p-5 rounded-xl flex flex-col gap-4 mb-2 select-text" onClick={(e) => e.stopPropagation()}>
+                    <h4 className="text-xs font-bold text-text-primary uppercase tracking-widest border-b border-border-subtle pb-1.5">New Risk Flag</h4>
 
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] text-text-muted uppercase tracking-widest font-bold">Description *</label>
-                        <textarea
-                          placeholder="Describe the risk flag..."
-                          className="bg-background border border-border rounded-md p-3 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-primary min-h-[60px]"
-                          value={newRiskForm.description}
-                          onChange={(e) => setNewRiskForm({ ...newRiskForm, description: e.target.value })}
-                          required
-                        />
-                      </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-text-muted uppercase tracking-widest font-bold">Description *</label>
+                      <textarea
+                        placeholder="Describe the risk flag..."
+                        className="bg-background border border-border rounded-md p-3 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-primary min-h-[60px]"
+                        value={newRiskForm.description}
+                        onChange={(e) => setNewRiskForm({ ...newRiskForm, description: e.target.value })}
+                        required
+                      />
+                    </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="flex flex-col gap-1">
@@ -2189,12 +1586,12 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                           Create Flag
                         </button>
                       </div>
-                    </form>
-                  )}
+                  </form>
+                )}
 
-                  {/* Risks List */}
-                  <div className="flex flex-col gap-6 pl-1">
-                    {activePlan.globalRisks.map((risk) => {
+                {/* Risks List */}
+                <div className="flex flex-col gap-6 pl-1">
+                  {activePlan.globalRisks.map((risk) => {
                       // Severity colors map
                       const dotClassMap = {
                         critical: 'bg-error',
@@ -2227,15 +1624,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                                 }}
                                 value={risk.severity}
                                 onChange={(e) => {
-                                  const val = e.target.value as any;
-                                  setPlanHistory(prev => {
-                                    const updated = [...prev];
-                                    const plan = { ...updated[activePlanIndex] };
-                                    plan.globalRisks = plan.globalRisks.map(r => r.id === risk.id ? { ...r, severity: val } : r);
-                                    updatedPlanMeta(plan);
-                                    updated[activePlanIndex] = plan;
-                                    return updated;
-                                  });
+                                  void updateRiskViaApi(risk.id, { severity: e.target.value as RiskItem['severity'] }, 'Field updated.');
                                 }}
                               >
                                 <option value="critical" className="bg-surface text-error">Critical</option>
@@ -2281,12 +1670,13 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                       );
                     })}
 
-                    {activePlan.globalRisks.length === 0 && (
-                      <span className="text-xs text-text-muted italic pl-1">No risk flags registered.</span>
-                    )}
-                  </div>
+                  {activePlan.globalRisks.length === 0 && (
+                    <span className="text-xs text-text-muted italic pl-1">
+                      {hasNoPlanBody ? 'No plan yet, start your brainstorming conversation.' : 'No risk flags registered.'}
+                    </span>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           </div>
         </div>
@@ -2388,66 +1778,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
 
       {/* --- Modals & Overlays --- */}
 
-      {/* 6.4 Revert Confirmation Modal */}
-      <Modal
-        isOpen={isRevertOpen}
-        onClose={() => setIsRevertOpen(false)}
-        title="REVERT PLAN"
-        isWarning={true}
-      >
-        <div className="flex flex-col gap-4 select-text">
-          <p className="text-sm leading-relaxed text-text-secondary">
-            This will restore Version 1 and permanently remove all comments on the current version. This action cannot be undone.
-          </p>
-          <p className="text-sm font-semibold text-text-primary">
-            You have {revertsRemaining} reverts remaining ({revertsRemaining - 1} after this).
-          </p>
-          <div className="flex justify-end gap-3 border-t border-border-subtle pt-4 mt-2 select-none">
-            <button
-              onClick={() => setIsRevertOpen(false)}
-              className="btn-secondary py-1.5 px-5 text-xs font-semibold"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleRevertConfirm}
-              className="btn-primary bg-warning text-text-inverse hover:bg-warning/80 py-1.5 px-5 text-xs font-bold flex items-center gap-1.5"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Revert to v1</span>
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* 6.5 Finalize & Sync Modal */}
-      <Modal
-        isOpen={isFinalizeOpen}
-        onClose={() => setIsFinalizeOpen(false)}
-        title="FINALIZE PLAN"
-      >
-        <div className="flex flex-col gap-4 select-text">
-          <p className="text-sm leading-relaxed text-text-secondary">
-            This plan will be synced to all project members. They will be notified and can comment via chat.
-          </p>
-          <div className="flex justify-end gap-3 border-t border-border-subtle pt-4 mt-2 select-none">
-            <button
-              onClick={() => setIsFinalizeOpen(false)}
-              className="btn-secondary py-1.5 px-5 text-xs font-semibold"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleFinalizeConfirm}
-              className="btn-primary py-1.5 px-5 text-xs font-bold flex items-center gap-1.5"
-            >
-              <span>Finalize & Sync</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-      </Modal>
-
       {/* Phase Delete Modal */}
       <Modal
         isOpen={deletePhaseTarget !== null}
@@ -2510,7 +1840,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                   >
                     <div className="flex items-center justify-between select-none">
                       <span className="text-[9px] uppercase tracking-widest font-bold text-primary">
-                        ◈ {change.action.toUpperCase()} TASK
+                        ? {change.action.toUpperCase()} TASK
                       </span>
                     </div>
 
@@ -2533,13 +1863,13 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                         onClick={() => applyChangeState(change.id, true)}
                         className="flex-1 py-1 rounded bg-success/15 hover:bg-success text-success hover:text-text-inverse text-[10px] font-bold transition-all"
                       >
-                        ✓ Accept
+                        ? Accept
                       </button>
                       <button
                         onClick={() => applyChangeState(change.id, false)}
                         className="flex-1 py-1 rounded bg-error/15 hover:bg-error text-error hover:text-text-inverse text-[10px] font-bold transition-all"
                       >
-                        ✕ Reject
+                        ? Reject
                       </button>
                     </div>
                   </div>
@@ -2564,7 +1894,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                   }}
                   className="w-full btn-primary py-2 text-xs font-bold flex items-center justify-center gap-1.5"
                 >
-                  <span>✓ Accept All →</span>
+                  <span>? Accept All ?</span>
                 </button>
               </div>
             )}
@@ -2573,7 +1903,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
       )}
 
       {/* Floating Action Button for Review Drawer on Mobile/Tablet */}
-      {pendingChanges.length > 0 && isLatestVersion && activePlan.status !== 'finalized' && isApprover && (
+      {pendingChanges.length > 0 && isApprover && (
         <button
           onClick={() => setIsReviewDrawerOpen(true)}
           className="fixed bottom-6 right-6 lg:hidden z-40 bg-primary hover:bg-primary-hover text-text-inverse w-12 h-12 rounded-full shadow-2xl flex items-center justify-center transition-transform hover:scale-105 active:scale-95 animate-pulse-glow"
@@ -2599,3 +1929,4 @@ export const PlanView: React.FC<PlanViewProps> = (props) => {
 };
 
 export default PlanView;
+

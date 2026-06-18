@@ -10,6 +10,12 @@ import type {
   ApiProjectMessage,
   ApiProjectFile,
   ApiMemberInvitation,
+  StructuredPlan,
+  PlanVersion,
+  ApiProjectPlan,
+  ApiPlanVersion,
+  Task,
+  RiskItem,
 } from './types';
 
 export interface ProjectRepository {
@@ -37,6 +43,51 @@ export interface ProjectRepository {
   renameProject(projectId: string, newName: string, sessionId: string): Promise<Project>;
   deleteProject(projectId: string, sessionId: string): Promise<void>;
   acceptInvitation(token: string, sessionId: string): Promise<string>;
+
+  // Plan methods
+  fetchProjectPlan(projectId: string, sessionId: string): Promise<StructuredPlan>;
+  fetchProjectPlanVersions(projectId: string, sessionId: string): Promise<PlanVersion[]>;
+  updateProjectPlan(
+    projectId: string,
+    planPatch: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives' | 'stakeholders'>>,
+    sessionId: string
+  ): Promise<StructuredPlan>;
+  revertProjectPlan(projectId: string, sessionId: string): Promise<void>;
+  createProjectPhase(projectId: string, title: string, goal: string, timeframe: string, sessionId: string): Promise<void>;
+  updateProjectPhase(projectId: string, phaseId: string, title: string, goal: string, timeframe: string, sessionId: string): Promise<void>;
+  deleteProjectPhase(projectId: string, phaseId: string, sessionId: string): Promise<void>;
+  createProjectTask(
+    projectId: string,
+    phaseId: string,
+    title: string,
+    owner: string,
+    due: string,
+    priority: string,
+    sessionId: string
+  ): Promise<void>;
+  updateProjectTask(
+    projectId: string,
+    phaseId: string,
+    taskId: string,
+    updates: Partial<Pick<Task, 'title' | 'description' | 'owner' | 'due' | 'priority' | 'acceptanceCriteria'>>,
+    sessionId: string
+  ): Promise<void>;
+  deleteProjectTask(projectId: string, phaseId: string, taskId: string, sessionId: string): Promise<void>;
+  createProjectRisk(
+    projectId: string,
+    description: string,
+    severity: string,
+    mitigation: string,
+    sessionId: string
+  ): Promise<void>;
+  updateProjectRisk(
+    projectId: string,
+    riskId: string,
+    updates: Partial<Pick<RiskItem, 'description' | 'severity' | 'mitigation'>>,
+    sessionId: string
+  ): Promise<void>;
+  deleteProjectRisk(projectId: string, riskId: string, sessionId: string): Promise<void>;
+  dismissProjectGap(projectId: string, phaseId: string, gapId: string, sessionId: string): Promise<void>;
 }
 
 export class ApiProjectRepository implements ProjectRepository {
@@ -193,6 +244,184 @@ export class ApiProjectRepository implements ProjectRepository {
     );
     return response.data.project_id;
   }
+
+  async fetchProjectPlan(projectId: string, sessionId: string): Promise<StructuredPlan> {
+    const response = await apiFetch<ApiEnvelope<ApiProjectPlan | null>>(
+      `/api/projects/${projectId}/plan`,
+      sessionId
+    );
+    return response.data ? mapPlan(response.data, projectId) : createEmptyPlan(projectId);
+  }
+
+  async fetchProjectPlanVersions(projectId: string, sessionId: string): Promise<PlanVersion[]> {
+    const response = await apiFetch<ApiEnvelope<ApiPlanVersion[]>>(
+      `/api/projects/${projectId}/plan/versions`,
+      sessionId
+    );
+    return response.data.map(mapApiPlanVersion);
+  }
+
+  async updateProjectPlan(
+    projectId: string,
+    planPatch: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives' | 'stakeholders'>>,
+    sessionId: string
+  ): Promise<StructuredPlan> {
+    const response = await apiFetch<ApiEnvelope<ApiProjectPlan>>(
+      `/api/projects/${projectId}/plan`,
+      sessionId,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: planPatch.title,
+          description: planPatch.description,
+          objectives: planPatch.objectives,
+          stakeholders: planPatch.stakeholders?.map((stakeholder) => ({
+            user_id: stakeholder.userId,
+            name: stakeholder.name,
+            role: stakeholder.role,
+            initials: stakeholder.initials,
+          })),
+        }),
+      }
+    );
+    return mapPlan(response.data, projectId);
+  }
+
+  async revertProjectPlan(projectId: string, sessionId: string): Promise<void> {
+    await apiFetch<null>(`/api/projects/${projectId}/plan/revert`, sessionId, {
+      method: 'POST',
+    });
+  }
+
+  async createProjectPhase(
+    projectId: string,
+    title: string,
+    goal: string,
+    timeframe: string,
+    sessionId: string
+  ): Promise<void> {
+    await apiFetch<null>(`/api/projects/${projectId}/plan/phases`, sessionId, {
+      method: 'POST',
+      body: JSON.stringify({ title, goal, timeframe }),
+    });
+  }
+
+  async updateProjectPhase(
+    projectId: string,
+    phaseId: string,
+    title: string,
+    goal: string,
+    timeframe: string,
+    sessionId: string
+  ): Promise<void> {
+    await apiFetch<null>(`/api/projects/${projectId}/plan/phases/${phaseId}`, sessionId, {
+      method: 'PATCH',
+      body: JSON.stringify({ title, goal, timeframe }),
+    });
+  }
+
+  async deleteProjectPhase(projectId: string, phaseId: string, sessionId: string): Promise<void> {
+    await apiFetch<null>(`/api/projects/${projectId}/plan/phases/${phaseId}?force=true`, sessionId, {
+      method: 'DELETE',
+    });
+  }
+
+  async createProjectTask(
+    projectId: string,
+    phaseId: string,
+    title: string,
+    owner: string,
+    due: string,
+    priority: string,
+    sessionId: string
+  ): Promise<void> {
+    await apiFetch<null>(`/api/projects/${projectId}/plan/phases/${phaseId}/tasks`, sessionId, {
+      method: 'POST',
+      body: JSON.stringify({
+        title,
+        owner,
+        due,
+        priority,
+        description: '',
+        acceptance_criteria: [],
+      }),
+    });
+  }
+
+  async updateProjectTask(
+    projectId: string,
+    phaseId: string,
+    taskId: string,
+    updates: Partial<Pick<Task, 'title' | 'description' | 'owner' | 'due' | 'priority' | 'acceptanceCriteria'>>,
+    sessionId: string
+  ): Promise<void> {
+    await apiFetch<null>(`/api/projects/${projectId}/plan/phases/${phaseId}/tasks/${taskId}`, sessionId, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        title: updates.title,
+        owner: updates.owner,
+        due: updates.due,
+        priority: updates.priority,
+        description: updates.description,
+        acceptance_criteria: updates.acceptanceCriteria,
+      }),
+    });
+  }
+
+  async deleteProjectTask(projectId: string, phaseId: string, taskId: string, sessionId: string): Promise<void> {
+    await apiFetch<null>(
+      `/api/projects/${projectId}/plan/phases/${phaseId}/tasks/${taskId}`,
+      sessionId,
+      {
+        method: 'DELETE',
+      }
+    );
+  }
+
+  async createProjectRisk(
+    projectId: string,
+    description: string,
+    severity: string,
+    mitigation: string,
+    sessionId: string
+  ): Promise<void> {
+    await apiFetch<null>(`/api/projects/${projectId}/plan/risks`, sessionId, {
+      method: 'POST',
+      body: JSON.stringify({ description, severity, mitigation }),
+    });
+  }
+
+  async updateProjectRisk(
+    projectId: string,
+    riskId: string,
+    updates: Partial<Pick<RiskItem, 'description' | 'severity' | 'mitigation'>>,
+    sessionId: string
+  ): Promise<void> {
+    await apiFetch<null>(`/api/projects/${projectId}/plan/risks/${riskId}`, sessionId, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        description: updates.description,
+        severity: updates.severity,
+        mitigation: updates.mitigation,
+      }),
+    });
+  }
+
+  async deleteProjectRisk(projectId: string, riskId: string, sessionId: string): Promise<void> {
+    await apiFetch<null>(`/api/projects/${projectId}/plan/risks/${riskId}`, sessionId, {
+      method: 'DELETE',
+    });
+  }
+
+  async dismissProjectGap(projectId: string, phaseId: string, gapId: string, sessionId: string): Promise<void> {
+    await apiFetch<null>(
+      `/api/projects/${projectId}/plan/phases/${phaseId}/gaps/${gapId}`,
+      sessionId,
+      {
+        method: 'DELETE',
+      }
+    );
+  }
 }
 
 // Default instance
@@ -279,4 +508,120 @@ export function mapApiProjectMember(member: ApiProjectMember, currentSessionId: 
     role,
     isCreator: member.role === 'creator',
   };
+}
+
+export function mapApiPlanVersion(version: ApiPlanVersion): PlanVersion {
+  return {
+    id: version.id,
+    version: version.version,
+    createdAt: version.created_at,
+    status: version.status,
+  };
+}
+
+export function formatDisplayDate(value?: string): string {
+  if (!value) return 'Today';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+export function createEmptyPlan(projectId: string): StructuredPlan {
+  return {
+    id: `empty-${projectId}`,
+    projectId,
+    title: '',
+    description: '',
+    status: 'draft',
+    version: 1,
+    createdAt: '',
+    updatedAt: '',
+    objectives: [],
+    stakeholders: [],
+    phases: [],
+    globalRisks: [],
+  };
+}
+
+export function mapPlanStatus(plan: ApiProjectPlan): StructuredPlan['status'] {
+  return 'draft';
+}
+
+export function mapPlan(plan: ApiProjectPlan, fallbackProjectId: string): StructuredPlan {
+  return {
+    id: plan.id,
+    projectId: plan.project_id || fallbackProjectId,
+    title: plan.title || '',
+    description: plan.description || '',
+    status: mapPlanStatus(plan),
+    version: plan.version || 1,
+    createdAt: plan.created_at || '',
+    updatedAt: plan.finalized_at || plan.created_at || '',
+    objectives: [...(plan.objectives || [])],
+    stakeholders: (plan.stakeholders || []).map((stakeholder) => ({
+      userId: stakeholder.user_id,
+      name: stakeholder.name,
+      role: stakeholder.role,
+      initials: stakeholder.initials,
+    })),
+    phases: (plan.phases || []).map((phase) => ({
+      id: phase.id,
+      title: phase.title,
+      goal: phase.goal || '',
+      timeframe: phase.timeframe || '',
+      tasks: (phase.tasks || []).map((task) => ({
+        id: task.id,
+        title: task.title,
+        description: task.description || '',
+        acceptanceCriteria: [...(task.acceptance_criteria || [])],
+        owner: task.owner || undefined,
+        due: task.due || undefined,
+        priority: task.priority || 'medium',
+        status: task.status === 'gap' ? 'gap' : 'accepted',
+        attachments: (task.attachments || []).map((attachment) => ({
+          id: attachment.id,
+          name: attachment.filename,
+          type: attachment.mime_type.startsWith('image/')
+            ? 'image'
+            : attachment.mime_type.startsWith('video/')
+              ? 'video'
+              : attachment.mime_type.startsWith('audio/')
+                ? 'audio'
+                : attachment.mime_type.includes('pdf') || attachment.mime_type.startsWith('text/')
+                  ? 'document'
+                  : 'other',
+          sizeBytes: attachment.size_bytes,
+          url: attachment.storage_path,
+          uploadedBy: attachment.uploaded_by_session_id,
+          uploadedAt: formatDisplayDate(attachment.uploaded_at),
+        })),
+        sourceMessageIds: [...(task.source_message_ids || [])],
+        sourceExcerpt: task.source_excerpt || undefined,
+        confidence: task.confidence || 'high',
+      })),
+      gaps: (phase.gaps || []).map((gap) => ({
+        id: gap.id,
+        description: gap.description,
+        severity: gap.severity || 'minor',
+        sourceMessageIds: [...(gap.source_message_ids || [])],
+        sourceExcerpt: gap.source_excerpt || undefined,
+      })),
+    })),
+    globalRisks: (plan.global_risks || []).map((risk) => ({
+      id: risk.id,
+      description: risk.description,
+      severity: risk.severity || 'minor',
+      mitigation: risk.mitigation || undefined,
+      sourceMessageIds: [...(risk.source_message_ids || [])],
+      sourceExcerpt: risk.source_excerpt || undefined,
+    })),
+  };
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }

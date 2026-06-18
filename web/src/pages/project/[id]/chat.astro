@@ -14,7 +14,7 @@ if (!id) {
 ---
 
 <Page title="Team Chat — Orca">
-  <TabBar currentTab="chat" projectId={id} client:load />
+  <TabBar currentTab="chat" projectId={id} />
   <ChatView projectId={id} client:only="react">
     <div class="flex-grow flex bg-background lg:h-[calc(100vh-104px)] w-full"></div>
   </ChatView>

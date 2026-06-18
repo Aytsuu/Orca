@@ -1,6 +1,7 @@
 // src/components/islands/features/PlanView.test.tsx
 import { describe, it, expect } from 'vitest';
-import { formatBytes, PlanView } from './PlanView';
+import { formatBytes } from '../../../stores/projectStore';
+import { PlanView } from './PlanView';
 
 describe('PlanView component and utilities', () => {
   describe('formatBytes helper', () => {

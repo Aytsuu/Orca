@@ -512,4 +512,35 @@ describe('projectStore tests', () => {
       });
     });
   });
+
+  describe('Project Repository Plans', () => {
+    it('sends partial plan meta updates without unrelated fields', async () => {
+      const repo = new ApiProjectRepository();
+      const { apiFetch } = await import('../lib/api/client');
+      (apiFetch as Mock).mockResolvedValue({
+        data: {
+          id: 'plan_1',
+          project_id: 'proj_1',
+          version: 2,
+          created_at: '2026-06-18T10:00:00Z',
+          finalized_at: '2026-06-18T10:01:00Z',
+          title: 'Updated title',
+          description: 'Existing description',
+          objectives: [],
+          stakeholders: [],
+          phases: [],
+          global_risks: [],
+        },
+      });
+
+      await repo.updateProjectPlan('proj_1', { title: 'Updated title' }, 'alpha');
+
+      expect(apiFetch).toHaveBeenCalledWith('/api/projects/proj_1/plan', 'alpha', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: 'Updated title',
+        }),
+      });
+    });
+  });
 });

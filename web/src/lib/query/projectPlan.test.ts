@@ -37,7 +37,9 @@ function createPlanFixture(): StructuredPlan {
         id: 'phase_1',
         title: 'Phase 1',
         goal: 'Launch',
+        description: 'High-level phase overview',
         timeframe: 'Week 1',
+        assignedMembers: [],
         tasks: [
           {
             id: 'task_1',
@@ -89,7 +91,7 @@ describe('projectPlan optimistic helpers', () => {
 
   it('builds and adds an optimistic phase', () => {
     const plan = createPlanFixture();
-    const phase = buildOptimisticPhase('Phase 2', 'Scale', 'Week 2');
+    const phase = buildOptimisticPhase('Phase 2', 'High-level delivery overview', 'Scale', 'Week 2', []);
 
     const updated = addOptimisticPhase(plan, phase);
 
@@ -104,16 +106,20 @@ describe('projectPlan optimistic helpers', () => {
     const patched = applyPhasePatch(plan, {
       phaseId: 'phase_1',
       title: 'Phase One',
+      description: 'Updated overview',
       goal: 'Ship',
       timeframe: 'Week 3',
+      assignedMembers: [{ sessionId: 'sam', name: 'Sam', initials: 'S', role: 'EDITOR' }],
     });
     const removed = removeOptimisticPhase(plan, 'phase_1');
 
     expect(patched.phases[0]).toMatchObject({
       id: 'phase_1',
       title: 'Phase One',
+      description: 'Updated overview',
       goal: 'Ship',
       timeframe: 'Week 3',
+      assignedMembers: [{ sessionId: 'sam', name: 'Sam', initials: 'S', role: 'EDITOR' }],
     });
     expect(removed.phases).toEqual([]);
   });
@@ -271,7 +277,7 @@ describe('projectPlan optimistic helpers', () => {
     });
 
     expect(phaseAdded.phases).toHaveLength(2);
-    expect(phaseAdded.phases[1]).toMatchObject({ title: 'Phase 2', goal: 'Scale' });
+    expect(phaseAdded.phases[1]).toMatchObject({ title: 'Phase 2', goal: 'Scale', assignedMembers: [] });
     expect(taskAdded.phases[0].tasks).toHaveLength(2);
     expect(taskAdded.phases[0].tasks[1]).toMatchObject({ title: 'New task', owner: 'Sam' });
     expect(riskAdded.globalRisks).toHaveLength(2);

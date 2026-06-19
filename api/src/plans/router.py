@@ -216,7 +216,9 @@ async def create_phase_endpoint(
         project_id=str(project_id),
         title=payload.title,
         goal=payload.goal,
+        description=payload.description,
         timeframe=payload.timeframe,
+        assigned_members=[item.model_dump(mode="python") for item in payload.assigned_members],
     )
     return MetaEnvelope(data=PhaseOut.model_validate(phase), meta={"conflicts": conflicts})
 
@@ -236,7 +238,11 @@ async def update_phase_endpoint(
         phase_id=phase_id,
         title=payload.title,
         goal=payload.goal,
+        description=payload.description,
         timeframe=payload.timeframe,
+        assigned_members=[item.model_dump(mode="python") for item in payload.assigned_members]
+        if payload.assigned_members is not None
+        else None,
     )
     return MetaEnvelope(data=PhaseOut.model_validate(phase), meta={"conflicts": conflicts})
 

@@ -26,6 +26,7 @@ import {
 import type {
   StructuredPlan,
   Phase,
+  PhaseAssignedMember,
   Task,
   GapItem,
   Stakeholder,
@@ -172,7 +173,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
 
   // Manual Add Form states
   const [isAddingPhase, setIsAddingPhase] = useState(false);
-  const [newPhaseForm, setNewPhaseForm] = useState({ title: '', goal: '', timeframe: '' });
+  const [newPhaseForm, setNewPhaseForm] = useState({ title: '', goal: '', description: '', timeframe: '' });
 
   const [addingTaskPhaseId, setAddingTaskPhaseId] = useState<string | null>(null);
   const [newTaskForm, setNewTaskForm] = useState({ title: '', owner: '', due: '', priority: 'medium' as any });
@@ -197,6 +198,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
 
   // Dropdown menu state
   const [activePhaseMenuId, setActivePhaseMenuId] = useState<string | null>(null);
+  const [activePhaseAssigneePickerId, setActivePhaseAssigneePickerId] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Click outside phase menu handler
@@ -205,12 +207,21 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setActivePhaseMenuId(null);
       }
+      const target = event.target as HTMLElement | null;
+      if (
+        activePhaseAssigneePickerId &&
+        target &&
+        !target.closest('[data-phase-assignee-trigger]') &&
+        !target.closest('[data-phase-assignee-popover]')
+      ) {
+        setActivePhaseAssigneePickerId(null);
+      }
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, []);
+  }, [activePhaseAssigneePickerId]);
 
   const pendingChanges: ProposedChange[] = pendingProposal?.changes || [];
   const [proposalStakeholderDrafts, setProposalStakeholderDrafts] = useState<Record<string, Stakeholder[]>>({});
@@ -271,6 +282,47 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
       if (task) return { phase, task };
     }
     return null;
+  };
+
+  const updatePhaseViaApi = async (
+    phaseId: string,
+    updates: Partial<Pick<Phase, 'title' | 'goal' | 'description' | 'timeframe' | 'assignedMembers'>>,
+    successMessage: string
+  ) => {
+    const phase = activePlan.phases.find((item) => item.id === phaseId);
+    if (!phase) {
+      addToast('error', 'Phase not found.');
+      return;
+    }
+    try {
+      await updateProjectPhaseMutation.mutateAsync({
+        phaseId,
+        title: updates.title ?? phase.title,
+        goal: updates.goal ?? phase.goal,
+        description: updates.description ?? (phase.description || ''),
+        timeframe: updates.timeframe ?? phase.timeframe,
+        assignedMembers: updates.assignedMembers ?? phase.assignedMembers,
+      });
+      addToast('success', successMessage);
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Failed to update phase.');
+    }
+  };
+
+  const togglePhaseAssignedMember = async (phase: Phase, teammate: typeof teammates[number]) => {
+    const alreadyAssigned = phase.assignedMembers.some((member) => member.sessionId === teammate.sessionId);
+    const nextAssignedMembers: PhaseAssignedMember[] = alreadyAssigned
+      ? phase.assignedMembers.filter((member) => member.sessionId !== teammate.sessionId)
+      : [
+        ...phase.assignedMembers,
+        {
+          sessionId: teammate.sessionId,
+          name: teammate.name,
+          initials: teammate.initials,
+          role: teammate.role,
+        },
+      ];
+    await updatePhaseViaApi(phase.id, { assignedMembers: nextAssignedMembers }, 'Phase assignments updated.');
   };
 
   const updateTaskViaApi = async (
@@ -365,7 +417,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     const currentEdit = editingField;
     const { type, id, index, subIndex, value, subValue } = currentEdit;
 
-    if (value.trim() === '' && type !== 'task-desc' && type !== 'phase-goal' && type !== 'risk-mitigation') {
+    if (value.trim() === '' && type !== 'task-desc' && type !== 'phase-goal' && type !== 'phase-description' && type !== 'risk-mitigation') {
       addToast('error', 'Title/text field cannot be blank.');
       return;
     }
@@ -399,7 +451,9 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
           phaseId: id,
           title: value,
           goal: phase.goal,
-          timeframe: phase.timeframe
+          description: phase.description || '',
+          timeframe: phase.timeframe,
+          assignedMembers: phase.assignedMembers,
         });
         addToast('success', 'Field updated.');
       } else if (type === 'phase-goal' && id) {
@@ -409,7 +463,21 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
           phaseId: id,
           title: phase.title,
           goal: value,
-          timeframe: phase.timeframe
+          description: phase.description || '',
+          timeframe: phase.timeframe,
+          assignedMembers: phase.assignedMembers,
+        });
+        addToast('success', 'Field updated.');
+      } else if (type === 'phase-description' && id) {
+        const phase = activePlan.phases.find((item) => item.id === id);
+        if (!phase) return;
+        await updateProjectPhaseMutation.mutateAsync({
+          phaseId: id,
+          title: phase.title,
+          goal: phase.goal,
+          description: value,
+          timeframe: phase.timeframe,
+          assignedMembers: phase.assignedMembers,
         });
         addToast('success', 'Field updated.');
       } else if (type === 'phase-timeframe' && id) {
@@ -419,7 +487,9 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
           phaseId: id,
           title: phase.title,
           goal: phase.goal,
-          timeframe: value
+          description: phase.description || '',
+          timeframe: value,
+          assignedMembers: phase.assignedMembers,
         });
         addToast('success', 'Field updated.');
       } else if (type === 'task-title' && id) {
@@ -458,10 +528,12 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
       await createProjectPhaseMutation.mutateAsync({
         title: newPhaseForm.title,
         goal: newPhaseForm.goal,
-        timeframe: newPhaseForm.timeframe
+        description: newPhaseForm.description,
+        timeframe: newPhaseForm.timeframe,
+        assignedMembers: []
       });
       setIsAddingPhase(false);
-      setNewPhaseForm({ title: '', goal: '', timeframe: '' });
+      setNewPhaseForm({ title: '', goal: '', description: '', timeframe: '' });
       addToast('success', 'New phase added successfully.');
     } catch (error) {
       addToast('error', error instanceof Error ? error.message : 'Failed to add phase.');
@@ -644,6 +716,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     if (type === 'objective') return 'Enter a specific business or delivery objective...';
     if (type === 'phase-title') return 'Enter the phase name, such as Discovery or Launch...';
     if (type === 'phase-goal') return 'Describe the outcome this phase should achieve...';
+    if (type === 'phase-description') return 'Summarize the phase at a high level without repeating task titles...';
     if (type === 'phase-timeframe') return 'Enter a timeframe such as Week 2 or Q3 2026...';
     if (type === 'task-title') return 'Enter a concrete task title...';
     if (type === 'task-desc') return 'Describe the task, expected output, and any constraints...';
@@ -1096,6 +1169,21 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                 {change.detail}
               </div>
             )}
+            {task.description && (
+              <div className="mt-2 text-xs text-text-secondary leading-relaxed">
+                {String(task.description)}
+              </div>
+            )}
+            {Array.isArray(task.acceptance_criteria) && task.acceptance_criteria.length > 0 && (
+              <div className="mt-2 flex flex-col gap-1">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Done When</span>
+                <ul className="list-disc pl-4 text-[11px] text-text-secondary leading-relaxed">
+                  {task.acceptance_criteria.map((criterion, criterionIndex) => (
+                    <li key={`${change.id}-${index}-${criterionIndex}`}>{criterion}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </div>
       ));
@@ -1130,6 +1218,11 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
               {(phase.goal || change.detail) && (
                 <span className="text-sm text-text-secondary italic">
                   {String(phase.goal || change.detail)}
+                </span>
+              )}
+              {phase.description && (
+                <span className="text-sm text-text-muted leading-relaxed">
+                  {String(phase.description)}
                 </span>
               )}
             </div>
@@ -1416,6 +1509,97 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                             false,
                             "text-sm text-text-secondary italic"
                           )}
+
+                          {renderEditableText(
+                            phase.description || '',
+                            'phase-description',
+                            phase.id,
+                            undefined,
+                            undefined,
+                            true,
+                            "text-sm text-text-muted leading-relaxed"
+                          )}
+
+                          <div className="relative mt-1">
+                            <button
+                              type="button"
+                              data-phase-assignee-trigger
+                              onClick={() => setActivePhaseAssigneePickerId((current) => current === phase.id ? null : phase.id)}
+                              className="inline-flex items-center gap-2 rounded-full border border-border bg-surface-raised/40 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-text-muted hover:text-text-primary hover:border-primary/40 transition-colors"
+                            >
+                              <span>Assigned</span>
+                              <span className="text-text-primary">{phase.assignedMembers.length}</span>
+                            </button>
+
+                            {phase.assignedMembers.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {phase.assignedMembers.map((member) => (
+                                  <span
+                                    key={`${phase.id}-${member.sessionId}`}
+                                    className="inline-flex items-center gap-2 rounded-full border border-border-subtle bg-surface-raised/30 px-2.5 py-1 text-xs text-text-secondary"
+                                  >
+                                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
+                                      {member.initials}
+                                    </span>
+                                    <span>{member.name}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            {activePhaseAssigneePickerId === phase.id && (
+                              <div
+                                data-phase-assignee-popover
+                                className="absolute left-0 top-full z-20 mt-3 w-full max-w-sm rounded-xl border border-border bg-surface p-3 shadow-2xl"
+                              >
+                                <div className="mb-2 flex items-center justify-between">
+                                  <span className="text-[11px] font-bold uppercase tracking-widest text-text-primary">
+                                    Assign Members
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setActivePhaseAssigneePickerId(null)}
+                                    className="text-text-muted hover:text-text-primary"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                                <p className="mb-3 text-xs leading-relaxed text-text-muted">
+                                  Select project members responsible for this phase.
+                                </p>
+                                <div className="flex max-h-56 flex-col gap-1 overflow-y-auto pr-1">
+                                  {teammates.map((member) => {
+                                    const isAssigned = phase.assignedMembers.some((assigned) => assigned.sessionId === member.sessionId);
+                                    return (
+                                      <button
+                                        key={`${phase.id}-${member.sessionId}`}
+                                        type="button"
+                                        onClick={() => {
+                                          void togglePhaseAssignedMember(phase, member);
+                                        }}
+                                        className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors ${
+                                          isAssigned
+                                            ? 'border-primary/40 bg-primary/10 text-text-primary'
+                                            : 'border-border-subtle bg-background text-text-secondary hover:border-border hover:text-text-primary'
+                                        }`}
+                                      >
+                                        <span className="flex items-center gap-2">
+                                          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-surface-raised text-[11px] font-bold text-text-primary">
+                                            {member.initials}
+                                          </span>
+                                          <span className="flex flex-col">
+                                            <span className="text-sm font-semibold">{member.name}</span>
+                                            <span className="text-[11px] uppercase tracking-wider text-text-muted">{member.role}</span>
+                                          </span>
+                                        </span>
+                                        {isAssigned && <Check className="w-4 h-4 text-primary" />}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         {/* Phase Overflow Menu (Approver Only) */}
@@ -1452,6 +1636,16 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                                 >
                                   <Edit2 className="w-3.5 h-3.5 text-primary" />
                                   <span>Edit Goal</span>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingField({ type: 'phase-description', id: phase.id, value: phase.description || '' });
+                                    setActivePhaseMenuId(null);
+                                  }}
+                                  className="w-full text-left px-4 py-2 text-xs text-text-primary hover:bg-primary-muted transition-colors flex items-center gap-2"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5 text-primary" />
+                                  <span>Edit Description</span>
                                 </button>
                                 <button
                                   onClick={() => {
@@ -2046,6 +2240,16 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                         className="bg-background border border-border rounded-md p-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary w-full"
                         value={newPhaseForm.goal}
                         onChange={(e) => setNewPhaseForm({ ...newPhaseForm, goal: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-text-muted uppercase tracking-widest font-bold">Description (high-level overview)</label>
+                      <textarea
+                        placeholder="Describe the phase scope and intended outcome without listing tasks..."
+                        className="bg-background border border-border rounded-md p-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary w-full min-h-[90px]"
+                        value={newPhaseForm.description}
+                        onChange={(e) => setNewPhaseForm({ ...newPhaseForm, description: e.target.value })}
                       />
                     </div>
 

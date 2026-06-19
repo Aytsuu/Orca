@@ -18,6 +18,13 @@ export interface Teammate {
   email?: string;
 }
 
+export interface PhaseAssignedMember {
+  sessionId: string;
+  name: string;
+  initials: string;
+  role: 'APPROVER' | 'EDITOR' | 'VIEWER';
+}
+
 export interface ProjectMessage {
   id: string;
   projectId: string;
@@ -142,7 +149,9 @@ export interface Phase {
   id: string;
   title: string;
   goal: string;
+  description?: string;
   timeframe: string;
+  assignedMembers: PhaseAssignedMember[];
   tasks: Task[];
   gaps: GapItem[];
 }
@@ -247,7 +256,14 @@ export interface ApiPlanPhase {
   id: string;
   title: string;
   goal?: string | null;
+  description?: string | null;
   timeframe?: string | null;
+  assigned_members?: {
+    session_id: string;
+    name: string;
+    initials: string;
+    role: 'APPROVER' | 'EDITOR' | 'VIEWER';
+  }[];
   tasks?: ApiPlanTask[];
   gaps?: ApiPlanGap[];
 }

@@ -670,6 +670,9 @@ async def test_pipeline_sanitizes_analyzer_and_planner_prompt_payload_ids(fake_s
         assert run["id"] not in prompt
         assert "phase-row-id" not in prompt
         assert "task-row-id" not in prompt
+    assert "treat missing task descriptions and missing acceptance criteria as real planning gaps" in analyzer_prompt
+    assert 'Treat task descriptions and acceptance_criteria as expected outputs' in planner_prompt
+    assert 'leave those fields empty rather than inventing detail' in planner_prompt
 
 
 @pytest.mark.asyncio

@@ -1534,6 +1534,14 @@ async def test_get_plan_returns_enriched_shape_without_breaking_legacy_fields(
                         "id": "phase-1",
                         "title": "Phase 1",
                         "goal": "Ship foundation",
+                        "assigned_members": [
+                            {
+                                "session_id": "alpha",
+                                "name": "You (Creator)",
+                                "role": "APPROVER",
+                                "initials": "YO",
+                            }
+                        ],
                         "timeframe": "Day 1-2",
                         "tasks": [],
                         "gaps": [],
@@ -1558,6 +1566,7 @@ async def test_get_plan_returns_enriched_shape_without_breaking_legacy_fields(
     assert payload["title"] == "Runway Q3 Launch"
     assert payload["objectives"] == ["Reduce churn"]
     assert payload["phases"][0]["id"] == "phase-1"
+    assert payload["phases"][0]["assigned_members"][0]["session_id"] == "alpha"
     assert payload["global_risks"] == []
 
 
@@ -1828,10 +1837,23 @@ async def test_phase_task_attachment_and_delete_phase_guards(
     create_phase = await client.post(
         f"/api/v1/projects/{project['id']}/plan/phases",
         headers={"X-Session-Id": "alpha"},
-        json={"title": "Phase 1", "goal": "Ship", "timeframe": "Week 1"},
+        json={
+            "title": "Phase 1",
+            "goal": "Ship",
+            "timeframe": "Week 1",
+            "assigned_members": [
+                {
+                    "session_id": "alpha",
+                    "name": "You (Creator)",
+                    "role": "APPROVER",
+                    "initials": "YO",
+                }
+            ],
+        },
     )
     assert create_phase.status_code == 201
     phase_id = create_phase.json()["data"]["id"]
+    assert create_phase.json()["data"]["assigned_members"][0]["session_id"] == "alpha"
 
     create_task = await client.post(
         f"/api/v1/projects/{project['id']}/plan/phases/{phase_id}/tasks",
@@ -1873,6 +1895,95 @@ async def test_phase_task_attachment_and_delete_phase_guards(
     )
     assert force_delete.status_code == 200
     assert force_delete.json()["data"]["id"] == phase_id
+
+
+@pytest.mark.asyncio
+async def test_phase_assignees_can_be_updated_and_returned_in_plan(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "content": {
+                "title": "Initial",
+                "description": "Draft",
+                "objectives": [],
+                "stakeholders": [],
+                "phases": [
+                    {
+                        "id": "phase-1",
+                        "title": "Discovery",
+                        "goal": "Define the scope",
+                        "description": "High-level discovery work",
+                        "timeframe": "Week 1",
+                        "assigned_members": [],
+                        "tasks": [],
+                        "gaps": [],
+                    }
+                ],
+                "global_risks": [],
+            },
+            "version": 1,
+            "finalized_at": _iso_now(),
+        },
+    )
+
+    response = await client.patch(
+        f"/api/v1/projects/{project['id']}/plan/phases/phase-1",
+        headers={"X-Session-Id": "alpha"},
+        json={
+            "assigned_members": [
+                {
+                    "session_id": "alpha",
+                    "name": "You (Creator)",
+                    "role": "APPROVER",
+                    "initials": "YO",
+                },
+                {
+                    "session_id": "beta",
+                    "name": "beta",
+                    "role": "EDITOR",
+                    "initials": "B",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["assigned_members"] == [
+        {
+            "session_id": "alpha",
+            "name": "You (Creator)",
+            "role": "APPROVER",
+            "initials": "YO",
+        },
+        {
+            "session_id": "beta",
+            "name": "beta",
+            "role": "EDITOR",
+            "initials": "B",
+        },
+    ]
+
+    plan_response = await client.get(
+        f"/api/v1/projects/{project['id']}/plan",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert plan_response.status_code == 200
+    assert plan_response.json()["data"]["phases"][0]["assigned_members"][1]["session_id"] == "beta"
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,11 @@ The API only accepts proposal changes for these sections:
 If the user's planning intent requires a section outside that allowed set, add the unsupported
 section name to unsupported_proposal_sections, explain the mismatch in gaps or panel_suggestions,
 and do not convert that request into concrete planner-ready work.
+When the source messages are concrete enough to define task scope or completion conditions,
+treat missing task descriptions and missing acceptance criteria as real planning gaps rather than
+optional polish. A source message is concrete enough when it gives a clear action, deliverable,
+constraint, or observable "done when" condition with low interpretation cost.
+If the evidence is vague, high-level, or exploratory, prefer missing_information over invented detail.
 
 Context:
 {context}
@@ -76,10 +81,19 @@ Assign confidence from the evidence structure using this rubric:
   change but still leave some interpretation
 - low: indirect, weak, incomplete, or ambiguous support
 For each change, content must be either:
-- an array of flat objects with optional string fields title, detail, owner, status,
-  priority, due_date, notes, and value
+- an array of flat objects with optional fields title, description, detail, goal, timeframe,
+  owner, status, priority, due_date, notes, value, and acceptance_criteria
 - an array of strings for simple list removals
 - a short string for scalar section replacement
+When adding or updating phases, include a high-level description when the context supports it.
+That phase description must summarize the phase outcome or scope and must not repeat task titles
+word-for-word or collapse into a task checklist.
+When adding or updating tasks, include a task description and acceptance_criteria when the context
+supports them. acceptance_criteria should clearly express "done when" conditions.
+Treat task descriptions and acceptance_criteria as expected outputs whenever the cited messages are
+concrete enough to support them. Concrete evidence usually includes a clear action, deliverable,
+scope boundary, constraint, or observable completion condition. If the evidence is too vague,
+leave those fields empty rather than inventing detail.
 
 Context:
 {context}

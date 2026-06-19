@@ -14,6 +14,7 @@ import type {
   PlanVersion,
   ApiProjectPlan,
   ApiPlanVersion,
+  PhaseAssignedMember,
   Task,
   RiskItem,
 } from './types';
@@ -53,8 +54,8 @@ export interface ProjectRepository {
     sessionId: string
   ): Promise<StructuredPlan>;
   revertProjectPlan(projectId: string, sessionId: string): Promise<void>;
-  createProjectPhase(projectId: string, title: string, goal: string, timeframe: string, sessionId: string): Promise<void>;
-  updateProjectPhase(projectId: string, phaseId: string, title: string, goal: string, timeframe: string, sessionId: string): Promise<void>;
+  createProjectPhase(projectId: string, title: string, goal: string, description: string, timeframe: string, assignedMembers: PhaseAssignedMember[], sessionId: string): Promise<void>;
+  updateProjectPhase(projectId: string, phaseId: string, title: string, goal: string, description: string, timeframe: string, assignedMembers: PhaseAssignedMember[], sessionId: string): Promise<void>;
   deleteProjectPhase(projectId: string, phaseId: string, sessionId: string): Promise<void>;
   createProjectTask(
     projectId: string,
@@ -297,12 +298,25 @@ export class ApiProjectRepository implements ProjectRepository {
     projectId: string,
     title: string,
     goal: string,
+    description: string,
     timeframe: string,
+    assignedMembers: PhaseAssignedMember[],
     sessionId: string
   ): Promise<void> {
     await apiFetch<null>(`/api/projects/${projectId}/plan/phases`, sessionId, {
       method: 'POST',
-      body: JSON.stringify({ title, goal, timeframe }),
+      body: JSON.stringify({
+        title,
+        goal,
+        description,
+        timeframe,
+        assigned_members: assignedMembers.map((member) => ({
+          session_id: member.sessionId,
+          name: member.name,
+          initials: member.initials,
+          role: member.role,
+        })),
+      }),
     });
   }
 
@@ -311,12 +325,25 @@ export class ApiProjectRepository implements ProjectRepository {
     phaseId: string,
     title: string,
     goal: string,
+    description: string,
     timeframe: string,
+    assignedMembers: PhaseAssignedMember[],
     sessionId: string
   ): Promise<void> {
     await apiFetch<null>(`/api/projects/${projectId}/plan/phases/${phaseId}`, sessionId, {
       method: 'PATCH',
-      body: JSON.stringify({ title, goal, timeframe }),
+      body: JSON.stringify({
+        title,
+        goal,
+        description,
+        timeframe,
+        assigned_members: assignedMembers.map((member) => ({
+          session_id: member.sessionId,
+          name: member.name,
+          initials: member.initials,
+          role: member.role,
+        })),
+      }),
     });
   }
 
@@ -573,7 +600,14 @@ export function mapPlan(plan: ApiProjectPlan, fallbackProjectId: string): Struct
       id: phase.id,
       title: phase.title,
       goal: phase.goal || '',
+      description: phase.description || '',
       timeframe: phase.timeframe || '',
+      assignedMembers: (phase.assigned_members || []).map((member) => ({
+        sessionId: member.session_id,
+        name: member.name,
+        initials: member.initials,
+        role: member.role,
+      })),
       tasks: (phase.tasks || []).map((task) => ({
         id: task.id,
         title: task.title,

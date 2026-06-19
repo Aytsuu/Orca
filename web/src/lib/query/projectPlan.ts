@@ -7,6 +7,7 @@ import type {
   ApiProjectPlan,
   GapItem,
   Phase,
+  PhaseAssignedMember,
   ProposedChange,
   RiskItem,
   StructuredPlan,
@@ -161,14 +162,18 @@ export function applyPlanMetaPatch(
 
 export function buildOptimisticPhase(
   title: string,
+  description: string,
   goal: string,
-  timeframe: string
+  timeframe: string,
+  assignedMembers: PhaseAssignedMember[]
 ): Phase {
   return {
     id: buildOptimisticId('phase'),
     title,
+    description,
     goal,
     timeframe,
+    assignedMembers,
     tasks: [],
     gaps: [],
   };
@@ -184,7 +189,7 @@ export function addOptimisticPhase(plan: StructuredPlan, phase: Phase): Structur
 
 export function applyPhasePatch(
   plan: StructuredPlan,
-  variables: { phaseId: string; title: string; goal: string; timeframe: string }
+  variables: { phaseId: string; title: string; description: string; goal: string; timeframe: string; assignedMembers: PhaseAssignedMember[] }
 ): StructuredPlan {
   return {
     ...plan,
@@ -193,8 +198,10 @@ export function applyPhasePatch(
         ? {
           ...phase,
           title: variables.title,
+          description: variables.description,
           goal: variables.goal,
           timeframe: variables.timeframe,
+          assignedMembers: variables.assignedMembers,
         }
         : phase
     ),
@@ -400,11 +407,33 @@ function toOptimisticStakeholder(entry: Record<string, unknown>) {
 }
 
 function toOptimisticPhase(entry: Record<string, unknown>): Phase {
+  const assignedMembers = Array.isArray(entry.assigned_members)
+    ? entry.assigned_members
+    : Array.isArray(entry.assignedMembers)
+      ? entry.assignedMembers
+      : [];
   return {
     id: typeof entry.id === 'string' ? entry.id : buildOptimisticId('phase'),
     title: typeof entry.title === 'string' ? entry.title : 'Proposed phase',
+    description: typeof entry.description === 'string' ? entry.description : '',
     goal: typeof entry.goal === 'string' ? entry.goal : '',
     timeframe: typeof entry.timeframe === 'string' ? entry.timeframe : '',
+    assignedMembers: assignedMembers
+      .filter((member): member is Record<string, unknown> => typeof member === 'object' && member !== null)
+      .map((member) => ({
+        sessionId:
+          typeof member.session_id === 'string'
+            ? member.session_id
+            : typeof member.sessionId === 'string'
+              ? member.sessionId
+              : buildOptimisticId('phase-member'),
+        name: typeof member.name === 'string' ? member.name : 'Assigned member',
+        initials: typeof member.initials === 'string' ? member.initials : 'AM',
+        role:
+          member.role === 'APPROVER' || member.role === 'EDITOR' || member.role === 'VIEWER'
+            ? member.role
+            : 'VIEWER',
+      })),
     tasks: [],
     gaps: [],
   };
@@ -576,8 +605,10 @@ export function applyAcceptedProposalChange(plan: StructuredPlan, change: Propos
       return applyPhasePatch(plan, {
         phaseId: change.targetId,
         title: phases[0].title,
+        description: phases[0].description || '',
         goal: phases[0].goal,
         timeframe: phases[0].timeframe,
+        assignedMembers: phases[0].assignedMembers,
       });
     }
   }
@@ -937,10 +968,10 @@ export function useRevertProjectPlan(projectId: string) {
 export function useCreateProjectPhase(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (variables: { title: string; goal: string; timeframe: string }) =>
-      defaultProjectRepository.createProjectPhase(projectId, variables.title, variables.goal, variables.timeframe, sessionId.get()),
+    mutationFn: (variables: { title: string; goal: string; description: string; timeframe: string }) =>
+      defaultProjectRepository.createProjectPhase(projectId, variables.title, variables.goal, variables.description, variables.timeframe, variables.assignedMembers, sessionId.get()),
     onMutate: (variables) => {
-      const optimisticPhase = buildOptimisticPhase(variables.title, variables.goal, variables.timeframe);
+      const optimisticPhase = buildOptimisticPhase(variables.title, variables.description, variables.goal, variables.timeframe, variables.assignedMembers);
       return prepareOptimisticPlanUpdate(queryClient, projectId, (plan) => addOptimisticPhase(plan, optimisticPhase));
     },
     onError: (_error, _variables, context) => {
@@ -955,8 +986,8 @@ export function useCreateProjectPhase(projectId: string) {
 export function useUpdateProjectPhase(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (variables: { phaseId: string; title: string; goal: string; timeframe: string }) =>
-      defaultProjectRepository.updateProjectPhase(projectId, variables.phaseId, variables.title, variables.goal, variables.timeframe, sessionId.get()),
+    mutationFn: (variables: { phaseId: string; title: string; goal: string; description: string; timeframe: string }) =>
+      defaultProjectRepository.updateProjectPhase(projectId, variables.phaseId, variables.title, variables.goal, variables.description, variables.timeframe, variables.assignedMembers, sessionId.get()),
     onMutate: (variables) =>
       prepareOptimisticPlanUpdate(queryClient, projectId, (plan) => applyPhasePatch(plan, variables)),
     onError: (_error, _variables, context) => {

@@ -36,6 +36,13 @@ class Stakeholder(ApiModel):
     initials: str = Field(min_length=1, max_length=10)
 
 
+class PhaseAssignedMember(ApiModel):
+    session_id: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=200)
+    role: Literal["APPROVER", "EDITOR", "VIEWER"] = "VIEWER"
+    initials: str = Field(min_length=1, max_length=10)
+
+
 class GapOut(ApiModel):
     id: str
     description: str
@@ -74,7 +81,9 @@ class PhaseOut(ApiModel):
     id: str
     title: str
     goal: str | None = None
+    description: str | None = None
     timeframe: str | None = None
+    assigned_members: list[PhaseAssignedMember] = Field(default_factory=list)
     tasks: list[TaskOut] = Field(default_factory=list)
     gaps: list[GapOut] = Field(default_factory=list)
 
@@ -229,13 +238,17 @@ class PlanMetaUpdate(ApiModel):
 class PhaseCreate(ApiModel):
     title: str = Field(min_length=1, max_length=200)
     goal: str | None = Field(default=None, max_length=1000)
+    description: str | None = Field(default=None, max_length=4000)
     timeframe: str | None = Field(default=None, max_length=200)
+    assigned_members: list[PhaseAssignedMember] = Field(default_factory=list)
 
 
 class PhaseUpdate(ApiModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     goal: str | None = Field(default=None, max_length=1000)
+    description: str | None = Field(default=None, max_length=4000)
     timeframe: str | None = Field(default=None, max_length=200)
+    assigned_members: list[PhaseAssignedMember] | None = None
 
 
 class TaskCreate(ApiModel):

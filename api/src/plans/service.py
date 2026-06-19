@@ -88,7 +88,16 @@ def _normalize_phase(phase: dict[str, Any]) -> dict[str, Any]:
     normalized.setdefault("id", str(uuid4()))
     normalized.setdefault("title", "")
     normalized.setdefault("goal", None)
+    normalized.setdefault("description", None)
     normalized.setdefault("timeframe", None)
+    normalized["assigned_members"] = [
+        _normalize_phase_assigned_member(member)
+        for member in list(
+            normalized.get("assigned_members")
+            or normalized.get("assignedMembers")
+            or []
+        )
+    ]
     normalized["tasks"] = [_normalize_task(task) for task in list(normalized.get("tasks") or [])]
     normalized["gaps"] = [_normalize_gap(gap) for gap in list(normalized.get("gaps") or [])]
     return normalized
@@ -166,6 +175,41 @@ def _normalize_stakeholder(stakeholder: Any) -> dict[str, str]:
         "user_id": name.lower().replace(" ", "_"),
         "name": name,
         "role": name,
+        "initials": _to_initials(name),
+    }
+
+
+def _normalize_phase_assigned_member(member: Any) -> dict[str, str]:
+    if isinstance(member, dict):
+        name = str(
+            member.get("name")
+            or member.get("title")
+            or member.get("session_id")
+            or member.get("sessionId")
+            or "Unknown member"
+        ).strip()
+        session_id = str(
+            member.get("session_id")
+            or member.get("sessionId")
+            or member.get("id")
+            or name.lower().replace(" ", "_")
+        ).strip()
+        role = str(member.get("role") or "VIEWER").strip().upper() or "VIEWER"
+        if role not in {"APPROVER", "EDITOR", "VIEWER"}:
+            role = "VIEWER"
+        initials = str(member.get("initials") or _to_initials(name)).strip() or _to_initials(name)
+        return {
+            "session_id": session_id,
+            "name": name,
+            "role": role,
+            "initials": initials[:10],
+        }
+
+    name = str(member or "Unknown member").strip() or "Unknown member"
+    return {
+        "session_id": name.lower().replace(" ", "_"),
+        "name": name,
+        "role": "VIEWER",
         "initials": _to_initials(name),
     }
 
@@ -880,7 +924,9 @@ async def create_phase(
     project_id: str,
     title: str,
     goal: str | None,
+    description: str | None,
     timeframe: str | None,
+    assigned_members: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], list[str]]:
     created_phase: dict[str, Any] = {}
 
@@ -891,7 +937,11 @@ async def create_phase(
                 "id": str(uuid4()),
                 "title": title.strip(),
                 "goal": goal.strip() if goal else None,
+                "description": description.strip() if description else None,
                 "timeframe": timeframe.strip() if timeframe else None,
+                "assigned_members": [
+                    _normalize_phase_assigned_member(member) for member in assigned_members
+                ],
                 "tasks": [],
                 "gaps": [],
             }
@@ -909,7 +959,9 @@ async def update_phase(
     phase_id: str,
     title: str | None,
     goal: str | None,
+    description: str | None,
     timeframe: str | None,
+    assigned_members: list[dict[str, Any]] | None,
 ) -> tuple[dict[str, Any], list[str]]:
     updated_phase: dict[str, Any] = {}
 
@@ -920,8 +972,14 @@ async def update_phase(
             phase["title"] = title.strip()
         if goal is not None:
             phase["goal"] = goal.strip() or None
+        if description is not None:
+            phase["description"] = description.strip() or None
         if timeframe is not None:
             phase["timeframe"] = timeframe.strip() or None
+        if assigned_members is not None:
+            phase["assigned_members"] = [
+                _normalize_phase_assigned_member(member) for member in assigned_members
+            ]
         updated_phase = deepcopy(phase)
 
     await _mutate_plan(supabase, project_id=project_id, mutate=_mutate)

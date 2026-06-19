@@ -62,11 +62,15 @@ class RelevanceOutput(EngineModel):
 
 class PlannerContentItem(EngineModel):
     title: str | None = None
+    description: str | None = None
     detail: str | None = None
+    goal: str | None = None
+    timeframe: str | None = None
     owner: str | None = None
     status: str | None = None
     priority: str | None = None
     due_date: str | None = None
+    acceptance_criteria: list[str] | None = None
     notes: str | None = None
     value: str | None = None
 

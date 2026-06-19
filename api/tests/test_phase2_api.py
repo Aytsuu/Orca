@@ -442,6 +442,67 @@ async def test_messages_and_upload_url_require_membership(
 
 
 @pytest.mark.asyncio
+async def test_filler_message_is_persisted_without_triggering_agents(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+    fake_queue_producer: FakeQueueProducer,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+
+    post_message = await client.post(
+        f"/api/v1/projects/{project['id']}/messages",
+        headers={"X-Session-Id": "alpha"},
+        json={"content": "the"},
+    )
+
+    assert post_message.status_code == 201
+    assert len(fake_supabase.tables["chat_message"]) == 1
+    assert fake_supabase.tables["agent_run"] == []
+    assert fake_queue_producer.enqueued_runs == []
+
+
+@pytest.mark.asyncio
+async def test_non_english_message_still_triggers_agents_when_not_obvious_filler(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+    fake_queue_producer: FakeQueueProducer,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+
+    post_message = await client.post(
+        f"/api/v1/projects/{project['id']}/messages",
+        headers={"X-Session-Id": "alpha"},
+        json={"content": "可以"},
+    )
+
+    assert post_message.status_code == 201
+    assert len(fake_supabase.tables["agent_run"]) == 1
+    assert fake_queue_producer.enqueued_runs == [
+        {"run_id": fake_supabase.tables["agent_run"][0]["id"], "delay_seconds": 8}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_finalize_and_list_uploaded_files(
     client: AsyncClient,
     fake_supabase: FakeSupabase,
@@ -970,11 +1031,8 @@ async def test_trigger_reuses_active_run_for_new_messages(
     assert fake_supabase.tables["agent_run"][0]["id"] == active_run["id"]
     follow_up_run = fake_supabase.tables["agent_run"][1]
     assert follow_up_run["status"] == "queued"
-    assert (
-        first_message.json()["data"]["id"]
-        in fake_supabase.tables["agent_run"][0]["new_message_ids"]
-    )
-    assert fake_queue_producer.enqueued_run_ids == []
+    assert first_message.json()["data"]["id"] in follow_up_run["new_message_ids"]
+    assert fake_queue_producer.enqueued_run_ids == [follow_up_run["id"]]
 
 
 @pytest.mark.asyncio

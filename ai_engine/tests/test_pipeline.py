@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.agents.schemas import AnalyzerOutput, MonitorOutput
+from src.agents.schemas import AnalyzerOutput, MonitorOutput, RelevanceOutput
 from src.exceptions import (
     ConfigurationError,
     InvalidOutputError,
@@ -21,7 +21,7 @@ async def test_pipeline_short_circuits_after_monitor_when_no_actionable_items(
     project = fake_supabase.insert_row("project", {"name": "Alpha"})
     message = fake_supabase.insert_row(
         "chat_message",
-        {"project_id": project["id"], "session_id": "alpha", "content": "hello"},
+        {"project_id": project["id"], "session_id": "alpha", "content": "add QA owner"},
     )
     run = fake_supabase.insert_row(
         "agent_run",
@@ -53,6 +53,38 @@ async def test_pipeline_short_circuits_after_monitor_when_no_actionable_items(
         if row["payload"].get("skipped")
     ]
     assert len(skipped) == 2
+
+
+@pytest.mark.asyncio
+async def test_pipeline_skips_without_llm_for_obvious_filler_messages(fake_supabase) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha"})
+    message = fake_supabase.insert_row(
+        "chat_message",
+        {"project_id": project["id"], "session_id": "alpha", "content": "the"},
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [message["id"]],
+        },
+    )
+    llm = FakeJsonLlmClient(responses=[])
+
+    results = await run_project_pipeline(
+        fake_supabase,
+        run["id"],
+        llm_client=llm,
+        safety_client=llm,
+    )
+
+    assert results == []
+    assert llm.calls == []
+    skipped_artifacts = [row for row in fake_supabase.tables["agent_artifact"] if row["payload"].get("skipped")]
+    assert len(skipped_artifacts) == 3
+    assert skipped_artifacts[0]["payload"]["reason"] == "no_meaningful_messages"
 
 
 @pytest.mark.asyncio
@@ -127,6 +159,45 @@ async def test_pipeline_persists_planner_proposal(fake_supabase) -> None:
     assert [result.agent for result in results] == ["monitor", "analyzer", "planner"]
     assert len(fake_supabase.tables["plan_proposal"]) == 1
     assert fake_supabase.tables["plan_proposal"][0]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_uses_relevance_gate_for_ambiguous_messages(fake_supabase) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha"})
+    message = fake_supabase.insert_row(
+        "chat_message",
+        {"project_id": project["id"], "session_id": "alpha", "content": "可以"},
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [message["id"]],
+        },
+    )
+    llm = FakeJsonLlmClient(
+        responses=[
+            RelevanceOutput(
+                should_trigger=True,
+                confidence="medium",
+                reason="Short but meaningful confirmation tied to planning context.",
+                use_with_previous_context=True,
+            ),
+            MonitorOutput(summary_candidate="brief summary"),
+        ]
+    )
+
+    results = await run_project_pipeline(
+        fake_supabase,
+        run["id"],
+        llm_client=llm,
+        safety_client=llm,
+    )
+
+    assert [result.agent for result in results] == ["monitor"]
+    assert [call["schema"] for call in llm.calls] == ["RelevanceOutput", "MonitorOutput"]
 
 
 @pytest.mark.asyncio

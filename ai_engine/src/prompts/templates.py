@@ -17,6 +17,25 @@ Context:
 {context}
 """
 
+RELEVANCE_PROMPT = """
+You are a lightweight message relevance scorer for a planning workspace.
+Decide whether the supplied new messages contain actionable planning information or
+clarification that should trigger the planning pipeline.
+
+Mark should_trigger=true when the messages likely add or change requirements, tasks,
+owners, priorities, dates, risks, objectives, approvals, rejections, or materially
+clarify earlier planning context.
+
+Mark should_trigger=false when the messages are only filler, acknowledgements, social
+chatter, accidental sends, greetings, typos, or otherwise provide no actionable planning value.
+
+Be multilingual. Judge meaning from the content itself, not from English keywords.
+Return JSON only.
+
+Context:
+{context}
+"""
+
 PLANNER_PROMPT = """
 You are the Planner step for a planning workspace.
 Create a proposal diff only. Prefer add/update. Use remove only for explicit removal requests.

@@ -16,6 +16,7 @@ from src.chat.schemas import (
     UploadUrlOut,
     UploadUrlRequest,
 )
+from src.chat.relevance import classify_message_for_agent_trigger
 from src.chat.service import (
     create_message,
     create_signed_upload,
@@ -51,14 +52,16 @@ async def create_message_endpoint(
         session_id=project_context["session_id"],
         content=payload.content,
     )
-    await trigger_agents(
-        supabase,
-        queue_producer,
-        project_id=str(project_id),
-        triggered_by=project_context["session_id"],
-        message_ids=[message["id"]],
-        debounce=True,
-    )
+    should_trigger, _reason = classify_message_for_agent_trigger(message["content"])
+    if should_trigger:
+        await trigger_agents(
+            supabase,
+            queue_producer,
+            project_id=str(project_id),
+            triggered_by=project_context["session_id"],
+            message_ids=[message["id"]],
+            debounce=True,
+        )
     return DataEnvelope(data=MessageOut.model_validate(message))
 
 

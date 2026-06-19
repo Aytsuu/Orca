@@ -44,6 +44,13 @@ class AnalyzerOutput(EngineModel):
     panel_suggestions: list[str] = Field(default_factory=list)
 
 
+class RelevanceOutput(EngineModel):
+    should_trigger: bool
+    confidence: Confidence
+    reason: str = Field(min_length=1)
+    use_with_previous_context: bool = False
+
+
 class PlannerContentItem(EngineModel):
     title: str | None = None
     detail: str | None = None

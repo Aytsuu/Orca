@@ -6,6 +6,7 @@ from functools import lru_cache
 from typing import Callable
 
 from src.agents.base import StepResult
+from src.agents.schemas import RelevanceOutput
 from src.agents.steps import AnalyzerStep, MonitorStep, PlannerStep
 from src.config import get_settings
 from src.context.builder import ContextBuilder
@@ -22,7 +23,9 @@ from src.llm.client import JsonLlmClient
 from src.llm.fake import FakeJsonLlmClient
 from src.llm.gemini import GeminiJsonLlmClient
 from src.llm.rate_limiter import RateLimiter
+from src.message_relevance import build_relevance_prompt_context, split_messages_by_signal
 from src.pipelines.locks import ProjectLockManager
+from src.prompts.templates import RELEVANCE_PROMPT
 from src.repository import (
     claim_agent_run,
     create_agent_artifact,
@@ -35,6 +38,35 @@ from src.repository import (
     set_agent_status,
     set_run_status,
 )
+
+
+async def _skip_pipeline_as_non_meaningful(
+    supabase,
+    *,
+    run_id: str,
+    project_id: str,
+    reason: str,
+    extra_payload: dict[str, object] | None = None,
+) -> list[StepResult]:
+    payload: dict[str, object] = {"skipped": True, "reason": reason}
+    if extra_payload:
+        payload.update(extra_payload)
+    for agent_name in ("monitor", "analyzer", "planner"):
+        await create_agent_artifact(
+            supabase,
+            run_id=run_id,
+            project_id=project_id,
+            agent=agent_name,
+            payload=payload,
+        )
+        await set_agent_status(
+            supabase,
+            project_id=project_id,
+            agent=agent_name,
+            status="completed",
+        )
+    await set_run_status(supabase, run_id, status="completed")
+    return []
 
 
 @lru_cache
@@ -312,6 +344,30 @@ async def run_project_pipeline(
             message_ids=run.get("new_message_ids", []),
             file_ids=run.get("new_file_ids", []),
         )
+        meaningful_messages, ambiguous_messages = split_messages_by_signal(context.new_messages)
+        if not meaningful_messages and not ambiguous_messages and not context.files:
+            return await _skip_pipeline_as_non_meaningful(
+                supabase,
+                run_id=run_id,
+                project_id=project_id,
+                reason="no_meaningful_messages",
+                extra_payload={"message_count": len(context.new_messages)},
+            )
+        if not meaningful_messages and ambiguous_messages:
+            relevance = await llm.generate_json(
+                RELEVANCE_PROMPT.format(context=build_relevance_prompt_context(context)),
+                RelevanceOutput,
+                model=settings.llm_fast_model,
+                temperature=0.0,
+            )
+            if not relevance.should_trigger:
+                return await _skip_pipeline_as_non_meaningful(
+                    supabase,
+                    run_id=run_id,
+                    project_id=project_id,
+                    reason="relevance_gate_filtered_messages",
+                    extra_payload={"relevance_gate": relevance.model_dump(mode="json")},
+                )
 
         steps = [
             MonitorStep(llm),

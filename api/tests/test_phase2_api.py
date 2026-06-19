@@ -1700,6 +1700,7 @@ async def test_get_plan_coerces_objective_objects_to_strings(
                 "title": "Runway Q3 Launch",
                 "description": "AI-generated plan",
                 "objectives": [
+                    {"goal": "Enhance team productivity through intelligent conversation monitoring and structured plan generation."},
                     {"title": "Develop a messaging workflow for team productivity."},
                     {"description": "Turn AI outputs into actionable planning steps."},
                     "Keep explicit string objectives intact.",
@@ -1720,9 +1721,122 @@ async def test_get_plan_coerces_objective_objects_to_strings(
 
     assert response.status_code == 200
     assert response.json()["data"]["objectives"] == [
+        "Enhance team productivity through intelligent conversation monitoring and structured plan generation.",
         "Develop a messaging workflow for team productivity.",
         "Turn AI outputs into actionable planning steps.",
         "Keep explicit string objectives intact.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_plan_recovers_stringified_objective_objects(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "content": {
+                "title": "Runway Q3 Launch",
+                "description": "AI-generated plan",
+                "objectives": [
+                    "{'goal': 'Improve project planning and execution by identifying gaps in conversations and generated plans.'}",
+                    '{"title": "Keep generated changes visible to all team members."}',
+                ],
+                "stakeholders": [],
+                "phases": [],
+                "global_risks": [],
+            },
+            "version": 4,
+            "finalized_at": _iso_now(),
+        },
+    )
+
+    response = await client.get(
+        f"/api/v1/projects/{project['id']}/plan",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["objectives"] == [
+        "Improve project planning and execution by identifying gaps in conversations and generated plans.",
+        "Keep generated changes visible to all team members.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_accept_plan_change_coerces_objective_objects_to_strings(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "content": {
+                "title": "Initial",
+                "description": "Draft",
+                "objectives": [],
+                "stakeholders": [],
+                "technology_stack": [],
+                "phases": [],
+                "global_risks": [],
+            },
+            "version": 1,
+            "finalized_at": _iso_now(),
+        },
+    )
+    fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "changes": [
+                {
+                    "id": "chg-objective",
+                    "section": "objectives",
+                    "action": "add",
+                    "content": [
+                        {
+                            "goal": "Enhance team productivity through intelligent conversation monitoring and structured plan generation."
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    response = await client.patch(
+        f"/api/v1/projects/{project['id']}/plan/proposal/changes/chg-objective/accept",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["objectives"] == [
+        "Enhance team productivity through intelligent conversation monitoring and structured plan generation."
     ]
 
 

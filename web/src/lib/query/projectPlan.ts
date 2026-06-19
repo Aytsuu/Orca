@@ -390,6 +390,33 @@ function toStringList(value: unknown): string[] {
   return [];
 }
 
+function toObjectiveText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'object' && value !== null) {
+    const entry = value as Record<string, unknown>;
+    for (const key of ['goal', 'title', 'description', 'detail', 'name', 'value'] as const) {
+      const candidate = entry[key];
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate;
+      }
+    }
+  }
+  return String(value ?? '');
+}
+
+function toObjectiveList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => toObjectiveText(item).trim())
+      .filter((item) => item.length > 0);
+  }
+
+  const objective = toObjectiveText(value).trim();
+  return objective ? [objective] : [];
+}
+
 function toOptimisticStakeholder(entry: Record<string, unknown>) {
   return {
     userId: String(entry.user_id || entry.userId || buildOptimisticId('stakeholder')),
@@ -544,7 +571,7 @@ export function applyAcceptedProposalChange(plan: StructuredPlan, change: Propos
   }
 
   if (change.section === 'objectives') {
-    const objectives = toStringList(change.content);
+    const objectives = toObjectiveList(change.content);
     if (change.action === 'remove') {
       return applyPlanMetaPatch(plan, {
         objectives: plan.objectives.filter((objective) => !objectives.includes(objective)),

@@ -217,6 +217,30 @@ describe('projectPlan optimistic helpers', () => {
     expect(updatedDescription.description).toBe('New project description');
   });
 
+  it('coerces object-style objective proposal content into strings', () => {
+    const plan = createPlanFixture();
+
+    const updated = applyAcceptedProposalChange(plan, {
+      id: 'change_objective_goal',
+      action: 'add',
+      section: 'objectives',
+      targetId: '',
+      title: 'Objective update',
+      detail: '',
+      sourceQuote: '',
+      content: [
+        {
+          goal: 'Enhance team productivity through intelligent conversation monitoring and structured plan generation.',
+        },
+      ],
+    });
+
+    expect(updated.objectives).toEqual([
+      'Ship MVP',
+      'Enhance team productivity through intelligent conversation monitoring and structured plan generation.',
+    ]);
+  });
+
   it('optimistically applies accepted technology stack changes', () => {
     const plan = createPlanFixture();
 

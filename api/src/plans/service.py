@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import re
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -129,13 +130,47 @@ def _normalize_technology_stack_item(item: Any) -> dict[str, str]:
 
 def _coerce_objective(value: Any) -> str:
     if isinstance(value, str):
+        recovered = _extract_objective_from_stringified_mapping(value)
+        if recovered is not None:
+            return recovered
         return value
     if isinstance(value, dict):
-        for key in ("title", "description", "detail", "name", "value"):
+        for key in ("goal", "title", "description", "detail", "name", "value"):
             candidate = value.get(key)
             if isinstance(candidate, str) and candidate.strip():
                 return candidate
     return str(value)
+
+
+def _coerce_objective_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        objectives: list[str] = []
+        for item in value:
+            objective = _coerce_objective(item).strip()
+            if objective:
+                objectives.append(objective)
+        return objectives
+    if value is None:
+        return []
+
+    objective = _coerce_objective(value).strip()
+    return [objective] if objective.strip() else []
+
+
+def _extract_objective_from_stringified_mapping(value: str) -> str | None:
+    stripped = value.strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        return None
+
+    for key in ("goal", "title", "description", "detail", "name", "value"):
+        pattern = rf"['\"]{re.escape(key)}['\"]\s*:\s*(['\"])(.*?)\1"
+        match = re.search(pattern, stripped)
+        if match:
+            candidate = match.group(2).strip()
+            if candidate:
+                return candidate
+
+    return None
 
 
 def _to_initials(value: str) -> str:
@@ -437,6 +472,18 @@ def _apply_structured_change(content: dict[str, Any], change: dict[str, Any]) ->
     action = normalized_change.get("action")
     target_id = normalized_change.get("targetId") or normalized_change.get("target_id")
     value = deepcopy(normalized_change.get("content"))
+
+    if section == "objectives":
+        objectives = _coerce_objective_list(value)
+        if action == "remove":
+            current["objectives"] = [
+                existing for existing in current["objectives"] if existing not in set(objectives)
+            ]
+            return current
+        current["objectives"] = (
+            [*current["objectives"], *objectives] if action == "add" else objectives
+        )
+        return current
 
     if section == "tasks":
         if action == "add":

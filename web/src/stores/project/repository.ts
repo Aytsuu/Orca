@@ -569,6 +569,43 @@ export function createEmptyPlan(projectId: string): StructuredPlan {
   };
 }
 
+function recoverObjectiveText(value: unknown): string {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      const recovered = extractObjectiveFromStringifiedMapping(trimmed);
+      if (recovered) {
+        return recovered;
+      }
+    }
+    return value;
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    const entry = value as Record<string, unknown>;
+    for (const key of ['goal', 'title', 'description', 'detail', 'name', 'value'] as const) {
+      const candidate = entry[key];
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate;
+      }
+    }
+  }
+
+  return String(value ?? '');
+}
+
+function extractObjectiveFromStringifiedMapping(value: string): string | null {
+  for (const key of ['goal', 'title', 'description', 'detail', 'name', 'value'] as const) {
+    const pattern = new RegExp(`['"]${key}['"]\\s*:\\s*(['"])(.*?)\\1`);
+    const match = value.match(pattern);
+    if (match?.[2]?.trim()) {
+      return match[2].trim();
+    }
+  }
+
+  return null;
+}
+
 export function mapPlanStatus(plan: ApiProjectPlan): StructuredPlan['status'] {
   return 'draft';
 }
@@ -583,7 +620,7 @@ export function mapPlan(plan: ApiProjectPlan, fallbackProjectId: string): Struct
     version: plan.version || 1,
     createdAt: plan.created_at || '',
     updatedAt: plan.finalized_at || plan.created_at || '',
-    objectives: [...(plan.objectives || [])],
+    objectives: (plan.objectives || []).map((objective) => recoverObjectiveText(objective)).filter(Boolean),
     stakeholders: (plan.stakeholders || []).map((stakeholder) => ({
       userId: stakeholder.user_id,
       name: stakeholder.name,

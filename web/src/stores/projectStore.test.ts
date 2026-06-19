@@ -50,7 +50,7 @@ import {
 } from './projectStore';
 
 import type { Project, Teammate } from './project/types';
-import { ApiProjectRepository, type ProjectRepository } from './project/repository';
+import { ApiProjectRepository, mapPlan, type ProjectRepository } from './project/repository';
 
 describe('projectStore tests', () => {
   beforeEach(() => {
@@ -541,6 +541,32 @@ describe('projectStore tests', () => {
           title: 'Updated title',
         }),
       });
+    });
+
+    it('recovers stringified objective objects when mapping plans', () => {
+      const plan = mapPlan(
+        {
+          id: 'plan_1',
+          project_id: 'proj_1',
+          version: 1,
+          created_at: '2026-06-18T10:00:00Z',
+          finalized_at: '2026-06-18T10:01:00Z',
+          title: 'Initial',
+          description: 'Draft',
+          objectives: [
+            "{'goal': 'Improve project planning and execution by identifying gaps in conversations and generated plans.'}",
+          ],
+          stakeholders: [],
+          technology_stack: [],
+          phases: [],
+          global_risks: [],
+        },
+        'proj_1'
+      );
+
+      expect(plan.objectives).toEqual([
+        'Improve project planning and execution by identifying gaps in conversations and generated plans.',
+      ]);
     });
   });
 });

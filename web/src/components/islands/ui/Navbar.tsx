@@ -10,6 +10,7 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ isHome: initialIsHome = false }) => {
+  const [hasMounted, setHasMounted] = useState(false);
   const [isHome, setIsHome] = useState(initialIsHome);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -19,6 +20,10 @@ export const Navbar: React.FC<NavbarProps> = ({ isHome: initialIsHome = false })
 
   useEffect(() => {
     void loadProjects();
+  }, []);
+
+  useEffect(() => {
+    setHasMounted(true);
   }, []);
 
   useEffect(() => {
@@ -40,6 +45,7 @@ export const Navbar: React.FC<NavbarProps> = ({ isHome: initialIsHome = false })
 
   const activeProject = projectList.find(p => p.id === currentProjectId);
   const projectName = activeProject?.name || null;
+  const shouldRenderProjectTitle = hasMounted && currentProjectId && projectName;
 
   useEffect(() => {
     if (projectName) {
@@ -56,7 +62,7 @@ export const Navbar: React.FC<NavbarProps> = ({ isHome: initialIsHome = false })
           <img src={logoSrc} alt="Orca Logo" className="h-6 w-6 object-contain" />
         </a>
         <div className="flex items-center">
-          {currentProjectId && projectName ? (
+          {shouldRenderProjectTitle ? (
             isEditing ? (
               <input
                 type="text"

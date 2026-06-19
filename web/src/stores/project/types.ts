@@ -163,6 +163,11 @@ export interface RiskItem {
   sourceExcerpt?: string;
 }
 
+export interface TechnologyStackItem {
+  title: string;
+  value: string;
+}
+
 export interface StructuredPlan {
   id: string;
   projectId: string;
@@ -175,6 +180,7 @@ export interface StructuredPlan {
   finalizedAt?: string;
   objectives: string[];
   stakeholders: Stakeholder[];
+  technologyStack: TechnologyStackItem[];
   phases: Phase[];
   globalRisks: RiskItem[];
 }
@@ -187,6 +193,7 @@ export interface ProposedChange {
     | 'description'
     | 'objectives'
     | 'stakeholders'
+    | 'technology_stack'
     | 'tasks'
     | 'phases'
     | 'gaps'
@@ -271,6 +278,7 @@ export interface ApiProjectPlan {
   description?: string;
   objectives?: string[];
   stakeholders?: ApiPlanStakeholder[];
+  technology_stack?: { title?: string; value?: string }[];
   phases?: ApiPlanPhase[];
   global_risks?: ApiPlanRisk[];
 }

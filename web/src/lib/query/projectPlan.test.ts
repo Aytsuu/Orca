@@ -31,6 +31,7 @@ function createPlanFixture(): StructuredPlan {
     updatedAt: '2026-06-18T10:00:00.000Z',
     objectives: ['Ship MVP'],
     stakeholders: [],
+    technologyStack: [],
     phases: [
       {
         id: 'phase_1',
@@ -210,6 +211,29 @@ describe('projectPlan optimistic helpers', () => {
     expect(updatedDescription.description).toBe('New project description');
   });
 
+  it('optimistically applies accepted technology stack changes', () => {
+    const plan = createPlanFixture();
+
+    const updated = applyAcceptedProposalChange(plan, {
+      id: 'change_2b',
+      action: 'add',
+      section: 'technology_stack',
+      targetId: '',
+      title: 'Technology Stack',
+      detail: '',
+      sourceQuote: '',
+      content: [
+        { title: 'Astro + React', value: 'Frontend' },
+        { title: 'FastAPI', value: 'Backend' },
+      ],
+    });
+
+    expect(updated.technologyStack).toEqual([
+      { title: 'Astro + React', value: 'Frontend' },
+      { title: 'FastAPI', value: 'Backend' },
+    ]);
+  });
+
   it('optimistically applies accepted proposal structural changes', () => {
     const plan = createPlanFixture();
 
@@ -252,5 +276,33 @@ describe('projectPlan optimistic helpers', () => {
     expect(taskAdded.phases[0].tasks[1]).toMatchObject({ title: 'New task', owner: 'Sam' });
     expect(riskAdded.globalRisks).toHaveLength(2);
     expect(riskAdded.globalRisks[1]).toMatchObject({ description: 'Supply risk', severity: 'major' });
+  });
+
+  it('applies task additions when the proposal targets a phase title path', () => {
+    const plan = {
+      ...createPlanFixture(),
+      phases: [
+        {
+          ...createPlanFixture().phases[0],
+          id: 'phase_1',
+          title: 'Discovery',
+          tasks: [],
+        },
+      ],
+    };
+
+    const updated = applyAcceptedProposalChange(plan, {
+      id: 'change_6',
+      action: 'add',
+      section: 'tasks',
+      targetId: 'Discovery',
+      title: 'Setup environment',
+      detail: '',
+      sourceQuote: '',
+      content: [{ title: 'Setup environment', owner: 'Sam', priority: 'high' }],
+    });
+
+    expect(updated.phases[0].tasks).toHaveLength(1);
+    expect(updated.phases[0].tasks[0]).toMatchObject({ title: 'Setup environment' });
   });
 });

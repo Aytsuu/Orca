@@ -15,6 +15,7 @@ ChangeSection = Literal[
     "description",
     "objectives",
     "stakeholders",
+    "technology_stack",
     "tasks",
     "phases",
     "gaps",
@@ -87,6 +88,11 @@ class RiskOut(ApiModel):
     source_excerpt: str | None = None
 
 
+class TechnologyStackItemOut(ApiModel):
+    title: str = ""
+    value: str = ""
+
+
 class StructuredPlanOut(ApiModel):
     id: UUID
     project_id: UUID
@@ -97,6 +103,7 @@ class StructuredPlanOut(ApiModel):
     description: str = ""
     objectives: list[str] = Field(default_factory=list)
     stakeholders: list[Stakeholder] = Field(default_factory=list)
+    technology_stack: list[TechnologyStackItemOut] = Field(default_factory=list)
     phases: list[PhaseOut] = Field(default_factory=list)
     global_risks: list[RiskOut] = Field(default_factory=list)
 

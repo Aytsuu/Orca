@@ -42,6 +42,7 @@ class AnalyzerOutput(EngineModel):
     conflicts: list[AnalyzerItem] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
     panel_suggestions: list[str] = Field(default_factory=list)
+    unsupported_proposal_sections: list[str] = Field(default_factory=list)
 
 
 class QuestionAnalyzerOutput(EngineModel):

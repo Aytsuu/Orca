@@ -14,10 +14,10 @@ from src.agents.schemas import (
 from src.config import get_settings
 from src.context.builder import AssembledContext
 from src.guardrails import (
+    calibrate_confidence_from_messages,
     collect_context_source_message_ids,
     deduplicate_changes,
     ensure_remove_actions_are_explicit,
-    normalize_confidence,
     validate_source_message_ids,
 )
 from src.llm.client import JsonLlmClient
@@ -103,6 +103,10 @@ def is_question_only_monitor_output(output: MonitorOutput) -> bool:
         ]
     )
     return has_questions and not has_concrete_items
+
+
+def analyzer_reports_unsupported_proposal_sections(output: Any) -> bool:
+    return bool(getattr(output, "unsupported_proposal_sections", []))
 
 
 class MonitorStep(AgentStep):
@@ -283,8 +287,16 @@ class PlannerStep(AgentStep):
             summaries=context.summaries,
             current_plan=context.current_plan,
         )
+        source_messages = {
+            str(message["id"]): message["content"]
+            for message in context.new_messages
+            if message.get("id") and message.get("content")
+        }
         normalized_changes = [
-            normalize_confidence(change.model_dump(mode="json", exclude_none=True))
+            calibrate_confidence_from_messages(
+                change.model_dump(mode="json", exclude_none=True),
+                source_messages=source_messages,
+            )
             for change in output.changes
         ]
         normalized_changes = deduplicate_changes(normalized_changes)

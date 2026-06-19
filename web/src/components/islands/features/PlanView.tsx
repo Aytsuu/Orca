@@ -249,6 +249,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
   const hasNoPlanBody =
     activePlan.objectives.length === 0 &&
     activePlan.stakeholders.length === 0 &&
+    activePlan.technologyStack.length === 0 &&
     activePlan.phases.length === 0 &&
     activePlan.globalRisks.length === 0;
 
@@ -633,6 +634,35 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
   };
 
   // --- Render Inline Edit Component Helper ---
+  const getEditablePlaceholder = (
+    type: string,
+    field?: string,
+    fallback = 'Enter content for this field...'
+  ) => {
+    if (type === 'plan-title') return 'Enter the project or initiative name...';
+    if (type === 'plan-desc') return 'Summarize the project scope, goals, and constraints...';
+    if (type === 'objective') return 'Enter a specific business or delivery objective...';
+    if (type === 'phase-title') return 'Enter the phase name, such as Discovery or Launch...';
+    if (type === 'phase-goal') return 'Describe the outcome this phase should achieve...';
+    if (type === 'phase-timeframe') return 'Enter a timeframe such as Week 2 or Q3 2026...';
+    if (type === 'task-title') return 'Enter a concrete task title...';
+    if (type === 'task-desc') return 'Describe the task, expected output, and any constraints...';
+    if (type === 'task-owner') return 'Enter the owner responsible for this task...';
+    if (type === 'task-due') return 'Enter a due date or milestone such as Jun 30 or Sprint 4...';
+    if (type === 'task-priority') return 'Enter a priority such as high, medium, or low...';
+    if (type === 'task-criteria') return 'Enter an acceptance criterion that defines done...';
+    if (type === 'risk-desc') return 'Describe the risk, blocker, or issue to watch...';
+    if (type === 'risk-mitigation') return 'Describe how the team should reduce or respond to this risk...';
+    if (type === 'risk-severity') return 'Enter a severity such as critical, major, or minor...';
+    if (type === 'stakeholder') {
+      if (field === 'name') return 'Enter the stakeholder name...';
+      if (field === 'role') return 'Enter the stakeholder role or responsibility...';
+      if (field === 'initials') return 'Enter the stakeholder initials...';
+      return 'Enter stakeholder details...';
+    }
+    return fallback;
+  };
+
   const renderEditableText = (
     text: string,
     type: string,
@@ -641,8 +671,9 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     field?: string,
     isTextArea = false,
     className = "",
-    placeholder = "Click to enter text..."
+    placeholder?: string
   ) => {
+    const resolvedPlaceholder = placeholder || getEditablePlaceholder(type, field);
     const isEditing =
       editingField &&
       editingField.type === type &&
@@ -653,7 +684,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     if (!isApprover) {
       return (
         <span className={`${className} ${!text ? 'italic text-text-muted text-xs' : ''}`}>
-          {text || placeholder}
+          {text || resolvedPlaceholder}
         </span>
       );
     }
@@ -720,7 +751,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
         }}
       >
         <span className={!text ? 'italic text-text-muted text-xs' : ''}>
-          {text || placeholder}
+          {text || resolvedPlaceholder}
         </span>
         <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-100 text-text-muted hover:text-text-primary transition-opacity shrink-0 ml-1" />
       </div>
@@ -732,6 +763,20 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
 
   const getChangesForTarget = (sections: ProposedChange['section'][], targetId: string) =>
     pendingChanges.filter((change) => sections.includes(change.section) && change.targetId === targetId);
+
+  const normalizePhaseReference = (value: string) =>
+    value.trim().toLowerCase().replaceAll('_', ' ').split(/\s+/).filter(Boolean).join(' ');
+
+  const getTaskChangesForPhase = (phase: Phase) =>
+    pendingChanges.filter(
+      (change) =>
+        change.section === 'tasks' &&
+        change.action === 'add' &&
+        (
+          change.targetId === phase.id ||
+          normalizePhaseReference(change.targetId) === normalizePhaseReference(phase.title)
+        )
+    );
 
   const getAddedChangesForSection = (...sections: ProposedChange['section'][]) =>
     pendingChanges.filter((change) => sections.includes(change.section) && change.action === 'add');
@@ -1012,8 +1057,8 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     );
   };
 
-  const renderProposedTaskRows = (phaseId: string) => {
-    const proposedTaskChanges = getChangesForTarget(['tasks'], phaseId).filter((change) => change.action === 'add');
+  const renderProposedTaskRows = (phase: Phase) => {
+    const proposedTaskChanges = getTaskChangesForPhase(phase);
     if (proposedTaskChanges.length === 0) return null;
 
     return proposedTaskChanges.map((change) => {
@@ -1201,7 +1246,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                   undefined,
                   true,
                   "text-sm text-text-secondary leading-relaxed",
-                  "Add a short project plan summary..."
+                  "Summarize the project scope, goals, and constraints..."
                 )}
                 {renderProposalCards(getChangesForSection('description'), 'mt-1')}
 
@@ -1273,11 +1318,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                     {renderProposalCards(getChangesForSection('stakeholders'), 'mb-1')}
                     {activePlan.stakeholders.map(stk => (
                       <div key={stk.userId} className="group/stk flex items-center justify-between hover:bg-surface-raised/20 p-1 rounded-lg transition-colors">
-                        <div className="flex items-center gap-3">
-                          {/* Avatar Circle */}
-                          <div className="w-8 h-8 rounded-full bg-surface-raised border border-border flex items-center justify-center text-xs font-semibold text-text-primary select-none shadow-sm font-mono uppercase tracking-tighter">
-                            {renderEditableText(stk.initials, 'stakeholder', stk.userId, undefined, 'initials', false, "text-text-primary")}
-                          </div>
+                        <div className="flex min-w-0 flex-col">
                           <div>
                             {renderEditableText(stk.name, 'stakeholder', stk.userId, undefined, 'name', false, "text-sm font-semibold text-text-primary")}
                             {renderEditableText(stk.role, 'stakeholder', stk.userId, undefined, 'role', false, "text-xs text-text-muted")}
@@ -1298,6 +1339,31 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                     {activePlan.stakeholders.length === 0 && (
                       <span className="text-xs text-text-muted italic">
                         {hasNoPlanBody ? 'No plan yet, start your brainstorming conversation.' : 'No team members assigned.'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs uppercase tracking-widest text-text-muted font-bold">
+                      Technology Stack
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-3 pl-1">
+                    {renderProposalCards(getChangesForSection('technology_stack'), 'mb-1')}
+                    {activePlan.technologyStack.map((item, index) => (
+                      <div
+                        key={`${item.title}-${item.value}-${index}`}
+                        className="flex items-center justify-between rounded-lg border border-border-subtle bg-surface-raised/20 px-3 py-2"
+                      >
+                        <span className="text-sm font-semibold text-text-primary">{item.title}</span>
+                        <span className="text-xs uppercase tracking-wider text-text-muted">{item.value}</span>
+                      </div>
+                    ))}
+                    {activePlan.technologyStack.length === 0 && (
+                      <span className="text-xs text-text-muted italic">
+                        {hasNoPlanBody ? 'No plan yet, start your brainstorming conversation.' : 'No technology stack defined.'}
                       </span>
                     )}
                   </div>
@@ -1421,7 +1487,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
 
                       {/* 3.4 Tasks in Phase */}
                       <div className="flex flex-col gap-4 pl-6 ml-3 select-none">
-                        {renderProposedTaskRows(phase.id)}
+                        {renderProposedTaskRows(phase)}
                         {phase.tasks.map((task: Task, tIdx: number) => {
                           const stepNum = String(tIdx + 1).padStart(2, '0');
                           const isExpanded = expandedTaskId === task.id;
@@ -1616,7 +1682,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                                       undefined,
                                       true,
                                       "text-sm text-text-secondary leading-relaxed",
-                                      "Click to add task description and context..."
+                                      "Describe the task, expected output, and any constraints..."
                                     )}
                                   </div>
 
@@ -2187,7 +2253,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                             undefined,
                             false,
                             "italic text-text-secondary text-xs",
-                            "No mitigation defined. Click to define..."
+                            "Describe how the team should reduce or respond to this risk..."
                           )}
                         </div>
 
@@ -2213,7 +2279,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
             {/* Review Panel Header */}
             <div className="p-5 border-b border-border-subtle flex flex-col gap-1.5 shrink-0 select-none">
               <div className="flex items-center justify-between">
-                <span className="text-xs uppercase tracking-widest text-text-muted font-bold">
+                <span className="text-sm text-text-muted font-bold">
                   Pending Changes
                 </span>
                 <span className="category-badge badge--approver text-[10px] py-0.5 px-2 font-bold">

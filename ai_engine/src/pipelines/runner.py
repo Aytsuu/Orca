@@ -12,6 +12,7 @@ from src.agents.steps import (
     MonitorStep,
     PlannerStep,
     QuestionAnalyzerStep,
+    analyzer_reports_unsupported_proposal_sections,
     is_question_only_monitor_output,
 )
 from src.config import get_settings
@@ -428,6 +429,31 @@ async def run_project_pipeline(
                         steps.append(AnalyzerStep(llm))
                         if not soft_budget_reached:
                             steps.append(PlannerStep(llm, safety))
+            if result.agent == "analyzer" and analyzer_reports_unsupported_proposal_sections(
+                result.output
+            ):
+                steps = [step for step in steps if step.agent_name != "planner"]
+                skipped_payload = {
+                    "skipped": True,
+                    "reason": "unsupported_proposal_section",
+                    "unsupported_proposal_sections": list(
+                        result.output.unsupported_proposal_sections
+                    ),
+                }
+                await create_agent_artifact(
+                    supabase,
+                    run_id=run_id,
+                    project_id=project_id,
+                    agent="planner",
+                    payload=skipped_payload,
+                )
+                await set_agent_status(
+                    supabase,
+                    project_id=project_id,
+                    agent="planner",
+                    status="completed",
+                )
+                break
 
             if not result.should_continue:
                 remaining_steps = steps[len(results) :]

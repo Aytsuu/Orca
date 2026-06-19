@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from typing import Any
 
@@ -75,6 +76,99 @@ def normalize_confidence(change: dict) -> dict:
     if change.get("confidence") == "high" and len(change.get("source_message_ids", [])) <= 1:
         return {**change, "confidence": "medium"}
     return change
+
+
+def calibrate_confidence_from_messages(
+    change: dict,
+    *,
+    source_messages: dict[str, str],
+) -> dict:
+    normalized = normalize_confidence(change)
+    if normalized.get("confidence") != "medium":
+        return normalized
+
+    source_ids = [str(item) for item in normalized.get("source_message_ids", []) if item]
+    if len(source_ids) != 1:
+        return normalized
+
+    source_text = source_messages.get(source_ids[0], "")
+    if not _is_explicit_instruction(source_text):
+        return normalized
+
+    fragments = _extract_change_fragments(normalized)
+    if not fragments:
+        return normalized
+
+    normalized_source = _normalize_text(source_text)
+    if any(fragment in normalized_source for fragment in fragments):
+        return {**normalized, "confidence": "high"}
+
+    return normalized
+
+
+def _normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", value.lower())).strip()
+
+
+def _is_explicit_instruction(source_text: str) -> bool:
+    normalized = _normalize_text(source_text)
+    if not normalized or source_text.strip().endswith("?"):
+        return False
+
+    ambiguous_markers = (
+        "maybe",
+        "might",
+        "perhaps",
+        "could you advise",
+        "should we",
+        "can we",
+        "do we need",
+        "not sure",
+        "i think",
+    )
+    return not any(marker in normalized for marker in ambiguous_markers)
+
+
+def _extract_change_fragments(change: dict) -> list[str]:
+    raw_fragments: list[str] = []
+    content = change.get("content")
+
+    if isinstance(content, str):
+        raw_fragments.append(content)
+    elif isinstance(content, list):
+        for item in content:
+            if isinstance(item, str):
+                raw_fragments.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            for key in (
+                "title",
+                "detail",
+                "owner",
+                "status",
+                "priority",
+                "due_date",
+                "notes",
+                "value",
+            ):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    raw_fragments.append(value)
+
+    fragments: list[str] = []
+    for fragment in raw_fragments:
+        normalized = _normalize_text(fragment)
+        if not normalized:
+            continue
+        if len(normalized) >= 12 or len(normalized.split()) >= 3:
+            fragments.append(normalized)
+
+    if fragments:
+        return list(dict.fromkeys(fragments))
+
+    fallback = [_normalize_text(fragment) for fragment in raw_fragments if _normalize_text(fragment)]
+    return list(dict.fromkeys(fallback[:1]))
 
 
 def deduplicate_changes(changes: list[dict]) -> list[dict]:

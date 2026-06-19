@@ -866,6 +866,55 @@ async def test_agent_activity_keeps_pending_proposal_changes_visible_across_runs
 
 
 @pytest.mark.asyncio
+async def test_get_pending_proposal_supports_technology_stack_section(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "changes": [
+                {
+                    "id": "add-tech-stack",
+                    "action": "add",
+                    "section": "technology_stack",
+                    "content": [
+                        {"title": "Astro + React", "value": "Frontend"},
+                        {"title": "FastAPI", "value": "Backend"},
+                    ],
+                    "confidence": "medium",
+                    "justification": "Add the stack section to the plan.",
+                    "source_message_ids": ["msg-1"],
+                }
+            ],
+        },
+    )
+
+    response = await client.get(
+        f"/api/v1/projects/{project['id']}/plan/proposal",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["changes"][0]["section"] == "technology_stack"
+    assert payload["changes"][0]["title"] == "Astro + React"
+
+
+@pytest.mark.asyncio
 async def test_agent_activity_is_sorted_oldest_to_latest(
     client: AsyncClient,
     fake_supabase: FakeSupabase,
@@ -1238,6 +1287,137 @@ async def test_accept_plan_change_applies_content_override(
             "initials": "PN",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_accept_plan_change_exposes_technology_stack_in_plan_response(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "content": {
+                "title": "Initial",
+                "description": "Draft",
+                "objectives": [],
+                "stakeholders": [],
+                "technology_stack": [],
+                "phases": [],
+                "global_risks": [],
+            },
+            "version": 1,
+            "finalized_at": _iso_now(),
+        },
+    )
+    fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "changes": [
+                {
+                    "id": "chg-tech-stack",
+                    "section": "technology_stack",
+                    "action": "add",
+                    "content": [
+                        {"title": "Astro + React", "value": "Frontend"},
+                        {"title": "FastAPI", "value": "Backend"},
+                    ],
+                }
+            ],
+        },
+    )
+
+    response = await client.patch(
+        f"/api/v1/projects/{project['id']}/plan/proposal/changes/chg-tech-stack/accept",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["technology_stack"] == [
+        {"title": "Astro + React", "value": "Frontend"},
+        {"title": "FastAPI", "value": "Backend"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_accept_plan_change_resolves_phase_title_reference_for_task_add(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "content": {
+                "title": "Initial",
+                "description": "Draft",
+                "objectives": [],
+                "stakeholders": [],
+                "technology_stack": [],
+                "phases": [
+                    {
+                        "id": "phase-1",
+                        "title": "Discovery",
+                        "goal": "Set foundations",
+                        "timeframe": "Week 1",
+                        "tasks": [],
+                        "gaps": [],
+                    }
+                ],
+                "global_risks": [],
+            },
+            "version": 1,
+            "finalized_at": _iso_now(),
+        },
+    )
+    fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "changes": [
+                {
+                    "id": "chg-discovery-task",
+                    "section": "phases.Discovery.tasks",
+                    "action": "add",
+                    "content": [{"title": "Create setup guide"}],
+                }
+            ],
+        },
+    )
+
+    response = await client.patch(
+        f"/api/v1/projects/{project['id']}/plan/proposal/changes/chg-discovery-task/accept",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["phases"][0]["tasks"][0]["title"] == "Create setup guide"
 
 
 @pytest.mark.asyncio

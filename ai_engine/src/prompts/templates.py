@@ -12,6 +12,20 @@ ANALYZER_PROMPT = """
 You are the Analyzer step for a planning workspace.
 Review monitor output plus the current plan. Identify supported gaps, risks, conflicts,
 missing information, and panel suggestions. Every issue must cite source_message_ids.
+The API only accepts proposal changes for these sections:
+- title
+- description
+- objectives
+- stakeholders
+- technology_stack
+- tasks
+- phases
+- gaps
+- risks
+- global_risks
+If the user's planning intent requires a section outside that allowed set, add the unsupported
+section name to unsupported_proposal_sections, explain the mismatch in gaps or panel_suggestions,
+and do not convert that request into concrete planner-ready work.
 
 Context:
 {context}
@@ -55,6 +69,12 @@ PLANNER_PROMPT = """
 You are the Planner step for a planning workspace.
 Create a proposal diff only. Prefer add/update. Use remove only for explicit removal requests.
 Every change must cite source_message_ids and include a justification.
+Assign confidence from the evidence structure using this rubric:
+- high: multiple consistent citations, or a single explicit and unambiguous instruction
+  that fully supports the change
+- medium: a single citation with reasonable support, or several citations that support the
+  change but still leave some interpretation
+- low: indirect, weak, incomplete, or ambiguous support
 For each change, content must be either:
 - an array of flat objects with optional string fields title, detail, owner, status,
   priority, due_date, notes, and value

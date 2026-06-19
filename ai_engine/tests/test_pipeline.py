@@ -364,6 +364,79 @@ async def test_pipeline_routes_question_only_monitor_output_to_question_analyzer
 
 
 @pytest.mark.asyncio
+async def test_pipeline_skips_planner_when_analyzer_flags_unsupported_proposal_sections(
+    fake_supabase,
+) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha"})
+    message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Add a budget section to the plan with cost ranges by phase",
+        },
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [message["id"]],
+        },
+    )
+    llm = FakeJsonLlmClient(
+        responses=[
+            MonitorOutput(
+                requirements=[
+                    {
+                        "kind": "requirement",
+                        "content": "Add a budget section to the plan",
+                        "source_message_ids": [message["id"]],
+                        "excerpt": "Add a budget section to the plan",
+                        "confidence": "medium",
+                    }
+                ],
+                summary_candidate="Requested a budget section.",
+            ),
+            AnalyzerOutput(
+                gaps=[
+                    {
+                        "title": "Unsupported section type",
+                        "detail": "The requested budget section is not in the allowed proposal section type list.",
+                        "severity": "major",
+                        "source_message_ids": [message["id"]],
+                    }
+                ],
+                panel_suggestions=[
+                    "Keep this as analyzer insight until the API schema supports a budget section."
+                ],
+                unsupported_proposal_sections=["budget"],
+            ),
+        ]
+    )
+
+    results = await run_project_pipeline(
+        fake_supabase,
+        run["id"],
+        llm_client=llm,
+        safety_client=llm,
+    )
+
+    assert [result.agent for result in results] == ["monitor", "analyzer"]
+    assert [call["schema"] for call in llm.calls] == ["MonitorOutput", "AnalyzerOutput"]
+    planner_artifact = next(
+        row for row in fake_supabase.tables["agent_artifact"] if row["agent"] == "planner"
+    )
+    assert planner_artifact["payload"] == {
+        "skipped": True,
+        "reason": "unsupported_proposal_section",
+        "unsupported_proposal_sections": ["budget"],
+    }
+    assert fake_supabase.tables["plan_proposal"] == []
+
+
+@pytest.mark.asyncio
 async def test_pipeline_allows_analyzer_and_planner_to_cite_ids_from_supplied_context(
     fake_supabase,
 ) -> None:
@@ -667,13 +740,90 @@ async def test_pipeline_uses_wording_neutral_safety_confidence_rubric(fake_supab
         safety_client=llm,
     )
 
+    planner_prompt = next(call["prompt"] for call in llm.calls if call["schema"] == "PlannerOutput")
     safety_prompt = next(call["prompt"] for call in llm.calls if call["schema"] == "SafetyCheckOutput")
+    assert "Assign confidence from the evidence structure using this rubric" in planner_prompt
+    assert "single explicit and unambiguous instruction" in planner_prompt
     assert "Judge confidence from the evidence structure" in safety_prompt
     assert "Do not treat phrases such as" in safety_prompt
     assert "directly reflects" in safety_prompt
     assert "high: multiple consistent citations" in safety_prompt
     assert "medium: a single citation with reasonable support" in safety_prompt
     assert "Only mark a confidence mismatch" in safety_prompt
+
+
+@pytest.mark.asyncio
+async def test_pipeline_upgrades_direct_single_message_instruction_to_high_confidence(
+    fake_supabase,
+) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha"})
+    message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Assign QA owner before launch",
+        },
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [message["id"]],
+        },
+    )
+    llm = FakeJsonLlmClient(
+        responses=[
+            MonitorOutput(
+                tasks=[
+                    {
+                        "kind": "task",
+                        "content": "Assign QA owner before launch",
+                        "source_message_ids": [message["id"]],
+                        "excerpt": "Assign QA owner before launch",
+                        "confidence": "medium",
+                    }
+                ]
+            ),
+            AnalyzerOutput(
+                gaps=[
+                    {
+                        "title": "QA owner missing",
+                        "detail": "Launch still needs an assigned QA owner.",
+                        "severity": "major",
+                        "source_message_ids": [message["id"]],
+                    }
+                ]
+            ),
+            {
+                "changes": [
+                    {
+                        "id": "chg-1",
+                        "section": "tasks",
+                        "action": "add",
+                        "content": [{"title": "Assign QA owner before launch"}],
+                        "justification": "This directly addresses the user's latest request.",
+                        "source_message_ids": [message["id"]],
+                        "confidence": "medium",
+                    }
+                ],
+                "summary": "Assign QA owner",
+            },
+            {"safe": True, "violations": []},
+        ]
+    )
+
+    await run_project_pipeline(
+        fake_supabase,
+        run["id"],
+        llm_client=llm,
+        safety_client=llm,
+    )
+
+    proposal = fake_supabase.tables["plan_proposal"][0]
+    assert proposal["changes"][0]["confidence"] == "high"
 
 
 @pytest.mark.asyncio

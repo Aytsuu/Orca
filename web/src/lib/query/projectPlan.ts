@@ -11,6 +11,7 @@ import type {
   RiskItem,
   StructuredPlan,
   Task,
+  TechnologyStackItem,
 } from '../../stores/project/types';
 
 const projectPlanQueryKey = (projectId: string) => ['project-plan', projectId] as const;
@@ -29,6 +30,7 @@ interface ApiProposalChange {
     | 'description'
     | 'objectives'
     | 'stakeholders'
+    | 'technology_stack'
     | 'tasks'
     | 'phases'
     | 'gaps'
@@ -469,6 +471,35 @@ function toOptimisticRisk(entry: Record<string, unknown>): RiskItem {
   };
 }
 
+function toOptimisticTechnologyStackItem(entry: Record<string, unknown>): TechnologyStackItem {
+  return {
+    title:
+      typeof entry.title === 'string'
+        ? entry.title
+        : typeof entry.name === 'string'
+          ? entry.name
+          : 'Proposed technology',
+    value:
+      typeof entry.value === 'string'
+        ? entry.value
+        : typeof entry.detail === 'string'
+          ? entry.detail
+          : '',
+  };
+}
+
+function normalizePhaseReference(value: string): string {
+  return value.trim().toLowerCase().replaceAll('_', ' ').split(/\s+/).filter(Boolean).join(' ');
+}
+
+function resolvePhaseId(plan: StructuredPlan, phaseReference: string): string | undefined {
+  const normalizedTarget = normalizePhaseReference(phaseReference);
+  const matchedPhase = plan.phases.find(
+    (phase) => phase.id === phaseReference || normalizePhaseReference(phase.title) === normalizedTarget
+  );
+  return matchedPhase?.id;
+}
+
 export function applyAcceptedProposalChange(plan: StructuredPlan, change: ProposedChange): StructuredPlan {
   if (change.section === 'title') {
     const nextTitle =
@@ -511,6 +542,23 @@ export function applyAcceptedProposalChange(plan: StructuredPlan, change: Propos
     });
   }
 
+  if (change.section === 'technology_stack') {
+    const items = asObjectArray(change.content).map(toOptimisticTechnologyStackItem);
+    if (change.action === 'remove') {
+      const titlesToRemove = new Set(items.map((item) => item.title));
+    return {
+      ...plan,
+      technologyStack: (plan.technologyStack || []).filter((item) => !titlesToRemove.has(item.title)),
+      updatedAt: getNextUpdatedAt(plan),
+    };
+  }
+  return {
+    ...plan,
+    technologyStack: change.action === 'add' ? [...(plan.technologyStack || []), ...items] : items,
+    updatedAt: getNextUpdatedAt(plan),
+  };
+}
+
   if (change.section === 'phases') {
     const phases = asObjectArray(change.content).map(toOptimisticPhase);
     if (change.action === 'add') {
@@ -537,7 +585,10 @@ export function applyAcceptedProposalChange(plan: StructuredPlan, change: Propos
   if (change.section === 'tasks') {
     if (change.action === 'add' && change.targetId) {
       const tasks = asObjectArray(change.content).map(toOptimisticTask);
-      return tasks.reduce((nextPlan, task) => addOptimisticTask(nextPlan, change.targetId, task), plan);
+      const resolvedPhaseId = resolvePhaseId(plan, change.targetId);
+      return resolvedPhaseId
+        ? tasks.reduce((nextPlan, task) => addOptimisticTask(nextPlan, resolvedPhaseId, task), plan)
+        : plan;
     }
     if (change.action === 'remove' && change.targetId) {
       const taskContext = plan.phases.find((phase) => phase.tasks.some((task) => task.id === change.targetId));

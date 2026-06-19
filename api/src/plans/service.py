@@ -35,6 +35,7 @@ def _empty_plan_content() -> dict[str, Any]:
         "description": "",
         "objectives": [],
         "stakeholders": [],
+        "technology_stack": [],
         "phases": [],
         "global_risks": [],
     }
@@ -102,6 +103,19 @@ def _normalize_risk(risk: dict[str, Any]) -> dict[str, Any]:
     normalized["source_message_ids"] = list(normalized.get("source_message_ids") or [])
     normalized.setdefault("source_excerpt", None)
     return normalized
+
+
+def _normalize_technology_stack_item(item: Any) -> dict[str, str]:
+    if isinstance(item, dict):
+        title = item.get("title")
+        value = item.get("value")
+        return {
+            "title": str(title).strip() if title is not None else "",
+            "value": str(value).strip() if value is not None else "",
+        }
+    if isinstance(item, str):
+        return {"title": item.strip(), "value": ""}
+    return {"title": str(item).strip(), "value": ""}
 
 
 def _coerce_objective(value: Any) -> str:
@@ -192,6 +206,10 @@ def normalize_plan_content(content: dict[str, Any] | None) -> dict[str, Any]:
         _normalize_stakeholder(stakeholder)
         for stakeholder in list(raw.get("stakeholders") or [])
     ]
+    normalized["technology_stack"] = [
+        _normalize_technology_stack_item(item)
+        for item in list(raw.get("technology_stack") or [])
+    ]
     normalized["phases"] = [_normalize_phase(phase) for phase in list(raw.get("phases") or [])]
     normalized["global_risks"] = [
         _normalize_risk(risk) for risk in list(raw.get("global_risks") or raw.get("risks") or [])
@@ -214,16 +232,22 @@ def serialize_plan_row(plan_row: dict[str, Any]) -> dict[str, Any]:
         "description": content["description"],
         "objectives": content["objectives"],
         "stakeholders": content["stakeholders"],
+        "technology_stack": content["technology_stack"],
         "phases": content["phases"],
         "global_risks": content["global_risks"],
     }
 
 
 def _find_phase(content: dict[str, Any], phase_id: str) -> dict[str, Any]:
+    normalized_target = _normalize_phase_reference(phase_id)
     for phase in content["phases"]:
-        if phase["id"] == phase_id:
+        if phase["id"] == phase_id or _normalize_phase_reference(phase.get("title", "")) == normalized_target:
             return phase
     raise PlanPhaseNotFound()
+
+
+def _normalize_phase_reference(value: str) -> str:
+    return " ".join(str(value or "").strip().lower().replace("_", " ").split())
 
 
 def _find_task(content: dict[str, Any], task_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -294,7 +318,15 @@ def _has_structured_shape(content: dict[str, Any] | None) -> bool:
         return False
     return any(
         key in content
-        for key in ("phases", "global_risks", "title", "description", "objectives", "stakeholders")
+        for key in (
+            "phases",
+            "global_risks",
+            "title",
+            "description",
+            "objectives",
+            "stakeholders",
+            "technology_stack",
+        )
     )
 
 
@@ -431,6 +463,24 @@ def _apply_structured_change(content: dict[str, Any], change: dict[str, Any]) ->
         if action == "remove":
             current["global_risks"] = [
                 existing for existing in current["global_risks"] if existing["id"] != risk["id"]
+            ]
+            return current
+
+    if section == "technology_stack":
+        items = value if isinstance(value, list) else [value]
+        normalized_items = [_normalize_technology_stack_item(item) for item in items]
+        if action == "add":
+            current["technology_stack"].extend(normalized_items)
+            return current
+        if action == "update":
+            current["technology_stack"] = normalized_items
+            return current
+        if action == "remove":
+            titles_to_remove = {item["title"] for item in normalized_items if item.get("title")}
+            current["technology_stack"] = [
+                existing
+                for existing in current["technology_stack"]
+                if existing.get("title") not in titles_to_remove
             ]
             return current
 

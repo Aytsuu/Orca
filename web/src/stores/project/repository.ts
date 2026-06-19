@@ -538,6 +538,7 @@ export function createEmptyPlan(projectId: string): StructuredPlan {
     updatedAt: '',
     objectives: [],
     stakeholders: [],
+    technologyStack: [],
     phases: [],
     globalRisks: [],
   };
@@ -563,6 +564,10 @@ export function mapPlan(plan: ApiProjectPlan, fallbackProjectId: string): Struct
       name: stakeholder.name,
       role: stakeholder.role,
       initials: stakeholder.initials,
+    })),
+    technologyStack: (plan.technology_stack || []).map((item) => ({
+      title: item.title || '',
+      value: item.value || '',
     })),
     phases: (plan.phases || []).map((phase) => ({
       id: phase.id,

@@ -109,7 +109,7 @@ describe('projectPlan optimistic helpers', () => {
       description: 'Updated overview',
       goal: 'Ship',
       timeframe: 'Week 3',
-      assignedMembers: [{ sessionId: 'sam', name: 'Sam', initials: 'S', role: 'EDITOR' }],
+      assignedMembers: [{ sessionId: 'sam', name: 'Sam', initials: 'S', role: 'VIEWER' }],
     });
     const removed = removeOptimisticPhase(plan, 'phase_1');
 
@@ -119,7 +119,7 @@ describe('projectPlan optimistic helpers', () => {
       description: 'Updated overview',
       goal: 'Ship',
       timeframe: 'Week 3',
-      assignedMembers: [{ sessionId: 'sam', name: 'Sam', initials: 'S', role: 'EDITOR' }],
+      assignedMembers: [{ sessionId: 'sam', name: 'Sam', initials: 'S', role: 'VIEWER' }],
     });
     expect(removed.phases).toEqual([]);
   });

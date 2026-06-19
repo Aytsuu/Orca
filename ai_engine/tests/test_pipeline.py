@@ -158,6 +158,79 @@ async def test_pipeline_persists_planner_proposal(fake_supabase) -> None:
 
     assert [result.agent for result in results] == ["monitor", "analyzer", "planner"]
     assert len(fake_supabase.tables["plan_proposal"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_pipeline_repairs_single_character_planner_source_id_typo(fake_supabase) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha"})
+    message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Create a setup guide for the technology stack",
+            "id": "d5e117ff-e9ae-4152-b6f1-88e5518d5332",
+        },
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [message["id"]],
+        },
+    )
+    llm = FakeJsonLlmClient(
+        responses=[
+            MonitorOutput(
+                tasks=[
+                    {
+                        "kind": "task",
+                        "content": "Create setup guide",
+                        "source_message_ids": [message["id"]],
+                        "excerpt": "Create a setup guide for the technology stack",
+                        "confidence": "medium",
+                    }
+                ]
+            ),
+            AnalyzerOutput(
+                gaps=[
+                    {
+                        "title": "Setup guide missing",
+                        "detail": "The project still needs a technology stack setup guide.",
+                        "severity": "major",
+                        "source_message_ids": [message["id"]],
+                    }
+                ]
+            ),
+            {
+                "changes": [
+                    {
+                        "id": "chg-setup-guide",
+                        "section": "tasks",
+                        "action": "add",
+                        "content": [{"title": "Create a setup guide for the technology stack"}],
+                        "justification": "Explicitly requested in the latest message.",
+                        "source_message_ids": ["d5e117ff-e9ae-4152-b6f1-88e518d5332"],
+                        "confidence": "high",
+                    }
+                ],
+                "summary": "Add the setup guide task",
+            },
+            {"safe": True, "violations": []},
+        ]
+    )
+
+    results = await run_project_pipeline(
+        fake_supabase,
+        run["id"],
+        llm_client=llm,
+        safety_client=llm,
+    )
+
+    assert [result.agent for result in results] == ["monitor", "analyzer", "planner"]
+    assert fake_supabase.tables["plan_proposal"][0]["changes"][0]["source_message_ids"] == [message["id"]]
     assert fake_supabase.tables["plan_proposal"][0]["status"] == "pending"
 
 
@@ -1305,6 +1378,123 @@ async def test_pipeline_persists_safe_fallback_metadata(fake_supabase) -> None:
         "attempt_count": 2,
     }
     assert "key" not in str(analyzer_artifact["payload"]).lower()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_ignores_confidence_wording_only_safety_false_positive(
+    fake_supabase,
+) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha"})
+    message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Add a project description and split the work into phases for setup, rollout, and validation.",
+        },
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [message["id"]],
+        },
+    )
+    llm = FakeJsonLlmClient(
+        responses=[
+            MonitorOutput(
+                requirements=[
+                    {
+                        "kind": "requirement",
+                        "content": "Add a project description",
+                        "source_message_ids": [message["id"]],
+                        "excerpt": "Add a project description",
+                        "confidence": "medium",
+                    }
+                ],
+                tasks=[
+                    {
+                        "kind": "task",
+                        "content": "Split the work into phases for setup, rollout, and validation",
+                        "source_message_ids": [message["id"]],
+                        "excerpt": "split the work into phases for setup, rollout, and validation",
+                        "confidence": "medium",
+                    }
+                ],
+            ),
+            AnalyzerOutput(
+                gaps=[
+                    {
+                        "title": "Description missing",
+                        "detail": "The plan still needs a description.",
+                        "severity": "major",
+                        "source_message_ids": [message["id"]],
+                    }
+                ]
+            ),
+            {
+                "changes": [
+                    {
+                        "id": "chg-description",
+                        "section": "description",
+                        "action": "update",
+                        "content": "Project delivery plan for setup, rollout, and validation.",
+                        "justification": "The user's message provides a clear concept for the description update.",
+                        "source_message_ids": [message["id"]],
+                        "confidence": "medium",
+                    },
+                    {
+                        "id": "chg-phases",
+                        "section": "phases",
+                        "action": "add",
+                        "content": [
+                            {
+                                "title": "Setup",
+                                "description": "Prepare the baseline project setup.",
+                            },
+                            {
+                                "title": "Rollout",
+                                "description": "Execute the implementation rollout.",
+                            },
+                            {
+                                "title": "Validation",
+                                "description": "Validate the delivered work.",
+                            },
+                        ],
+                        "justification": "The requirements imply significant development work across setup, rollout, and validation.",
+                        "source_message_ids": [message["id"]],
+                        "confidence": "medium",
+                    },
+                ],
+                "summary": "Add plan description and phases.",
+            },
+            {
+                "safe": False,
+                "violations": [
+                    "The confidence level for the 'description' update is 'medium', but the justification suggests a 'high' confidence level by stating the user's message provides a 'clear concept'. The evidence cited does not fully support the 'high' confidence level.",
+                    "The confidence level for the 'phases' addition is 'medium', but the justification states the requirements 'imply significant development work' which suggests a higher degree of certainty. The evidence cited does not fully support the 'medium' confidence level.",
+                ],
+            },
+        ]
+    )
+
+    results = await run_project_pipeline(
+        fake_supabase,
+        run["id"],
+        llm_client=llm,
+        safety_client=llm,
+    )
+
+    assert [result.agent for result in results] == ["monitor", "analyzer", "planner"]
+    proposal = fake_supabase.tables["plan_proposal"][0]
+    assert proposal["status"] == "pending"
+    planner_artifact = next(
+        row for row in fake_supabase.tables["agent_artifact"] if row["agent"] == "planner"
+    )
+    assert planner_artifact["payload"]["safety"]["effective_safe"] is True
+    assert len(planner_artifact["payload"]["safety"]["ignored_violations"]) == 2
 
 
 @pytest.mark.asyncio

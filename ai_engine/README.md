@@ -114,6 +114,18 @@ cd ai_engine
 .venv\Scripts\python.exe -m src.llm.smoke --profile fallback
 ```
 
+## Planner schema smoke test
+
+Print the exact planner `response_schema` that the Gemini client sends:
+
+```powershell
+cd ai_engine
+.venv\Scripts\python.exe -m src.llm.schema_smoke
+```
+
+Use this when Gemini rejects a planner request with `INVALID_ARGUMENT` and you
+need to inspect the emitted schema locally without making a live API call.
+
 ## Redis contingency fallback
 
 If Redis becomes the blocker during the hackathon, the intended fallback is a

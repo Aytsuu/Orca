@@ -29,6 +29,23 @@ def validate_source_message_ids(valid_ids: Iterable[str], cited_ids: Iterable[st
         raise InvalidOutputError(f"Output cited unknown source_message_ids: {invalid}")
 
 
+def canonicalize_source_message_ids(valid_ids: Iterable[str], cited_ids: Iterable[str]) -> list[str]:
+    valid = [str(message_id) for message_id in valid_ids if message_id]
+    valid_set = set(valid)
+    canonicalized: list[str] = []
+
+    for raw_id in cited_ids:
+        cited_id = str(raw_id)
+        if cited_id in valid_set:
+            canonicalized.append(cited_id)
+            continue
+
+        repaired = _repair_opaque_id_typo(valid, cited_id)
+        canonicalized.append(repaired or cited_id)
+
+    return canonicalized
+
+
 def collect_context_source_message_ids(
     *,
     messages: list[dict[str, Any]],
@@ -185,3 +202,92 @@ def deduplicate_changes(changes: list[dict]) -> list[dict]:
         seen.add(key)
         deduplicated.append(change)
     return deduplicated
+
+
+def partition_safety_violations(violations: list[str]) -> tuple[list[str], list[str]]:
+    ignored: list[str] = []
+    blocking: list[str] = []
+
+    for violation in violations:
+        if _is_non_blocking_confidence_wording_violation(violation):
+            ignored.append(violation)
+            continue
+        blocking.append(violation)
+
+    return ignored, blocking
+
+
+def _is_non_blocking_confidence_wording_violation(violation: str) -> bool:
+    normalized = _normalize_text(violation)
+    if "confidence level" not in normalized or "justification" not in normalized:
+        return False
+
+    wording_markers = (
+        "suggests a high confidence level",
+        "implies a higher degree of certainty",
+        "implies higher certainty",
+        "stating the user s message provides a clear concept",
+        "identified critical risks",
+        "three core requirements",
+        "significant development work",
+    )
+    evidence_marker = "evidence cited does not fully support"
+
+    return evidence_marker in normalized and any(marker in normalized for marker in wording_markers)
+
+
+def _repair_opaque_id_typo(valid_ids: list[str], cited_id: str) -> str | None:
+    if not _looks_like_opaque_id(cited_id):
+        return None
+
+    candidates = [
+        valid_id
+        for valid_id in valid_ids
+        if _looks_like_opaque_id(valid_id) and _opaque_id_distance(valid_id, cited_id) is not None
+    ]
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
+def _looks_like_opaque_id(value: str) -> bool:
+    return len(value) >= 20 and value.count("-") >= 2
+
+
+def _opaque_id_distance(left: str, right: str) -> int | None:
+    if abs(len(left) - len(right)) > 2:
+        return None
+    if [index for index, char in enumerate(left) if char == "-"] != [
+        index for index, char in enumerate(right) if char == "-"
+    ]:
+        return None
+
+    distance = _bounded_levenshtein(left, right, max_distance=2)
+    if distance is None or distance == 0:
+        return None
+    return distance
+
+
+def _bounded_levenshtein(left: str, right: str, *, max_distance: int) -> int | None:
+    if abs(len(left) - len(right)) > max_distance:
+        return None
+
+    previous = list(range(len(right) + 1))
+    for left_index, left_char in enumerate(left, start=1):
+        current = [left_index]
+        row_min = current[0]
+        for right_index, right_char in enumerate(right, start=1):
+            insertion = current[right_index - 1] + 1
+            deletion = previous[right_index] + 1
+            substitution = previous[right_index - 1] + (0 if left_char == right_char else 1)
+            cost = min(insertion, deletion, substitution)
+            current.append(cost)
+            row_min = min(row_min, cost)
+        if row_min > max_distance:
+            return None
+        previous = current
+
+    distance = previous[-1]
+    if distance > max_distance:
+        return None
+    return distance

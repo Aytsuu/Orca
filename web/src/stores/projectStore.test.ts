@@ -280,7 +280,7 @@ describe('projectStore tests', () => {
           sessionId: 'beta',
           name: 'John Doe',
           initials: 'JD',
-          role: 'EDITOR',
+          role: 'VIEWER',
         },
       ];
       mockStore.set('orca_project_members_proj_1', JSON.stringify(mockMembers));

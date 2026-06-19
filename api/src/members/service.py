@@ -153,7 +153,28 @@ async def accept_member_invitation(
         raise MemberInvitationNotFound()
 
     invitation = invitation_rows[0]
+    is_default_invitation = invitation["invitee_email"] == "__default__"
     if invitation["redeemed_at"]:
+        if is_default_invitation:
+            member_rows = (
+                await supabase.table("project_member")
+                .select("*")
+                .eq("project_id", invitation["project_id"])
+                .eq("session_id", session_id)
+                .limit(1)
+                .execute()
+            ).data
+            if member_rows:
+                return invitation, member_rows[0]
+            member = await add_member(
+                supabase,
+                project_id=invitation["project_id"],
+                session_id=session_id,
+                role=invitation["role"],
+                can_approve=invitation["can_approve"],
+                can_edit=invitation["can_edit"],
+            )
+            return invitation, member
         if invitation["redeemed_by_session_id"] == session_id:
             member_rows = (
                 await supabase.table("project_member")
@@ -187,6 +208,9 @@ async def accept_member_invitation(
             can_approve=invitation["can_approve"],
             can_edit=invitation["can_edit"],
         )
+
+    if is_default_invitation:
+        return invitation, member
 
     updated_invitation = (
         await supabase.table("project_invitation")

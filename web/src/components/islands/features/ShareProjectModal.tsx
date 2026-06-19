@@ -115,7 +115,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({
               const name = atIdx !== -1 ? val.substring(0, atIdx) : val;
               const email = atIdx !== -1 ? val : `${val.toLowerCase().replace(/\s+/g, '')}@company.com`;
 
-              void addProjectMember(projectId, name, email, 'EDITOR');
+              void addProjectMember(projectId, name, email, 'VIEWER');
               input.value = '';
             }
           }}
@@ -193,7 +193,6 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({
                         className="bg-transparent text-xs font-medium text-text-secondary hover:text-text-primary border-none outline-none focus:outline-none pr-6 pl-2 py-1 cursor-pointer appearance-none text-right"
                       >
                         <option value="APPROVER" className="bg-surface">Approver</option>
-                        <option value="EDITOR" className="bg-surface">Editor</option>
                         <option value="VIEWER" className="bg-surface">Viewer</option>
                       </select>
                       <ChevronDown className="w-3 h-3 text-text-muted pointer-events-none absolute right-1 top-1/2 -translate-y-1/2" />
@@ -222,7 +221,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({
                   <span className="text-sm font-semibold text-text-primary">Anyone with the link</span>
                 </div>
                 <p className="text-xs text-text-muted mt-0.5">
-                  Anyone on the Internet with the link can edit
+                  Anyone on the Internet with the link can view
                 </p>
               </div>
             </div>
@@ -230,11 +229,11 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({
             {/* Role Dropdown */}
             <div className="relative select-none">
               <select
-                defaultValue="EDITOR"
+                defaultValue="VIEWER"
                 className="bg-transparent text-xs font-medium text-text-secondary hover:text-text-primary border-none outline-none focus:outline-none pr-6 pl-2 py-1 cursor-pointer appearance-none text-right"
                 disabled
               >
-                <option value="EDITOR" className="bg-surface">Editor</option>
+                <option value="VIEWER" className="bg-surface">Viewer</option>
               </select>
               <ChevronDown className="w-3 h-3 text-text-muted pointer-events-none absolute right-1 top-1/2 -translate-y-1/2" />
             </div>

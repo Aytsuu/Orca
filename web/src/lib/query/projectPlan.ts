@@ -429,10 +429,7 @@ function toOptimisticPhase(entry: Record<string, unknown>): Phase {
               : buildOptimisticId('phase-member'),
         name: typeof member.name === 'string' ? member.name : 'Assigned member',
         initials: typeof member.initials === 'string' ? member.initials : 'AM',
-        role:
-          member.role === 'APPROVER' || member.role === 'EDITOR' || member.role === 'VIEWER'
-            ? member.role
-            : 'VIEWER',
+        role: member.role === 'APPROVER' ? 'APPROVER' : 'VIEWER',
       })),
     tasks: [],
     gaps: [],

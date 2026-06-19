@@ -915,6 +915,60 @@ async def test_get_pending_proposal_supports_technology_stack_section(
 
 
 @pytest.mark.asyncio
+async def test_members_can_view_pending_plan_proposals_without_approval_rights(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "beta",
+            "role": "member",
+            "can_approve": False,
+            "can_edit": False,
+        },
+    )
+    fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "changes": [
+                {
+                    "id": "chg-1",
+                    "action": "add",
+                    "section": "tasks",
+                    "targetId": "phase-1",
+                    "title": "Add kickoff task",
+                    "detail": "Keep the team aligned on scope.",
+                    "sourceQuote": "we should add a kickoff task",
+                }
+            ],
+        },
+    )
+
+    response = await client.get(
+        f"/api/v1/projects/{project['id']}/plan/proposal",
+        headers={"X-Session-Id": "beta"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["changes"][0]["id"] == "chg-1"
+
+
+@pytest.mark.asyncio
 async def test_agent_activity_is_sorted_oldest_to_latest(
     client: AsyncClient,
     fake_supabase: FakeSupabase,
@@ -1108,6 +1162,58 @@ async def test_create_and_accept_project_invitation(
     assert accepted["member"]["session_id"] == "beta"
     assert accepted["member"]["can_edit"] is True
     assert fake_supabase.tables["project_invitation"][0]["redeemed_by_session_id"] == "beta"
+
+
+@pytest.mark.asyncio
+async def test_default_invitation_link_can_be_reused_for_multiple_members(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    create_response = await client.post(
+        "/api/v1/projects",
+        headers={"X-Session-Id": "alpha"},
+        json={"name": "Orca", "description": "Planning workspace"},
+    )
+
+    assert create_response.status_code == 201
+    project_id = create_response.json()["data"]["id"]
+
+    default_invitation = await client.get(
+        f"/api/v1/projects/{project_id}/member-invitations/default",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert default_invitation.status_code == 200
+    token = default_invitation.json()["data"]["token"]
+
+    accept_beta = await client.post(
+        f"/api/v1/member-invitations/{token}/accept",
+        headers={"X-Session-Id": "beta"},
+    )
+    assert accept_beta.status_code == 200
+    assert accept_beta.json()["data"]["member"]["session_id"] == "beta"
+
+    accept_gamma = await client.post(
+        f"/api/v1/member-invitations/{token}/accept",
+        headers={"X-Session-Id": "gamma"},
+    )
+    assert accept_gamma.status_code == 200
+    assert accept_gamma.json()["data"]["member"]["session_id"] == "gamma"
+
+    default_rows = [
+        row
+        for row in fake_supabase.tables["project_invitation"]
+        if row["project_id"] == project_id and row["invitee_email"] == "__default__"
+    ]
+    assert len(default_rows) == 1
+    assert default_rows[0]["redeemed_at"] is None
+    assert default_rows[0]["redeemed_by_session_id"] is None
+
+    members = [
+        row["session_id"]
+        for row in fake_supabase.tables["project_member"]
+        if row["project_id"] == project_id
+    ]
+    assert members == ["alpha", "beta", "gamma"]
 
 
 @pytest.mark.asyncio
@@ -1955,7 +2061,7 @@ async def test_phase_assignees_can_be_updated_and_returned_in_plan(
                 {
                     "session_id": "beta",
                     "name": "beta",
-                    "role": "EDITOR",
+                    "role": "VIEWER",
                     "initials": "B",
                 },
             ]
@@ -1973,7 +2079,7 @@ async def test_phase_assignees_can_be_updated_and_returned_in_plan(
         {
             "session_id": "beta",
             "name": "beta",
-            "role": "EDITOR",
+            "role": "VIEWER",
             "initials": "B",
         },
     ]

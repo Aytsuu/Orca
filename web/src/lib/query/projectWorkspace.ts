@@ -35,7 +35,7 @@ export interface WorkspaceTeammate {
   sessionId: string;
   name: string;
   initials: string;
-  role: 'APPROVER' | 'EDITOR' | 'VIEWER';
+  role: 'APPROVER' | 'VIEWER';
   isCreator: boolean;
   email?: string;
 }
@@ -63,8 +63,6 @@ function mapMember(member: ApiProjectMember, currentSessionId: string): Workspac
   let role: WorkspaceTeammate['role'] = 'VIEWER';
   if (member.role === 'creator' || member.can_approve) {
     role = 'APPROVER';
-  } else if (member.can_edit) {
-    role = 'EDITOR';
   }
 
   return {

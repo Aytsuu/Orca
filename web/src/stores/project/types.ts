@@ -13,7 +13,7 @@ export interface Teammate {
   sessionId: string;
   name: string;
   initials: string;
-  role: 'APPROVER' | 'EDITOR' | 'VIEWER';
+  role: 'APPROVER' | 'VIEWER';
   isCreator?: boolean;
   email?: string;
 }
@@ -22,7 +22,7 @@ export interface PhaseAssignedMember {
   sessionId: string;
   name: string;
   initials: string;
-  role: 'APPROVER' | 'EDITOR' | 'VIEWER';
+  role: 'APPROVER' | 'VIEWER';
 }
 
 export interface ProjectMessage {
@@ -262,7 +262,7 @@ export interface ApiPlanPhase {
     session_id: string;
     name: string;
     initials: string;
-    role: 'APPROVER' | 'EDITOR' | 'VIEWER';
+    role: 'APPROVER' | 'VIEWER';
   }[];
   tasks?: ApiPlanTask[];
   gaps?: ApiPlanGap[];

@@ -146,7 +146,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
   const { data: pendingProposal } = usePendingProjectProposal(projectId);
 
   // Derived properties
-  const showReviewPanel = isApprover;
+  const showReviewPanel = true;
 
   // Mutations
   const updateProjectPlanMutation = useUpdateProjectPlan(projectId);
@@ -1036,7 +1036,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
           </div>
         )}
 
-        {change.section === 'stakeholders' && (
+        {change.section === 'stakeholders' && isApprover && (
           <div className="mt-1 flex flex-col gap-2">
             {(proposalStakeholderDrafts[change.id] || toDraftStakeholder(change)).map((stakeholder, index) => (
               <div
@@ -1112,20 +1112,26 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
           </div>
         )}
 
-        <div className="flex gap-2 mt-1.5 select-none">
-          <button
-            onClick={() => applyChangeState(change.id, true)}
-            className="flex-1 py-1 rounded bg-success/15 hover:bg-success text-success hover:text-text-inverse text-[10px] font-bold transition-all"
-          >
-            Accept
-          </button>
-          <button
-            onClick={() => applyChangeState(change.id, false)}
-            className="flex-1 py-1 rounded bg-error/15 hover:bg-error text-error hover:text-text-inverse text-[10px] font-bold transition-all"
-          >
-            Reject
-          </button>
-        </div>
+        {isApprover ? (
+          <div className="flex gap-2 mt-1.5 select-none">
+            <button
+              onClick={() => applyChangeState(change.id, true)}
+              className="flex-1 py-1 rounded bg-success/15 hover:bg-success text-success hover:text-text-inverse text-[10px] font-bold transition-all"
+            >
+              Accept
+            </button>
+            <button
+              onClick={() => applyChangeState(change.id, false)}
+              className="flex-1 py-1 rounded bg-error/15 hover:bg-error text-error hover:text-text-inverse text-[10px] font-bold transition-all"
+            >
+              Reject
+            </button>
+          </div>
+        ) : (
+          <div className="mt-1.5 rounded-lg border border-border-subtle bg-surface-raised/50 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted select-none">
+            View only
+          </div>
+        )}
       </div>
     );
   };
@@ -2486,10 +2492,15 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                 <span className="text-sm text-text-muted font-bold">
                   Pending Changes
                 </span>
-                <span className="category-badge badge--approver text-[10px] py-0.5 px-2 font-bold">
+                <span className={`category-badge text-[10px] py-0.5 px-2 font-bold ${isApprover ? 'badge--approver' : 'badge--viewer'}`}>
                   {pendingChanges.length}
                 </span>
               </div>
+              {!isApprover && (
+                <span className="text-[10px] uppercase tracking-wider text-text-muted">
+                  Read-only preview
+                </span>
+              )}
             </div>
 
             {/* Scrollable list of cards */}
@@ -2507,7 +2518,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
             </div>
 
             {/* Bottom-anchored Accept All button */}
-            {pendingChanges.length > 0 && (
+            {pendingChanges.length > 0 && isApprover && (
               <div className="p-4 border-t border-border-subtle bg-surface select-none">
                 <button
                   onClick={handleAcceptAll}
@@ -2588,7 +2599,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
             </div>
 
             {/* Accept All bottom action */}
-            {pendingChanges.length > 0 && (
+            {pendingChanges.length > 0 && isApprover && (
               <div className="p-4 border-t border-border-subtle bg-surface select-none">
                 <button
                   onClick={() => {

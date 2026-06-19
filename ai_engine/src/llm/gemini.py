@@ -52,11 +52,90 @@ class GeminiJsonLlmClient:
             self._async_client = genai.Client(api_key=self._api_key).aio
         return self._async_client
 
+    def _build_response_schema(self, schema: type[SchemaT]) -> Any:
+        if schema.__name__ != "PlannerOutput":
+            return schema
+
+        planner_content_item_properties = {
+            "title": {"type": "string"},
+            "description": {"type": "string"},
+            "detail": {"type": "string"},
+            "goal": {"type": "string"},
+            "timeframe": {"type": "string"},
+            "owner": {"type": "string"},
+            "status": {"type": "string"},
+            "priority": {"type": "string"},
+            "due_date": {"type": "string"},
+            "acceptance_criteria": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "notes": {"type": "string"},
+            "value": {"type": "string"},
+        }
+        planner_content_item_schema = {
+            "type": "object",
+            "properties": planner_content_item_properties,
+        }
+        planner_change_schema = {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "section": {"type": "string"},
+                "action": {
+                    "type": "string",
+                    "enum": ["add", "update", "remove"],
+                },
+                "content": {
+                    "anyOf": [
+                        {
+                            "type": "array",
+                            "items": planner_content_item_schema,
+                        },
+                        {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        {"type": "string"},
+                    ]
+                },
+                "justification": {"type": "string"},
+                "source_message_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "confidence": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                },
+                "approved": {"type": "boolean"},
+            },
+            "required": [
+                "id",
+                "section",
+                "action",
+                "content",
+                "justification",
+                "source_message_ids",
+                "confidence",
+            ],
+        }
+        return {
+            "type": "object",
+            "properties": {
+                "changes": {
+                    "type": "array",
+                    "items": planner_change_schema,
+                },
+                "summary": {"type": "string"},
+            },
+        }
+
     def _build_config(self, types_module, schema: type[SchemaT], temperature: float):
         return types_module.GenerateContentConfig(
             temperature=temperature,
             response_mime_type="application/json",
-            response_schema=schema,
+            response_schema=self._build_response_schema(schema),
         )
 
     async def _request_json(

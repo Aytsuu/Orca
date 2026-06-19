@@ -195,7 +195,7 @@ def _normalize_phase_assigned_member(member: Any) -> dict[str, str]:
             or name.lower().replace(" ", "_")
         ).strip()
         role = str(member.get("role") or "VIEWER").strip().upper() or "VIEWER"
-        if role not in {"APPROVER", "EDITOR", "VIEWER"}:
+        if role != "APPROVER":
             role = "VIEWER"
         initials = str(member.get("initials") or _to_initials(name)).strip() or _to_initials(name)
         return {

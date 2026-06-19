@@ -93,10 +93,9 @@ async def update_plan_endpoint(
 @router.get("/{project_id}/plan/proposal", response_model=DataEnvelope[ProposalOut | None])
 async def get_pending_proposal_endpoint(
     project_id: UUID,
-    project_context: Annotated[dict, Depends(get_project_context)],
+    _: Annotated[dict, Depends(get_project_context)],
     supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
 ) -> DataEnvelope[ProposalOut | None]:
-    require_approver_membership(project_context["membership"])
     proposal = await get_pending_proposal(supabase, str(project_id))
     return DataEnvelope(data=ProposalOut.model_validate(proposal) if proposal else None)
 

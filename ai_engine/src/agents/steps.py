@@ -15,9 +15,11 @@ from src.config import get_settings
 from src.context.builder import AssembledContext
 from src.guardrails import (
     calibrate_confidence_from_messages,
+    canonicalize_source_message_ids,
     collect_context_source_message_ids,
     deduplicate_changes,
     ensure_remove_actions_are_explicit,
+    partition_safety_violations,
     validate_source_message_ids,
 )
 from src.llm.client import JsonLlmClient
@@ -301,6 +303,10 @@ class PlannerStep(AgentStep):
         ]
         normalized_changes = deduplicate_changes(normalized_changes)
         for change in normalized_changes:
+            change["source_message_ids"] = canonicalize_source_message_ids(
+                valid_ids,
+                change["source_message_ids"],
+            )
             validate_source_message_ids(valid_ids, change["source_message_ids"])
         ensure_remove_actions_are_explicit(normalized_changes, context.new_messages)
 
@@ -312,13 +318,22 @@ class PlannerStep(AgentStep):
             temperature=0.0,
         )
         safety_metadata = _llm_metadata(self._safety_client)
-        if not safety.safe:
-            raise ValueError(f"Planner output failed safety check: {safety.violations}")
+        ignored_safety_violations, blocking_safety_violations = partition_safety_violations(
+            safety.violations
+        )
+        if not safety.safe and blocking_safety_violations:
+            raise ValueError(
+                f"Planner output failed safety check: {blocking_safety_violations}"
+            )
 
         artifacts = {
             "changes": normalized_changes,
             "summary": output.summary,
-            "safety": safety.model_dump(mode="json"),
+            "safety": {
+                **safety.model_dump(mode="json"),
+                "effective_safe": not blocking_safety_violations,
+                "ignored_violations": ignored_safety_violations,
+            },
         }
         if planner_metadata:
             artifacts["llm"] = planner_metadata

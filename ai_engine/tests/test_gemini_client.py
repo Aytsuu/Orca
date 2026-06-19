@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from src.exceptions import AuthenticationError, InvalidOutputError, TransportError
 from src.llm.gemini import GeminiJsonLlmClient
+from src.agents.schemas import PlannerOutput
 
 
 class Ping(BaseModel):
@@ -218,3 +219,47 @@ async def test_gemini_client_raises_invalid_output_after_failed_repair(
     client = GeminiJsonLlmClient()
     with pytest.raises(InvalidOutputError):
         await client.generate_json("test", Ping, model="gemini-2.5-flash-lite", temperature=0.0)
+
+
+@pytest.mark.asyncio
+async def test_gemini_client_uses_flattened_planner_response_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "src.llm.gemini.get_settings",
+        lambda: SimpleNamespace(llm_api_key="key", llm_rate_limit_rpm=15),
+    )
+
+    captured_configs: list[FakeGenerateContentConfig] = []
+
+    class FakeModels:
+        async def generate_content(self, *, model, contents, config):
+            captured_configs.append(config)
+            return FakeResponse(text='{"changes": [], "summary": "ok"}')
+
+    class FakeAioClient:
+        def __init__(self) -> None:
+            self.models = FakeModels()
+
+    class FakeClient:
+        def __init__(self, *, api_key: str) -> None:
+            self.aio = FakeAioClient()
+
+    install_fake_google(monkeypatch, FakeClient)
+
+    client = GeminiJsonLlmClient()
+    result = await client.generate_json(
+        "planner",
+        PlannerOutput,
+        model="gemini-2.5-flash-lite",
+        temperature=0.0,
+    )
+
+    assert result.summary == "ok"
+    response_schema = captured_configs[0].kwargs["response_schema"]
+    content_any_of = response_schema["properties"]["changes"]["items"]["properties"]["content"]["anyOf"]
+    object_array_schema = content_any_of[0]
+    assert object_array_schema["items"]["properties"]["acceptance_criteria"] == {
+        "type": "array",
+        "items": {"type": "string"},
+    }

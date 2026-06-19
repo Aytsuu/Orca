@@ -186,7 +186,7 @@ export class ApiProjectRepository implements ProjectRepository {
           invitee_email: inviteeEmail,
           role: role === 'APPROVER' ? 'approver' : 'member',
           can_approve: role === 'APPROVER',
-          can_edit: role !== 'VIEWER',
+          can_edit: role === 'APPROVER',
         }),
       }
     );
@@ -206,7 +206,7 @@ export class ApiProjectRepository implements ProjectRepository {
         method: 'PATCH',
         body: JSON.stringify({
           can_approve: role === 'APPROVER',
-          can_edit: role !== 'VIEWER',
+          can_edit: role === 'APPROVER',
         }),
       }
     );
@@ -523,8 +523,6 @@ export function mapApiProjectMember(member: ApiProjectMember, currentSessionId: 
   let role: Teammate['role'] = 'VIEWER';
   if (member.role === 'creator' || member.can_approve) {
     role = 'APPROVER';
-  } else if (member.can_edit) {
-    role = 'EDITOR';
   }
 
   return {

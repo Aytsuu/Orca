@@ -306,11 +306,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
             {teammates.map((member) => {
               const isSelfOrCreator = member.isCreator || member.id === 'creator_id';
               const isApprover = member.role === 'APPROVER';
-              const isEditor = member.role === 'EDITOR';
 
               let roleClass = 'badge--viewer';
               if (isApprover) roleClass = 'badge--approver';
-              else if (isEditor) roleClass = 'badge--editor';
 
               return (
                 <div
@@ -345,7 +343,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
                           className="absolute right-0 mt-1.5 w-32 bg-surface-raised border border-border rounded-sm shadow-xl flex flex-col p-1 z-30 fade-up"
                           style={{ boxShadow: '0 8px 24px -6px rgba(0,0,0,0.6)' }}
                         >
-                          {['VIEWER', 'EDITOR', 'APPROVER'].map((r) => (
+                          {['VIEWER', 'APPROVER'].map((r) => (
                             <button
                               key={r}
                               onClick={() => {

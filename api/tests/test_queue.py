@@ -55,6 +55,7 @@ def test_rq_queue_producer_uses_stable_job_ids(monkeypatch) -> None:
     fake_rq_module = types.SimpleNamespace(Queue=FakeQueue)
     monkeypatch.setitem(sys.modules, "redis", fake_redis_module)
     monkeypatch.setitem(sys.modules, "rq", fake_rq_module)
+    monkeypatch.setattr("src.agents.queue.runtime_supports_delayed_enqueue", lambda: True)
 
     producer = RqQueueProducer(FakeSettings())
 
@@ -83,4 +84,32 @@ def test_rq_queue_producer_uses_stable_job_ids(monkeypatch) -> None:
                 "job_id": "agent-run:run-1:delayed",
             },
         },
+    ]
+
+
+def test_rq_queue_producer_falls_back_to_immediate_enqueue_when_delayed_jobs_are_unsupported(
+    monkeypatch,
+) -> None:
+    FakeQueue.calls = []
+    fake_redis_module = types.SimpleNamespace(Redis=FakeRedis)
+    fake_rq_module = types.SimpleNamespace(Queue=FakeQueue)
+    monkeypatch.setitem(sys.modules, "redis", fake_redis_module)
+    monkeypatch.setitem(sys.modules, "rq", fake_rq_module)
+    monkeypatch.setattr("src.agents.queue.runtime_supports_delayed_enqueue", lambda: False)
+
+    producer = RqQueueProducer(FakeSettings())
+
+    job_id = producer.enqueue_run("run-1", delay_seconds=8)
+
+    assert job_id == "agent-run:run-1:immediate"
+    assert FakeQueue.calls == [
+        {
+            "method": "enqueue",
+            "func": "src.tasks.worker.run_project_pipeline_job",
+            "run_id": "run-1",
+            "kwargs": {
+                "job_timeout": 300,
+                "job_id": "agent-run:run-1:immediate",
+            },
+        }
     ]

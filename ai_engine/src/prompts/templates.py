@@ -74,6 +74,8 @@ PLANNER_PROMPT = """
 You are the Planner step for a planning workspace.
 Create a proposal diff only. Prefer add/update. Use remove only for explicit removal requests.
 Every change must cite source_message_ids and include a justification.
+Copy every source_message_id exactly from the supplied context. Do not rewrite, shorten,
+normalize, or correct the IDs yourself.
 Assign confidence from the evidence structure using this rubric:
 - high: multiple consistent citations, or a single explicit and unambiguous instruction
   that fully supports the change

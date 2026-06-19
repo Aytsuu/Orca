@@ -1241,6 +1241,152 @@ async def test_accept_plan_change_applies_content_override(
 
 
 @pytest.mark.asyncio
+async def test_accept_plan_change_resolves_matching_pending_proposal_by_change_id(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "content": {
+                "title": "Initial",
+                "description": "Draft",
+                "objectives": [],
+                "stakeholders": [],
+                "phases": [],
+                "global_risks": [],
+            },
+            "version": 1,
+            "finalized_at": _iso_now(),
+        },
+    )
+    target_proposal = fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "created_at": "2026-06-19T10:00:00+00:00",
+            "changes": [
+                {
+                    "id": "phases-update-with-tasks",
+                    "section": "phases",
+                    "action": "add",
+                    "content": [{"title": "Phase 1", "description": "Set direction", "tasks": [{"title": "Identify stakeholders"}]}],
+                }
+            ],
+        },
+    )
+    fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "created_at": "2026-06-19T11:00:00+00:00",
+            "changes": [
+                {
+                    "id": "latest-other-change",
+                    "section": "risks",
+                    "action": "add",
+                    "content": [{"description": "Fallback missing"}],
+                }
+            ],
+        },
+    )
+
+    response = await client.patch(
+        f"/api/v1/projects/{project['id']}/plan/proposal/changes/phases-update-with-tasks/accept",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["phases"][0]["title"] == "Phase 1"
+    accepted_target = next(
+        row for row in fake_supabase.tables["plan_proposal"] if row["id"] == target_proposal["id"]
+    )
+    assert accepted_target["status"] == "applied"
+
+
+@pytest.mark.asyncio
+async def test_phase_proposal_value_becomes_description_and_seed_tasks(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "content": {
+                "title": "Initial",
+                "description": "Draft",
+                "objectives": [],
+                "stakeholders": [],
+                "phases": [],
+                "global_risks": [],
+            },
+            "version": 1,
+            "finalized_at": _iso_now(),
+        },
+    )
+    fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "changes": [
+                {
+                    "id": "chg-phase",
+                    "section": "phases",
+                    "action": "add",
+                    "content": [
+                        {
+                            "title": "Phase 1: Discovery & Planning",
+                            "value": "Identify stakeholders, refine requirements, and establish initial design principles.",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    response = await client.patch(
+        f"/api/v1/projects/{project['id']}/plan/proposal/changes/chg-phase/accept",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 200
+    phase = response.json()["data"]["phases"][0]
+    assert phase["description"] == "Identify stakeholders, refine requirements, and establish initial design principles."
+    assert [task["title"] for task in phase["tasks"]] == [
+        "Identify stakeholders",
+        "refine requirements",
+        "establish initial design principles",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_agents_status_and_trigger(
     client: AsyncClient,
     fake_supabase: FakeSupabase,

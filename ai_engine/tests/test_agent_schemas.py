@@ -63,3 +63,46 @@ def test_planner_output_accepts_flat_content_and_excludes_none_fields() -> None:
     dumped = output.model_dump(mode="json", exclude_none=True)
 
     assert dumped["changes"][0]["content"] == [{"title": "Assign QA owner"}]
+
+
+def test_planner_output_accepts_phase_description_with_nested_tasks() -> None:
+    output = PlannerOutput.model_validate(
+        {
+            "changes": [
+                {
+                    "id": "chg-phase-1",
+                    "section": "phases",
+                    "action": "add",
+                    "content": [
+                        {
+                            "title": "Phase 1: Discovery & Planning",
+                            "description": "Define the project foundation by aligning stakeholders, clarifying requirements, and setting the initial design direction.",
+                            "tasks": [
+                                {"title": "Identify stakeholders"},
+                                {"title": "Refine requirements"},
+                                {"title": "Establish initial design principles"},
+                            ],
+                        }
+                    ],
+                    "justification": "Supported by the latest planning message",
+                    "source_message_ids": ["msg-1"],
+                    "confidence": "medium",
+                }
+            ],
+            "summary": "Add the initial discovery phase",
+        }
+    )
+
+    dumped = output.model_dump(mode="json", exclude_none=True)
+
+    assert dumped["changes"][0]["content"] == [
+        {
+            "title": "Phase 1: Discovery & Planning",
+            "description": "Define the project foundation by aligning stakeholders, clarifying requirements, and setting the initial design direction.",
+            "tasks": [
+                {"title": "Identify stakeholders"},
+                {"title": "Refine requirements"},
+                {"title": "Establish initial design principles"},
+            ],
+        }
+    ]

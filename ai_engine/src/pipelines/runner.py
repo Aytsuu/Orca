@@ -11,7 +11,6 @@ from src.agents.steps import (
     AnalyzerStep,
     MonitorStep,
     PlannerStep,
-    QuestionAnalyzerStep,
     is_question_only_monitor_output,
 )
 from src.config import get_settings
@@ -420,14 +419,31 @@ async def run_project_pipeline(
                         source_message_ids=[message["id"] for message in context.new_messages],
                         last_message_created_at=context.new_messages[-1]["created_at"],
                     )
+                if is_question_only_monitor_output(monitor_output):
+                    skipped_payload = {
+                        "skipped": True,
+                        "reason": "open_ended_team_question",
+                        "detail": "Open-ended planning questions require team input and do not trigger analyzer or planner suggestions.",
+                    }
+                    for pending_agent in ("analyzer", "planner"):
+                        await create_agent_artifact(
+                            supabase,
+                            run_id=run_id,
+                            project_id=project_id,
+                            agent=pending_agent,
+                            payload=skipped_payload,
+                        )
+                        await set_agent_status(
+                            supabase,
+                            project_id=project_id,
+                            agent=pending_agent,
+                            status="completed",
+                        )
+                    break
                 if result.should_continue:
-                    if is_question_only_monitor_output(monitor_output):
-                        steps.append(QuestionAnalyzerStep(llm))
+                    steps.append(AnalyzerStep(llm))
+                    if not soft_budget_reached:
                         steps.append(PlannerStep(llm, safety))
-                    else:
-                        steps.append(AnalyzerStep(llm))
-                        if not soft_budget_reached:
-                            steps.append(PlannerStep(llm, safety))
 
             if not result.should_continue:
                 remaining_steps = steps[len(results) :]

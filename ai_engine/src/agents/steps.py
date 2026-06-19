@@ -8,7 +8,6 @@ from src.agents.schemas import (
     AnalyzerOutput,
     MonitorOutput,
     PlannerOutput,
-    QuestionAnalyzerOutput,
     SafetyCheckOutput,
 )
 from src.config import get_settings
@@ -25,7 +24,6 @@ from src.prompts.templates import (
     ANALYZER_PROMPT,
     MONITOR_PROMPT,
     PLANNER_PROMPT,
-    QUESTION_ANALYZER_PROMPT,
     SAFETY_CHECK_PROMPT,
 )
 
@@ -199,51 +197,6 @@ class AnalyzerStep(AgentStep):
             agent=self.agent_name,
             output=output,
             should_continue=actionable,
-            artifacts=artifacts,
-        )
-
-
-class QuestionAnalyzerStep(AgentStep):
-    agent_name = "analyzer"
-
-    def __init__(self, llm_client: JsonLlmClient) -> None:
-        self._llm_client = llm_client
-        self._settings = get_settings()
-
-    async def execute(
-        self,
-        context: AssembledContext,
-        prior_results: list[StepResult],
-    ) -> StepResult:
-        monitor_output = prior_results[-1].output
-        output = await self._llm_client.generate_json(
-            QUESTION_ANALYZER_PROMPT.format(
-                context=_build_reasoning_context(
-                    context,
-                    monitor_output=monitor_output,
-                )
-            ),
-            QuestionAnalyzerOutput,
-            model=self._settings.llm_model,
-            temperature=0.1,
-        )
-        valid_ids = collect_context_source_message_ids(
-            messages=context.new_messages,
-            memory=context.memory,
-            summaries=context.summaries,
-            current_plan=context.current_plan,
-        )
-        validate_source_message_ids(valid_ids, output.source_message_ids)
-
-        artifacts = output.model_dump(mode="json")
-        artifacts["mode"] = "question_analyzer"
-        metadata = _llm_metadata(self._llm_client)
-        if metadata:
-            artifacts["llm"] = metadata
-        return StepResult(
-            agent=self.agent_name,
-            output=output,
-            should_continue=False,
             artifacts=artifacts,
         )
 

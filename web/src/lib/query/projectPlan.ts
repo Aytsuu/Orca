@@ -160,12 +160,14 @@ export function applyPlanMetaPatch(
 export function buildOptimisticPhase(
   title: string,
   goal: string,
+  description: string,
   timeframe: string
 ): Phase {
   return {
     id: buildOptimisticId('phase'),
     title,
     goal,
+    description,
     timeframe,
     tasks: [],
     gaps: [],
@@ -182,7 +184,7 @@ export function addOptimisticPhase(plan: StructuredPlan, phase: Phase): Structur
 
 export function applyPhasePatch(
   plan: StructuredPlan,
-  variables: { phaseId: string; title: string; goal: string; timeframe: string }
+  variables: { phaseId: string; title: string; goal: string; description: string; timeframe: string }
 ): StructuredPlan {
   return {
     ...plan,
@@ -192,6 +194,7 @@ export function applyPhasePatch(
           ...phase,
           title: variables.title,
           goal: variables.goal,
+          description: variables.description,
           timeframe: variables.timeframe,
         }
         : phase
@@ -398,12 +401,32 @@ function toOptimisticStakeholder(entry: Record<string, unknown>) {
 }
 
 function toOptimisticPhase(entry: Record<string, unknown>): Phase {
+  const description =
+    typeof entry.description === 'string'
+      ? entry.description
+      : typeof entry.value === 'string'
+        ? entry.value
+        : '';
+  const taskEntries = Array.isArray(entry.tasks)
+    ? entry.tasks.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    : [];
+
   return {
     id: typeof entry.id === 'string' ? entry.id : buildOptimisticId('phase'),
     title: typeof entry.title === 'string' ? entry.title : 'Proposed phase',
     goal: typeof entry.goal === 'string' ? entry.goal : '',
+    description,
     timeframe: typeof entry.timeframe === 'string' ? entry.timeframe : '',
-    tasks: [],
+    tasks:
+      taskEntries.length > 0
+        ? taskEntries.map(toOptimisticTask)
+        : description
+          ? description
+            .split(/\s*(?:,|;|\n)\s*|\s+and\s+/i)
+            .map((item) => item.trim().replace(/[.]+$/g, '').replace(/^(and|then)\s+/i, ''))
+            .filter(Boolean)
+            .map((title) => toOptimisticTask({ title }))
+          : [],
     gaps: [],
   };
 }
@@ -529,6 +552,7 @@ export function applyAcceptedProposalChange(plan: StructuredPlan, change: Propos
         phaseId: change.targetId,
         title: phases[0].title,
         goal: phases[0].goal,
+        description: phases[0].description,
         timeframe: phases[0].timeframe,
       });
     }
@@ -886,10 +910,22 @@ export function useRevertProjectPlan(projectId: string) {
 export function useCreateProjectPhase(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (variables: { title: string; goal: string; timeframe: string }) =>
-      defaultProjectRepository.createProjectPhase(projectId, variables.title, variables.goal, variables.timeframe, sessionId.get()),
+    mutationFn: (variables: { title: string; goal: string; description: string; timeframe: string }) =>
+      defaultProjectRepository.createProjectPhase(
+        projectId,
+        variables.title,
+        variables.goal,
+        variables.description,
+        variables.timeframe,
+        sessionId.get()
+      ),
     onMutate: (variables) => {
-      const optimisticPhase = buildOptimisticPhase(variables.title, variables.goal, variables.timeframe);
+      const optimisticPhase = buildOptimisticPhase(
+        variables.title,
+        variables.goal,
+        variables.description,
+        variables.timeframe
+      );
       return prepareOptimisticPlanUpdate(queryClient, projectId, (plan) => addOptimisticPhase(plan, optimisticPhase));
     },
     onError: (_error, _variables, context) => {
@@ -904,8 +940,16 @@ export function useCreateProjectPhase(projectId: string) {
 export function useUpdateProjectPhase(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (variables: { phaseId: string; title: string; goal: string; timeframe: string }) =>
-      defaultProjectRepository.updateProjectPhase(projectId, variables.phaseId, variables.title, variables.goal, variables.timeframe, sessionId.get()),
+    mutationFn: (variables: { phaseId: string; title: string; goal: string; description: string; timeframe: string }) =>
+      defaultProjectRepository.updateProjectPhase(
+        projectId,
+        variables.phaseId,
+        variables.title,
+        variables.goal,
+        variables.description,
+        variables.timeframe,
+        sessionId.get()
+      ),
     onMutate: (variables) =>
       prepareOptimisticPlanUpdate(queryClient, projectId, (plan) => applyPhasePatch(plan, variables)),
     onError: (_error, _variables, context) => {

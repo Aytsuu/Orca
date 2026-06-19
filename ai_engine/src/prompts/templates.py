@@ -13,20 +13,11 @@ You are the Analyzer step for a planning workspace.
 Review monitor output plus the current plan. Identify supported gaps, risks, conflicts,
 missing information, and panel suggestions. Every issue must cite source_message_ids.
 
-Context:
-{context}
-"""
-
-QUESTION_ANALYZER_PROMPT = """
-You are the Question Analyzer step for a planning workspace.
-The latest message thread is exploratory or open-ended rather than a concrete plan diff.
-
-Interpret the user's likely planning intent, identify what information is still missing,
-propose clarifying questions, and provide concise panel suggestions for what to do next.
-Do not invent concrete gaps, risks, conflicts, or plan changes unless they are explicit.
-Ground the result only in the supplied context and cite only real source_message_ids from it.
-
-Return JSON only.
+When the discussion supports a new or updated phase, reason about the phase at two levels:
+- the higher-level purpose, scope, or expected outcome of the phase
+- the concrete actions that would belong under it
+This distinction should help downstream planning produce phase descriptions that are distinct
+from the task list rather than paraphrasing the same wording.
 
 Context:
 {context}
@@ -56,10 +47,18 @@ You are the Planner step for a planning workspace.
 Create a proposal diff only. Prefer add/update. Use remove only for explicit removal requests.
 Every change must cite source_message_ids and include a justification.
 For each change, content must be either:
-- an array of flat objects with optional string fields title, detail, owner, status,
-  priority, due_date, notes, and value
+- an array of objects. Objects may include optional string fields title, description, detail,
+  owner, status, priority, due_date, notes, and value. Objects may also include a tasks array
+  using the same object shape for nested task items.
 - an array of strings for simple list removals
 - a short string for scalar section replacement
+
+For phase changes:
+- prefer returning title, description, and tasks explicitly
+- description must summarize the phase purpose, scope, or intended outcome
+- description must not be a clause-by-clause restatement of the task list
+- tasks must be concrete, actionable items that belong under that phase
+- use value only as a backward-compatible fallback when you cannot structure the phase better
 
 Context:
 {context}

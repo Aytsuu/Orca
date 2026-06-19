@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.agents.schemas import AnalyzerOutput, MonitorOutput, QuestionAnalyzerOutput, RelevanceOutput
+from src.agents.schemas import AnalyzerOutput, MonitorOutput, RelevanceOutput
 from src.exceptions import (
     ConfigurationError,
     InvalidOutputError,
@@ -297,7 +297,7 @@ async def test_pipeline_uses_relevance_gate_for_ambiguous_messages(fake_supabase
 
 
 @pytest.mark.asyncio
-async def test_pipeline_routes_question_only_monitor_output_to_question_analyzer(fake_supabase) -> None:
+async def test_pipeline_skips_open_ended_team_questions_after_monitor(fake_supabase) -> None:
     project = fake_supabase.insert_row("project", {"name": "Alpha"})
     message = fake_supabase.insert_row(
         "chat_message",
@@ -330,13 +330,6 @@ async def test_pipeline_routes_question_only_monitor_output_to_question_analyzer
                 ],
                 summary_candidate="Asked for direction on the first phase.",
             ),
-            QuestionAnalyzerOutput(
-                interpreted_intent="The user wants guidance on how to shape the first phase.",
-                missing_information=["Success criteria for phase one are not defined."],
-                clarifying_questions=["Is the first phase primarily discovery, delivery, or validation?"],
-                panel_suggestions=["Review the current plan and decide whether phase one is for discovery or execution."],
-                source_message_ids=[message["id"]],
-            ),
         ]
     )
 
@@ -347,19 +340,24 @@ async def test_pipeline_routes_question_only_monitor_output_to_question_analyzer
         safety_client=llm,
     )
 
-    assert [result.agent for result in results] == ["monitor", "analyzer"]
-    assert [call["schema"] for call in llm.calls] == ["MonitorOutput", "QuestionAnalyzerOutput"]
+    assert [result.agent for result in results] == ["monitor"]
+    assert [call["schema"] for call in llm.calls] == ["MonitorOutput"]
     analyzer_artifact = next(
         row for row in fake_supabase.tables["agent_artifact"] if row["agent"] == "analyzer"
     )
-    assert analyzer_artifact["payload"]["mode"] == "question_analyzer"
-    assert analyzer_artifact["payload"]["panel_suggestions"] == [
-        "Review the current plan and decide whether phase one is for discovery or execution."
-    ]
+    assert analyzer_artifact["payload"] == {
+        "skipped": True,
+        "reason": "open_ended_team_question",
+        "detail": "Open-ended planning questions require team input and do not trigger analyzer or planner suggestions.",
+    }
     planner_artifact = next(
         row for row in fake_supabase.tables["agent_artifact"] if row["agent"] == "planner"
     )
-    assert planner_artifact["payload"] == {"skipped": True, "reason": "no_actionable_input"}
+    assert planner_artifact["payload"] == {
+        "skipped": True,
+        "reason": "open_ended_team_question",
+        "detail": "Open-ended planning questions require team input and do not trigger analyzer or planner suggestions.",
+    }
     assert fake_supabase.tables["plan_proposal"] == []
 
 
@@ -597,6 +595,10 @@ async def test_pipeline_sanitizes_analyzer_and_planner_prompt_payload_ids(fake_s
         assert run["id"] not in prompt
         assert "phase-row-id" not in prompt
         assert "task-row-id" not in prompt
+
+    assert "description must summarize the phase purpose, scope, or intended outcome" in planner_prompt
+    assert "description must not be a clause-by-clause restatement of the task list" in planner_prompt
+    assert "tasks must be concrete, actionable items that belong under that phase" in planner_prompt
 
 
 @pytest.mark.asyncio

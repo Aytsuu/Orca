@@ -36,6 +36,7 @@ function createPlanFixture(): StructuredPlan {
         id: 'phase_1',
         title: 'Phase 1',
         goal: 'Launch',
+        description: 'Ship the initial MVP',
         timeframe: 'Week 1',
         tasks: [
           {
@@ -88,7 +89,7 @@ describe('projectPlan optimistic helpers', () => {
 
   it('builds and adds an optimistic phase', () => {
     const plan = createPlanFixture();
-    const phase = buildOptimisticPhase('Phase 2', 'Scale', 'Week 2');
+    const phase = buildOptimisticPhase('Phase 2', 'Scale', 'Expand to the full release scope', 'Week 2');
 
     const updated = addOptimisticPhase(plan, phase);
 
@@ -104,6 +105,7 @@ describe('projectPlan optimistic helpers', () => {
       phaseId: 'phase_1',
       title: 'Phase One',
       goal: 'Ship',
+      description: 'Tighten the launch workstream',
       timeframe: 'Week 3',
     });
     const removed = removeOptimisticPhase(plan, 'phase_1');
@@ -112,6 +114,7 @@ describe('projectPlan optimistic helpers', () => {
       id: 'phase_1',
       title: 'Phase One',
       goal: 'Ship',
+      description: 'Tighten the launch workstream',
       timeframe: 'Week 3',
     });
     expect(removed.phases).toEqual([]);
@@ -221,7 +224,12 @@ describe('projectPlan optimistic helpers', () => {
       title: 'Phase 2',
       detail: '',
       sourceQuote: '',
-      content: [{ title: 'Phase 2', goal: 'Scale', timeframe: 'Week 2' }],
+      content: [{
+        title: 'Phase 2',
+        goal: 'Scale',
+        description: 'Set up analytics, improve reliability, and prepare rollout',
+        timeframe: 'Week 2',
+      }],
     });
 
     const taskAdded = applyAcceptedProposalChange(plan, {
@@ -247,7 +255,12 @@ describe('projectPlan optimistic helpers', () => {
     });
 
     expect(phaseAdded.phases).toHaveLength(2);
-    expect(phaseAdded.phases[1]).toMatchObject({ title: 'Phase 2', goal: 'Scale' });
+    expect(phaseAdded.phases[1]).toMatchObject({
+      title: 'Phase 2',
+      goal: 'Scale',
+      description: 'Set up analytics, improve reliability, and prepare rollout',
+    });
+    expect(phaseAdded.phases[1].tasks).toHaveLength(3);
     expect(taskAdded.phases[0].tasks).toHaveLength(2);
     expect(taskAdded.phases[0].tasks[1]).toMatchObject({ title: 'New task', owner: 'Sam' });
     expect(riskAdded.globalRisks).toHaveLength(2);

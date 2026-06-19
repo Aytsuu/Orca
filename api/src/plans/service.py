@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import re
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -82,13 +83,33 @@ def _normalize_gap(gap: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _split_phase_description_into_tasks(description: str) -> list[str]:
+    parts = [
+        re.sub(r"^(?:and|then)\s+", "", part.strip(" ."), flags=re.IGNORECASE)
+        for part in re.split(r"\s*(?:,|;|\n)\s*|\s+\band\b\s+", description, flags=re.IGNORECASE)
+        if part and part.strip(" .")
+    ]
+    cleaned = [part for part in parts if part]
+    return cleaned or [description.strip()]
+
+
 def _normalize_phase(phase: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(phase)
+    description = normalized.get("description")
+    if not isinstance(description, str) or not description.strip():
+        value = normalized.get("value")
+        description = value if isinstance(value, str) and value.strip() else None
+
+    raw_tasks = list(normalized.get("tasks") or [])
+    if not raw_tasks and isinstance(description, str) and description.strip():
+        raw_tasks = [{"title": item} for item in _split_phase_description_into_tasks(description)]
+
     normalized.setdefault("id", str(uuid4()))
     normalized.setdefault("title", "")
     normalized.setdefault("goal", None)
+    normalized["description"] = description.strip() if isinstance(description, str) and description.strip() else None
     normalized.setdefault("timeframe", None)
-    normalized["tasks"] = [_normalize_task(task) for task in list(normalized.get("tasks") or [])]
+    normalized["tasks"] = [_normalize_task(task) for task in raw_tasks]
     normalized["gaps"] = [_normalize_gap(gap) for gap in list(normalized.get("gaps") or [])]
     return normalized
 
@@ -461,6 +482,17 @@ async def get_pending_proposal(supabase: AsyncClient, project_id: str) -> dict[s
     return rows[0] if rows else None
 
 
+async def list_pending_proposals(supabase: AsyncClient, project_id: str) -> list[dict[str, Any]]:
+    return (
+        await supabase.table("plan_proposal")
+        .select("*")
+        .eq("project_id", project_id)
+        .eq("status", "pending")
+        .order("created_at", desc=True)
+        .execute()
+    ).data
+
+
 async def get_latest_proposal(supabase: AsyncClient, project_id: str) -> dict[str, Any] | None:
     rows = (
         await supabase.table("plan_proposal")
@@ -471,6 +503,28 @@ async def get_latest_proposal(supabase: AsyncClient, project_id: str) -> dict[st
         .execute()
     ).data
     return rows[0] if rows else None
+
+
+async def get_pending_proposal_by_change_id(
+    supabase: AsyncClient,
+    project_id: str,
+    change_id: str,
+) -> dict[str, Any] | None:
+    pending_proposals = await list_pending_proposals(supabase, project_id)
+    for proposal in pending_proposals:
+        for index, change in enumerate(list(proposal.get("changes") or [])):
+            normalized_change = _normalize_proposal_change(
+                {**change, "id": change.get("id", f"legacy-change-{index}")}
+            )
+            if normalized_change["id"] == change_id:
+                proposal["changes"] = [
+                    _normalize_proposal_change(
+                        {**candidate, "id": candidate.get("id", f"legacy-change-{candidate_index}")}
+                    )
+                    for candidate_index, candidate in enumerate(list(proposal.get("changes") or []))
+                ]
+                return proposal
+    return None
 
 
 async def list_plan_versions(supabase: AsyncClient, project_id: str) -> list[dict[str, Any]]:
@@ -644,8 +698,9 @@ async def approve_proposal(
     approved_change_indexes: list[int] | None = None,
     change_ids: list[str] | None = None,
     change_overrides: list[dict[str, Any]] | None = None,
+    proposal_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    proposal = await get_pending_proposal(supabase, project_id)
+    proposal = proposal_override or await get_pending_proposal(supabase, project_id)
     if not proposal:
         latest = await get_latest_proposal(supabase, project_id)
         if latest:
@@ -721,6 +776,13 @@ async def accept_proposal_change(
     change_id: str,
     content_override: Any | None = None,
 ) -> dict[str, Any]:
+    proposal = await get_pending_proposal_by_change_id(supabase, project_id, change_id)
+    if not proposal:
+        latest = await get_latest_proposal(supabase, project_id)
+        if latest:
+            raise PlanProposalAlreadyResolved()
+        raise PlanProposalNotFound()
+
     change_overrides = None
     if content_override is not None:
         change_overrides = [{"change_id": change_id, "content": content_override}]
@@ -729,6 +791,7 @@ async def accept_proposal_change(
         project_id=project_id,
         change_ids=[change_id],
         change_overrides=change_overrides,
+        proposal_override=proposal,
     )
 
 
@@ -751,8 +814,11 @@ async def reject_proposal_change(
     project_id: str,
     change_id: str,
 ) -> dict[str, Any]:
-    proposal = await get_pending_proposal(supabase, project_id)
+    proposal = await get_pending_proposal_by_change_id(supabase, project_id, change_id)
     if not proposal:
+        latest = await get_latest_proposal(supabase, project_id)
+        if latest:
+            raise PlanProposalAlreadyResolved()
         raise PlanProposalNotFound()
 
     remaining = [change for change in proposal["changes"] if change["id"] != change_id]
@@ -830,6 +896,7 @@ async def create_phase(
     project_id: str,
     title: str,
     goal: str | None,
+    description: str | None,
     timeframe: str | None,
 ) -> tuple[dict[str, Any], list[str]]:
     created_phase: dict[str, Any] = {}
@@ -841,6 +908,7 @@ async def create_phase(
                 "id": str(uuid4()),
                 "title": title.strip(),
                 "goal": goal.strip() if goal else None,
+                "description": description.strip() if description else None,
                 "timeframe": timeframe.strip() if timeframe else None,
                 "tasks": [],
                 "gaps": [],
@@ -859,6 +927,7 @@ async def update_phase(
     phase_id: str,
     title: str | None,
     goal: str | None,
+    description: str | None,
     timeframe: str | None,
 ) -> tuple[dict[str, Any], list[str]]:
     updated_phase: dict[str, Any] = {}
@@ -870,6 +939,8 @@ async def update_phase(
             phase["title"] = title.strip()
         if goal is not None:
             phase["goal"] = goal.strip() or None
+        if description is not None:
+            phase["description"] = description.strip() or None
         if timeframe is not None:
             phase["timeframe"] = timeframe.strip() or None
         updated_phase = deepcopy(phase)

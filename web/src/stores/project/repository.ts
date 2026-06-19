@@ -53,8 +53,23 @@ export interface ProjectRepository {
     sessionId: string
   ): Promise<StructuredPlan>;
   revertProjectPlan(projectId: string, sessionId: string): Promise<void>;
-  createProjectPhase(projectId: string, title: string, goal: string, timeframe: string, sessionId: string): Promise<void>;
-  updateProjectPhase(projectId: string, phaseId: string, title: string, goal: string, timeframe: string, sessionId: string): Promise<void>;
+  createProjectPhase(
+    projectId: string,
+    title: string,
+    goal: string,
+    description: string,
+    timeframe: string,
+    sessionId: string
+  ): Promise<void>;
+  updateProjectPhase(
+    projectId: string,
+    phaseId: string,
+    title: string,
+    goal: string,
+    description: string,
+    timeframe: string,
+    sessionId: string
+  ): Promise<void>;
   deleteProjectPhase(projectId: string, phaseId: string, sessionId: string): Promise<void>;
   createProjectTask(
     projectId: string,
@@ -297,12 +312,13 @@ export class ApiProjectRepository implements ProjectRepository {
     projectId: string,
     title: string,
     goal: string,
+    description: string,
     timeframe: string,
     sessionId: string
   ): Promise<void> {
     await apiFetch<null>(`/api/projects/${projectId}/plan/phases`, sessionId, {
       method: 'POST',
-      body: JSON.stringify({ title, goal, timeframe }),
+      body: JSON.stringify({ title, goal, description, timeframe }),
     });
   }
 
@@ -311,12 +327,13 @@ export class ApiProjectRepository implements ProjectRepository {
     phaseId: string,
     title: string,
     goal: string,
+    description: string,
     timeframe: string,
     sessionId: string
   ): Promise<void> {
     await apiFetch<null>(`/api/projects/${projectId}/plan/phases/${phaseId}`, sessionId, {
       method: 'PATCH',
-      body: JSON.stringify({ title, goal, timeframe }),
+      body: JSON.stringify({ title, goal, description, timeframe }),
     });
   }
 
@@ -568,6 +585,7 @@ export function mapPlan(plan: ApiProjectPlan, fallbackProjectId: string): Struct
       id: phase.id,
       title: phase.title,
       goal: phase.goal || '',
+      description: phase.description || '',
       timeframe: phase.timeframe || '',
       tasks: (phase.tasks || []).map((task) => ({
         id: task.id,

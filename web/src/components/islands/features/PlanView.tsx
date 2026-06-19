@@ -172,7 +172,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
 
   // Manual Add Form states
   const [isAddingPhase, setIsAddingPhase] = useState(false);
-  const [newPhaseForm, setNewPhaseForm] = useState({ title: '', goal: '', timeframe: '' });
+  const [newPhaseForm, setNewPhaseForm] = useState({ title: '', goal: '', description: '', timeframe: '' });
 
   const [addingTaskPhaseId, setAddingTaskPhaseId] = useState<string | null>(null);
   const [newTaskForm, setNewTaskForm] = useState({ title: '', owner: '', due: '', priority: 'medium' as any });
@@ -364,7 +364,13 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     const currentEdit = editingField;
     const { type, id, index, subIndex, value, subValue } = currentEdit;
 
-    if (value.trim() === '' && type !== 'task-desc' && type !== 'phase-goal' && type !== 'risk-mitigation') {
+    if (
+      value.trim() === '' &&
+      type !== 'task-desc' &&
+      type !== 'phase-goal' &&
+      type !== 'phase-description' &&
+      type !== 'risk-mitigation'
+    ) {
       addToast('error', 'Title/text field cannot be blank.');
       return;
     }
@@ -398,6 +404,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
           phaseId: id,
           title: value,
           goal: phase.goal,
+          description: phase.description,
           timeframe: phase.timeframe
         });
         addToast('success', 'Field updated.');
@@ -408,6 +415,18 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
           phaseId: id,
           title: phase.title,
           goal: value,
+          description: phase.description,
+          timeframe: phase.timeframe
+        });
+        addToast('success', 'Field updated.');
+      } else if (type === 'phase-description' && id) {
+        const phase = activePlan.phases.find((item) => item.id === id);
+        if (!phase) return;
+        await updateProjectPhaseMutation.mutateAsync({
+          phaseId: id,
+          title: phase.title,
+          goal: phase.goal,
+          description: value,
           timeframe: phase.timeframe
         });
         addToast('success', 'Field updated.');
@@ -418,6 +437,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
           phaseId: id,
           title: phase.title,
           goal: phase.goal,
+          description: phase.description,
           timeframe: value
         });
         addToast('success', 'Field updated.');
@@ -457,10 +477,11 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
       await createProjectPhaseMutation.mutateAsync({
         title: newPhaseForm.title,
         goal: newPhaseForm.goal,
+        description: newPhaseForm.description,
         timeframe: newPhaseForm.timeframe
       });
       setIsAddingPhase(false);
-      setNewPhaseForm({ title: '', goal: '', timeframe: '' });
+      setNewPhaseForm({ title: '', goal: '', description: '', timeframe: '' });
       addToast('success', 'New phase added successfully.');
     } catch (error) {
       addToast('error', error instanceof Error ? error.message : 'Failed to add phase.');
@@ -643,6 +664,30 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     className = "",
     placeholder = "Click to enter text..."
   ) => {
+    const contextualPlaceholder =
+      placeholder !== "Click to enter text..."
+        ? placeholder
+        : (() => {
+          if (type === 'plan-title') return 'Enter a clear plan title, such as the product or initiative name';
+          if (type === 'plan-desc') return 'Summarize what this plan covers, why it matters, and what success looks like';
+          if (type === 'objective') return 'Add a specific objective the project must achieve';
+          if (type === 'stakeholder' && field === 'name') return "Enter the stakeholder's name";
+          if (type === 'stakeholder' && field === 'role') return "Describe the stakeholder's role in the project";
+          if (type === 'stakeholder' && field === 'initials') return 'Add short initials used to identify this stakeholder';
+          if (type === 'phase-title') return 'Name the phase, such as Discovery, Build, or Launch';
+          if (type === 'phase-timeframe') return 'Add the expected timeframe, milestone window, or sprint';
+          if (type === 'phase-goal') return 'Write a one-line outcome for this phase';
+          if (type === 'phase-description') return 'Describe the scope, intent, and expected result of this phase without listing tasks verbatim';
+          if (type === 'task-title') return 'Name the concrete task or deliverable for this step';
+          if (type === 'task-owner') return 'Assign the owner responsible for completing this task';
+          if (type === 'task-due') return 'Set the due date, milestone, or target window';
+          if (type === 'task-desc') return 'Explain the task, relevant context, and any constraints or dependencies';
+          if (type === 'task-criteria') return 'Define how this task will be considered complete';
+          if (type === 'risk-desc') return 'Describe the risk, why it matters, and what could go wrong';
+          if (type === 'risk-mitigation') return 'Describe how the team should reduce, monitor, or respond to this risk';
+          return placeholder;
+        })();
+
     const isEditing =
       editingField &&
       editingField.type === type &&
@@ -653,7 +698,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     if (!isApprover) {
       return (
         <span className={`${className} ${!text ? 'italic text-text-muted text-xs' : ''}`}>
-          {text || placeholder}
+          {text || contextualPlaceholder}
         </span>
       );
     }
@@ -720,7 +765,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
         }}
       >
         <span className={!text ? 'italic text-text-muted text-xs' : ''}>
-          {text || placeholder}
+          {text || contextualPlaceholder}
         </span>
         <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-100 text-text-muted hover:text-text-primary transition-opacity shrink-0 ml-1" />
       </div>
@@ -1082,13 +1127,18 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                   NEW
                 </span>
               </div>
-              {(phase.goal || change.detail) && (
+              {(phase.goal || phase.description || phase.value || change.detail) && (
                 <span className="text-sm text-text-secondary italic">
-                  {String(phase.goal || change.detail)}
+                  {String(phase.goal || phase.description || phase.value || change.detail)}
                 </span>
               )}
             </div>
           </div>
+          {phase.description && phase.description !== phase.goal && (
+            <p className="text-sm text-text-secondary leading-relaxed">
+              {String(phase.description)}
+            </p>
+          )}
           {change.sourceQuote && (
             <div className="border-l border-border-subtle pl-2 text-[10px] italic text-text-muted leading-normal">
               {change.sourceQuote}
@@ -1189,7 +1239,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                   undefined,
                   false,
                   "text-display-sm font-bold text-text-primary tracking-tight md:text-3xl",
-                  "Untitled project plan"
+                  "Enter a clear plan title, such as the product or initiative name"
                 )}
                 {renderProposalCards(getChangesForSection('title'), 'mt-1')}
 
@@ -1201,7 +1251,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                   undefined,
                   true,
                   "text-sm text-text-secondary leading-relaxed",
-                  "Add a short project plan summary..."
+                  "Summarize what this plan covers, why it matters, and what success looks like"
                 )}
                 {renderProposalCards(getChangesForSection('description'), 'mt-1')}
 
@@ -1247,7 +1297,16 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                     {activePlan.objectives.map((obj, idx) => (
                       <div key={idx} className="group/obj flex items-start gap-2.5">
                         <div className="flex-grow">
-                          {renderEditableText(obj, 'objective', undefined, idx, undefined, false, "text-sm text-text-secondary")}
+                          {renderEditableText(
+                            obj,
+                            'objective',
+                            undefined,
+                            idx,
+                            undefined,
+                            false,
+                            "text-sm text-text-secondary",
+                            "Add a specific objective the project must achieve"
+                          )}
                         </div>
                         {isApprover && (
                           <button
@@ -1273,14 +1332,28 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                     {renderProposalCards(getChangesForSection('stakeholders'), 'mb-1')}
                     {activePlan.stakeholders.map(stk => (
                       <div key={stk.userId} className="group/stk flex items-center justify-between hover:bg-surface-raised/20 p-1 rounded-lg transition-colors">
-                        <div className="flex items-center gap-3">
-                          {/* Avatar Circle */}
-                          <div className="w-8 h-8 rounded-full bg-surface-raised border border-border flex items-center justify-center text-xs font-semibold text-text-primary select-none shadow-sm font-mono uppercase tracking-tighter">
-                            {renderEditableText(stk.initials, 'stakeholder', stk.userId, undefined, 'initials', false, "text-text-primary")}
-                          </div>
+                        <div>
                           <div>
-                            {renderEditableText(stk.name, 'stakeholder', stk.userId, undefined, 'name', false, "text-sm font-semibold text-text-primary")}
-                            {renderEditableText(stk.role, 'stakeholder', stk.userId, undefined, 'role', false, "text-xs text-text-muted")}
+                            {renderEditableText(
+                              stk.name,
+                              'stakeholder',
+                              stk.userId,
+                              undefined,
+                              'name',
+                              false,
+                              "text-sm font-semibold text-text-primary",
+                              "Enter the stakeholder's name"
+                            )}
+                            {renderEditableText(
+                              stk.role,
+                              'stakeholder',
+                              stk.userId,
+                              undefined,
+                              'role',
+                              false,
+                              "text-xs text-text-muted",
+                              "Describe the stakeholder's role in the project"
+                            )}
                           </div>
                         </div>
 
@@ -1327,7 +1400,8 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                               undefined,
                               undefined,
                               false,
-                              "text-lg font-bold text-text-primary tracking-tight"
+                              "text-lg font-bold text-text-primary tracking-tight",
+                              "Name the phase, such as Discovery, Build, or Launch"
                             )}
 
                             {renderEditableText(
@@ -1337,7 +1411,8 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                               undefined,
                               undefined,
                               false,
-                              "category-badge badge--viewer text-[11px] py-0.5 px-2 font-semibold bg-surface-raised border border-border"
+                              "category-badge badge--viewer text-[11px] py-0.5 px-2 font-semibold bg-surface-raised border border-border",
+                              "Add the expected timeframe, milestone window, or sprint"
                             )}
                           </div>
 
@@ -1348,7 +1423,19 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                             undefined,
                             undefined,
                             false,
-                            "text-sm text-text-secondary italic"
+                            "text-sm text-text-secondary italic",
+                            "Write a one-line outcome for this phase"
+                          )}
+
+                          {renderEditableText(
+                            phase.description,
+                            'phase-description',
+                            phase.id,
+                            undefined,
+                            undefined,
+                            false,
+                            "text-sm text-text-secondary leading-relaxed",
+                            "Describe the scope, intent, and expected result of this phase without listing tasks verbatim"
                           )}
                         </div>
 
@@ -1386,6 +1473,16 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                                 >
                                   <Edit2 className="w-3.5 h-3.5 text-primary" />
                                   <span>Edit Goal</span>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingField({ type: 'phase-description', id: phase.id, value: phase.description });
+                                    setActivePhaseMenuId(null);
+                                  }}
+                                  className="w-full text-left px-4 py-2 text-xs text-text-primary hover:bg-primary-muted transition-colors flex items-center gap-2"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5 text-primary" />
+                                  <span>Edit Description</span>
                                 </button>
                                 <button
                                   onClick={() => {
@@ -1518,10 +1615,10 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
 
                                   <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-text-muted select-none">
                                     <span>Owner:</span>
-                                    {renderEditableText(task.owner || '—', 'task-owner', task.id, undefined, undefined, false, "font-semibold text-text-secondary")}
+                                    {renderEditableText(task.owner || '', 'task-owner', task.id, undefined, undefined, false, "font-semibold text-text-secondary")}
                                     <span>·</span>
                                     <span>Due:</span>
-                                    {renderEditableText(task.due || '—', 'task-due', task.id, undefined, undefined, false, "font-semibold text-text-secondary")}
+                                    {renderEditableText(task.due || '', 'task-due', task.id, undefined, undefined, false, "font-semibold text-text-secondary")}
                                     <span>·</span>
 
                                     {/* Priority Dot & text */}
@@ -1980,6 +2077,16 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                         className="bg-background border border-border rounded-md p-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary w-full"
                         value={newPhaseForm.goal}
                         onChange={(e) => setNewPhaseForm({ ...newPhaseForm, goal: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-text-muted uppercase tracking-widest font-bold">Description</label>
+                      <textarea
+                        placeholder="Expand the phase into the concrete work it should cover."
+                        className="bg-background border border-border rounded-md p-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary w-full min-h-[88px]"
+                        value={newPhaseForm.description}
+                        onChange={(e) => setNewPhaseForm({ ...newPhaseForm, description: e.target.value })}
                       />
                     </div>
 

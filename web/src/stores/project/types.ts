@@ -142,6 +142,7 @@ export interface Phase {
   id: string;
   title: string;
   goal: string;
+  description: string;
   timeframe: string;
   tasks: Task[];
   gaps: GapItem[];
@@ -240,6 +241,7 @@ export interface ApiPlanPhase {
   id: string;
   title: string;
   goal?: string | null;
+  description?: string | null;
   timeframe?: string | null;
   tasks?: ApiPlanTask[];
   gaps?: ApiPlanGap[];

@@ -44,14 +44,6 @@ class AnalyzerOutput(EngineModel):
     panel_suggestions: list[str] = Field(default_factory=list)
 
 
-class QuestionAnalyzerOutput(EngineModel):
-    interpreted_intent: str | None = None
-    missing_information: list[str] = Field(default_factory=list)
-    clarifying_questions: list[str] = Field(default_factory=list)
-    panel_suggestions: list[str] = Field(default_factory=list)
-    source_message_ids: list[str] = Field(min_length=1)
-
-
 class RelevanceOutput(EngineModel):
     should_trigger: bool
     confidence: Confidence
@@ -59,8 +51,9 @@ class RelevanceOutput(EngineModel):
     use_with_previous_context: bool = False
 
 
-class PlannerContentItem(EngineModel):
+class PlannerTaskContentItem(EngineModel):
     title: str | None = None
+    description: str | None = None
     detail: str | None = None
     owner: str | None = None
     status: str | None = None
@@ -68,6 +61,19 @@ class PlannerContentItem(EngineModel):
     due_date: str | None = None
     notes: str | None = None
     value: str | None = None
+
+
+class PlannerContentItem(EngineModel):
+    title: str | None = None
+    description: str | None = None
+    detail: str | None = None
+    owner: str | None = None
+    status: str | None = None
+    priority: str | None = None
+    due_date: str | None = None
+    notes: str | None = None
+    value: str | None = None
+    tasks: list[PlannerTaskContentItem] | None = None
 
 
 class PlannerChange(EngineModel):

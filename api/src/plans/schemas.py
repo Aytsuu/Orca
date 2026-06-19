@@ -73,6 +73,7 @@ class PhaseOut(ApiModel):
     id: str
     title: str
     goal: str | None = None
+    description: str | None = None
     timeframe: str | None = None
     tasks: list[TaskOut] = Field(default_factory=list)
     gaps: list[GapOut] = Field(default_factory=list)
@@ -222,12 +223,14 @@ class PlanMetaUpdate(ApiModel):
 class PhaseCreate(ApiModel):
     title: str = Field(min_length=1, max_length=200)
     goal: str | None = Field(default=None, max_length=1000)
+    description: str | None = Field(default=None, max_length=4000)
     timeframe: str | None = Field(default=None, max_length=200)
 
 
 class PhaseUpdate(ApiModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     goal: str | None = Field(default=None, max_length=1000)
+    description: str | None = Field(default=None, max_length=4000)
     timeframe: str | None = Field(default=None, max_length=200)
 
 

@@ -143,13 +143,55 @@ async def supersede_pending_proposals(supabase: AsyncClient, project_id: str) ->
         ).execute()
 
 
+def _merge_proposal_changes(
+    existing_changes: list[dict[str, Any]],
+    incoming_changes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged = [dict(change) for change in existing_changes]
+    existing_ids = {
+        str(change.get("id"))
+        for change in merged
+        if change.get("id") is not None
+    }
+    for change in incoming_changes:
+        change_id = change.get("id")
+        if change_id is not None and str(change_id) in existing_ids:
+            continue
+        merged.append(dict(change))
+        if change_id is not None:
+            existing_ids.add(str(change_id))
+    return merged
+
+
 async def create_plan_proposal(
     supabase: AsyncClient,
     *,
     project_id: str,
     changes: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    await supersede_pending_proposals(supabase, project_id)
+    pending_rows = (
+        await supabase.table("plan_proposal")
+        .select("*")
+        .eq("project_id", project_id)
+        .eq("status", "pending")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    ).data
+    if pending_rows:
+        pending = pending_rows[0]
+        merged_changes = _merge_proposal_changes(
+            list(pending.get("changes") or []),
+            changes,
+        )
+        updated = (
+            await supabase.table("plan_proposal")
+            .update({"changes": merged_changes})
+            .eq("id", pending["id"])
+            .execute()
+        ).data[0]
+        return updated
+
     created = (
         await supabase.table("plan_proposal")
         .insert({"project_id": project_id, "status": "pending", "changes": changes})

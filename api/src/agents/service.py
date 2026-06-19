@@ -285,6 +285,30 @@ def _normalize_change(change: dict[str, Any], index: int) -> dict[str, Any]:
     return normalized
 
 
+def _build_pending_proposal_activity_items(pending: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not pending:
+        return []
+
+    created_at = pending["created_at"]
+    items: list[dict[str, Any]] = []
+    for index, change in enumerate(list(pending.get("changes") or [])):
+        normalized_change = _normalize_change(change, index)
+        items.append(
+            {
+                "id": f'pending-proposal-change:{pending["id"]}:{normalized_change["id"]}',
+                "artifact_id": pending["id"],
+                "agent": "planner",
+                "kind": "proposal_change",
+                "title": normalized_change["title"],
+                "detail": normalized_change.get("detail") or "",
+                "actionable": False,
+                "proposal_change": normalized_change,
+                "created_at": created_at,
+            }
+        )
+    return items
+
+
 async def append_plan_proposal_changes(
     supabase: AsyncClient,
     *,
@@ -324,7 +348,7 @@ async def get_agent_activity(supabase: AsyncClient, project_id: str) -> list[dic
         if change.get("id") is not None
     }
 
-    items: list[dict[str, Any]] = []
+    items = _build_pending_proposal_activity_items(pending)
     for artifact in artifacts:
         payload = artifact.get("payload") or {}
         created_at = artifact["created_at"]
@@ -418,6 +442,7 @@ async def get_agent_activity(supabase: AsyncClient, project_id: str) -> list[dic
                 }
             )
 
+    items.sort(key=lambda item: (str(item["created_at"]), str(item["id"])))
     return items
 
 

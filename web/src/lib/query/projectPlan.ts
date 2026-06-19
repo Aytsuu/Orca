@@ -65,6 +65,16 @@ interface OptimisticProposalContext extends OptimisticPlanContext {
   previousProposal?: PendingProposalView;
 }
 
+interface ProposalChangeOverrideInput {
+  changeId: string;
+  content: unknown;
+}
+
+interface AcceptProposalChangeInput {
+  changeId: string;
+  content?: unknown;
+}
+
 function buildOptimisticId(prefix: string): string {
   return `optimistic:${prefix}:${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -632,6 +642,14 @@ function mapProposalChange(change: ApiProposalChange): ProposedChange {
   };
 }
 
+function withProposalChangeContent(change: ProposedChange, content: unknown): ProposedChange {
+  return {
+    ...change,
+    content,
+    title: typeof content === 'string' && content.trim() ? content : change.title,
+  };
+}
+
 function deriveProposalTitle(change: ApiProposalChange): string {
   if (typeof change.content === 'string' && change.content.trim()) {
     return change.content;
@@ -704,17 +722,18 @@ export function useUpdateProjectPlan(projectId: string) {
 export function useAcceptProjectProposalChange(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (changeId: string) => {
+    mutationFn: async ({ changeId, content }: AcceptProposalChangeInput) => {
       const response = await apiFetch<ApiEnvelope<ApiProjectPlan>>(
         `/api/projects/${projectId}/plan/proposal/changes/${changeId}/accept`,
         sessionId.get(),
         {
           method: 'PATCH',
+          body: JSON.stringify({ content: content ?? null }),
         }
       );
       return mapPlan(response.data, projectId);
     },
-    onMutate: async (changeId) => {
+    onMutate: async ({ changeId, content }) => {
       await queryClient.cancelQueries({ queryKey: projectPendingProposalQueryKey(projectId) });
       await queryClient.cancelQueries({ queryKey: projectPlanQueryKey(projectId) });
       const previousProposal = queryClient.getQueryData<PendingProposalView>(projectPendingProposalQueryKey(projectId));
@@ -729,7 +748,10 @@ export function useAcceptProjectProposalChange(projectId: string) {
       }
 
       if (previousPlan && acceptedChange) {
-        updateCachedPlan(queryClient, projectId, (plan) => applyAcceptedProposalChange(plan, acceptedChange));
+        const nextAcceptedChange = content !== undefined
+          ? withProposalChangeContent(acceptedChange, content)
+          : acceptedChange;
+        updateCachedPlan(queryClient, projectId, (plan) => applyAcceptedProposalChange(plan, nextAcceptedChange));
       }
 
       return { previousPlan, previousProposal };
@@ -788,23 +810,30 @@ export function useRejectProjectProposalChange(projectId: string) {
 export function useApproveProjectProposal(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (changeIds: string[]) => {
+    mutationFn: async (payload: { changeIds: string[]; changeOverrides?: ProposalChangeOverrideInput[] }) => {
       const response = await apiFetch<ApiEnvelope<ApiProjectPlan>>(
         `/api/projects/${projectId}/plan/approve`,
         sessionId.get(),
         {
           method: 'POST',
-          body: JSON.stringify({ change_ids: changeIds }),
+          body: JSON.stringify({
+            change_ids: payload.changeIds,
+            change_overrides: payload.changeOverrides?.map((item) => ({
+              change_id: item.changeId,
+              content: item.content,
+            })),
+          }),
         }
       );
       return mapPlan(response.data, projectId);
     },
-    onMutate: async (changeIds) => {
+    onMutate: async ({ changeIds, changeOverrides }) => {
       await queryClient.cancelQueries({ queryKey: projectPendingProposalQueryKey(projectId) });
       await queryClient.cancelQueries({ queryKey: projectPlanQueryKey(projectId) });
       const previousProposal = queryClient.getQueryData<PendingProposalView>(projectPendingProposalQueryKey(projectId));
       const previousPlan = queryClient.getQueryData<StructuredPlan>(projectPlanQueryKey(projectId));
       const acceptedChanges = previousProposal?.changes.filter((change) => changeIds.includes(change.id)) || [];
+      const overrideById = new Map((changeOverrides || []).map((item) => [item.changeId, item.content]));
 
       if (previousProposal) {
         const selectedIds = new Set(changeIds);
@@ -816,7 +845,13 @@ export function useApproveProjectProposal(projectId: string) {
 
       if (previousPlan && acceptedChanges.length > 0) {
         updateCachedPlan(queryClient, projectId, (plan) =>
-          acceptedChanges.reduce((nextPlan, change) => applyAcceptedProposalChange(nextPlan, change), plan)
+          acceptedChanges.reduce((nextPlan, change) => {
+            const overrideContent = overrideById.get(change.id);
+            const nextChange = overrideContent !== undefined
+              ? withProposalChangeContent(change, overrideContent)
+              : change;
+            return applyAcceptedProposalChange(nextPlan, nextChange);
+          }, plan)
         );
       }
 

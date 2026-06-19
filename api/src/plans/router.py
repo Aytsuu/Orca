@@ -13,6 +13,7 @@ from src.plans.schemas import (
     PhaseOut,
     PhaseUpdate,
     PlanApprove,
+    ProposalChangeAccept,
     PlanMetaUpdate,
     PlanReject,
     PlanVersionOut,
@@ -119,9 +120,15 @@ async def accept_plan_change_endpoint(
     change_id: str,
     project_context: Annotated[dict, Depends(get_project_context)],
     supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
+    payload: ProposalChangeAccept | None = None,
 ) -> DataEnvelope[StructuredPlanOut]:
     require_approver_membership(project_context["membership"])
-    plan = await accept_proposal_change(supabase, project_id=str(project_id), change_id=change_id)
+    plan = await accept_proposal_change(
+        supabase,
+        project_id=str(project_id),
+        change_id=change_id,
+        content_override=payload.content if payload else None,
+    )
     return DataEnvelope(data=StructuredPlanOut.model_validate(plan))
 
 
@@ -153,6 +160,7 @@ async def approve_plan_endpoint(
         project_id=str(project_id),
         approved_change_indexes=payload.approved_change_indexes,
         change_ids=payload.change_ids,
+        change_overrides=payload.change_overrides,
     )
     return DataEnvelope(data=StructuredPlanOut.model_validate(plan))
 

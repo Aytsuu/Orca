@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '@nanostores/react';
+import { navigate } from 'astro:transitions/client';
 import {
   Plus,
   FileText,
@@ -15,7 +16,6 @@ import {
   AlertCircle,
   ArrowRight,
   Eye,
-  EyeOff,
   Loader2,
   Compass,
   Calendar,
@@ -49,6 +49,18 @@ import { formatRelativeTime, toInitials } from '../../../stores/project/reposito
 
 interface ChatViewProps {
   projectId: string;
+}
+
+interface SuggestionCluster {
+  key: string;
+  type: 'GAP' | 'TASK' | 'SUGGESTION' | 'INSIGHT';
+  suggestions: Array<{
+    id: string;
+    type: 'GAP' | 'TASK' | 'SUGGESTION' | 'INSIGHT';
+    content: string;
+    actionable: boolean;
+  }>;
+  collapsible: boolean;
 }
 
 const agentDetails: Record<
@@ -86,10 +98,9 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const [messageText, setMessageText] = useState('');
   const [mobileTab, setMobileTab] = useState<'files' | 'chat' | 'ai'>('chat');
   const [isInviteOpen, setIsInviteOpen] = useState(false);
-  const [visibleSuggestionId, setVisibleSuggestionId] = useState<string | null>(null);
+  const [expandedSuggestionClusterKeys, setExpandedSuggestionClusterKeys] = useState<string[]>([]);
 
   const [showTabletFiles, setShowTabletFiles] = useState(false);
-  const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<string[]>([]);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -119,21 +130,6 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
       setFiles([]);
     }
   }, [projectFiles, isFilesLoading, filesError]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const stored = window.localStorage.getItem(`orca_ai_activity_dismissed_${projectId}`);
-    if (!stored) {
-      setDismissedSuggestionIds([]);
-      return;
-    }
-    try {
-      const parsed = JSON.parse(stored);
-      setDismissedSuggestionIds(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []);
-    } catch {
-      setDismissedSuggestionIds([]);
-    }
-  }, [projectId]);
 
   const isInitialLoad = useRef(true);
 
@@ -195,6 +191,10 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     void loadProjects();
   }, []);
 
+  useEffect(() => {
+    setExpandedSuggestionClusterKeys([]);
+  }, [projectId]);
+
   if (isLoading) {
     return (
       <div className="flex-grow flex items-center justify-center text-text-muted select-none">
@@ -244,26 +244,6 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     }
   };
 
-  const persistDismissedSuggestionIds = (nextIds: string[]) => {
-    setDismissedSuggestionIds(nextIds);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(`orca_ai_activity_dismissed_${projectId}`, JSON.stringify(nextIds));
-    }
-  };
-
-  const handleDismissSuggestion = (suggestionId: string) => {
-    if (dismissedSuggestionIds.includes(suggestionId)) return;
-    persistDismissedSuggestionIds([...dismissedSuggestionIds, suggestionId]);
-    addToast('success', 'Suggestion dismissed.');
-  };
-
-  const handleKeepSuggestionForNow = (suggestionId: string) => {
-    if (visibleSuggestionId === suggestionId) {
-      setVisibleSuggestionId(null);
-    }
-    addToast('info', 'Suggestion kept for now.');
-  };
-
   const handlePromoteSuggestion = async (suggestionId: string) => {
     try {
       await promoteAiActivityItemMutation.mutateAsync(suggestionId);
@@ -289,10 +269,9 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     UPDATER: 'idle',
   };
   const recentOrcaActivity = aiActivity?.recentActivity || null;
-  const panelSuggestions = (aiActivity?.suggestions || []).filter(
-    (suggestion) => !dismissedSuggestionIds.includes(suggestion.id)
-  );
+  const panelSuggestions = aiActivity?.suggestions || [];
   const actionableSuggestionCount = panelSuggestions.filter((suggestion) => suggestion.actionable).length;
+  const suggestionClusters = buildSuggestionClusters(panelSuggestions);
 
   const renderedMessages = (projectMessages ?? []).map((message) => {
     const teammate = detail.teammates.find((member) => member.sessionId === message.sessionId);
@@ -566,9 +545,8 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
                     <div className="bg-surface-raised border border-border-subtle text-text-primary text-[10px] px-2.5 py-1 rounded-md shadow-lg font-medium tracking-wide whitespace-nowrap">
                       <span className="font-semibold text-text-primary">{agentInfo.name}</span>
                       <span className="mx-1 text-text-muted">•</span>
-                      <span className={`uppercase text-[9px] font-bold ${
-                        isActive ? 'text-primary animate-pulse' : isError ? 'text-error' : 'text-text-muted'
-                      }`}>{status}</span>
+                      <span className={`uppercase text-[9px] font-bold ${isActive ? 'text-primary animate-pulse' : isError ? 'text-error' : 'text-text-muted'
+                        }`}>{status}</span>
                     </div>
                     <div className="w-1.5 h-1.5 bg-surface-raised border-r border-b border-border-subtle transform rotate-45 -mt-1" />
                   </div>
@@ -577,7 +555,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
                   <div className="relative transition-transform duration-300 hover:scale-110">
                     {/* Solid Mask */}
                     <div className="absolute inset-0 rounded-full bg-surface -z-10" />
-                    
+
                     {/* Pulsing ring for active state */}
                     {isActive && (
                       <div className="absolute -inset-1 rounded-full bg-primary/25 animate-ping -z-10" />
@@ -585,11 +563,9 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
 
                     <div className={`h-9 w-9 rounded-full flex items-center justify-center border transition-all duration-300 ${iconContainerClass}`}>
                       <IconComponent
-                        className={`w-4.5 h-4.5 ${
-                          isActive && key !== 'UPDATER' ? 'animate-pulse' : ''
-                        } ${
-                          isActive && key === 'UPDATER' ? 'animate-spin' : ''
-                        }`}
+                        className={`w-4.5 h-4.5 ${isActive && key !== 'UPDATER' ? 'animate-pulse' : ''
+                          } ${isActive && key === 'UPDATER' ? 'animate-spin' : ''
+                          }`}
                         style={isActive && key === 'UPDATER' ? { animationDuration: '3s' } : undefined}
                       />
                     </div>
@@ -623,93 +599,111 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-3 pr-1 pb-6">
-            {panelSuggestions.map((sug) => {
-              const chatSugId = sug.id;
-              const isVisible = visibleSuggestionId === chatSugId;
+            {suggestionClusters.map((cluster) => {
+              const isInsight = cluster.type === 'INSIGHT';
+              const isExpanded = !cluster.collapsible || expandedSuggestionClusterKeys.includes(cluster.key);
               let iconNode = <Zap className="w-3.5 h-3.5 text-primary shrink-0" />;
               let color = 'text-primary';
 
-              if (sug.type === 'GAP') {
+              if (cluster.type === 'GAP') {
                 iconNode = <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />;
                 color = 'text-warning';
-              } else if (sug.type === 'TASK') {
+              } else if (cluster.type === 'TASK') {
                 iconNode = <Zap className="w-3.5 h-3.5 text-success shrink-0" />;
                 color = 'text-success';
-              } else if (sug.type === 'INSIGHT') {
+              } else if (cluster.type === 'INSIGHT') {
                 iconNode = <Info className="w-3.5 h-3.5 text-text-muted shrink-0" />;
                 color = 'text-text-muted';
               }
 
+              if (isInsight) {
+                return (
+                  <div
+                    key={cluster.key}
+                    className="min-w-0 shrink-0 text-xs text-text-secondary leading-relaxed"
+                  >
+                    <p className="select-text">
+                      {cluster.suggestions[0]?.content}
+                    </p>
+                  </div>
+                );
+              }
+
               return (
                 <div
-                  key={sug.id}
-                  className="bg-background/50 border border-border-subtle rounded-xl p-4 flex flex-col gap-2 transition-all min-w-0 shrink-0"
+                  key={cluster.key}
+                  className="bg-background/50 border border-border-subtle rounded-xl p-4 flex flex-col gap-3 transition-all min-w-0 shrink-0"
                 >
-                  <div className="flex justify-between items-center text-xs font-bold">
+                  <div className="flex items-center justify-between gap-3 text-xs font-bold">
                     <div className="flex items-center gap-1.5">
                       {iconNode}
-                      <span className={`tracking-wider uppercase ${color}`}>{sug.type}</span>
+                      <span className={`tracking-wider uppercase ${color}`}>
+                        {cluster.type}
+                        {cluster.collapsible ? ` (${cluster.suggestions.length})` : ''}
+                      </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const nextId = isVisible ? null : chatSugId;
-                        setVisibleSuggestionId(nextId);
-                        if (nextId) {
-                          setTimeout(() => {
-                            const el = document.getElementById(`msg-sug-${nextId}`);
-                            if (el) {
-                              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            }
-                          }, 120);
-                        }
-                      }}
-                      className="text-text-muted hover:text-text-primary p-0.5 hover:bg-surface-raised rounded transition-colors cursor-pointer"
-                      title={isVisible ? "Hide suggestion details" : "View suggestion details"}
-                    >
-                      {isVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    </button>
-                  </div>
-                  {isVisible && (
-                    <p className="text-xs text-text-secondary leading-relaxed select-text mt-1 fade-up">
-                      {sug.content}
-                    </p>
-                  )}
-                  <div className="flex items-center gap-2 mt-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {sug.actionable && (
+                    <div className="flex items-center gap-2">
+                      {cluster.type === 'TASK' && (
                         <button
                           type="button"
                           onClick={() => {
-                            void handlePromoteSuggestion(sug.id);
+                            void navigate(`/project/${projectId}/plan`);
                           }}
-                          disabled={promoteAiActivityItemMutation.isPending}
-                          className="text-[10px] font-bold text-primary hover:text-primary-hover disabled:opacity-50"
+                          className="px-2.5 py-1 rounded-md border border-border bg-surface-raised text-[10px] font-bold text-text-primary hover:border-primary/40 hover:text-primary transition-colors"
                         >
-                          {promoteAiActivityItemMutation.isPending ? 'Sending...' : (sug.actionLabel || 'Send to review')}
+                          Preview
                         </button>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => handleKeepSuggestionForNow(chatSugId)}
-                        className="text-[10px] font-bold text-text-muted hover:text-text-primary"
-                      >
-                        Keep
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDismissSuggestion(sug.id)}
-                        className="text-[10px] font-bold text-text-muted hover:text-error"
-                      >
-                        Dismiss
-                      </button>
+                      {cluster.collapsible && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedSuggestionClusterKeys((currentKeys) =>
+                              currentKeys.includes(cluster.key)
+                                ? currentKeys.filter((key) => key !== cluster.key)
+                                : [...currentKeys, cluster.key]
+                            );
+                          }}
+                          className="text-[10px] font-bold text-text-muted hover:text-text-primary"
+                        >
+                          {isExpanded ? 'Collapse' : 'Expand'}
+                        </button>
+                      )}
                     </div>
                   </div>
+                  {isExpanded && (
+                    <div className="flex flex-col gap-3">
+                      {cluster.suggestions.map((suggestion, index) => (
+                        <div
+                          key={suggestion.id}
+                          className={index > 0 ? 'border-t border-border-subtle pt-3' : ''}
+                        >
+                          <p className="text-xs text-text-secondary leading-relaxed select-text">
+                            {suggestion.content}
+                          </p>
+                          {suggestion.actionable && (
+                            <div className="flex items-center gap-2 mt-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handlePromoteSuggestion(suggestion.id);
+                                }}
+                                disabled={promoteAiActivityItemMutation.isPending}
+                                className="text-[10px] font-bold text-primary hover:text-primary-hover disabled:opacity-50"
+                              >
+                                {promoteAiActivityItemMutation.isPending ? 'Sending...' : 'Send to review'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
 
-            {panelSuggestions.length === 0 && (
+            {suggestionClusters.length === 0 && (
               <div className="text-xs text-text-muted italic py-4">No active warnings or suggestions.</div>
             )}
           </div>
@@ -770,4 +764,48 @@ function formatFileSize(sizeBytes: number): string {
   if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
   if (sizeBytes < 1024 * 1024 * 1024) return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(sizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function buildSuggestionClusters(
+  suggestions: SuggestionCluster['suggestions']
+): SuggestionCluster[] {
+  const clusters: SuggestionCluster[] = [];
+  let index = 0;
+
+  while (index < suggestions.length) {
+    const current = suggestions[index];
+    if (!current) {
+      index += 1;
+      continue;
+    }
+
+    if (current.type === 'GAP' || current.type === 'TASK') {
+      const groupedSuggestions = [current];
+      let nextIndex = index + 1;
+
+      while (nextIndex < suggestions.length && suggestions[nextIndex]?.type === current.type) {
+        groupedSuggestions.push(suggestions[nextIndex]);
+        nextIndex += 1;
+      }
+
+      clusters.push({
+        key: `${current.type.toLowerCase()}-cluster-${current.id}`,
+        type: current.type,
+        suggestions: groupedSuggestions,
+        collapsible: groupedSuggestions.length >= 2,
+      });
+      index = nextIndex;
+      continue;
+    }
+
+    clusters.push({
+      key: `${current.type.toLowerCase()}-${current.id}`,
+      type: current.type,
+      suggestions: [current],
+      collapsible: false,
+    });
+    index += 1;
+  }
+
+  return clusters;
 }

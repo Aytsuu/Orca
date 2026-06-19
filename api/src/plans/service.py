@@ -104,6 +104,58 @@ def _normalize_risk(risk: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _coerce_objective(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("title", "description", "detail", "name", "value"):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate
+    return str(value)
+
+
+def _to_initials(value: str) -> str:
+    words = [part for part in value.replace("_", " ").split() if part]
+    if not words:
+        return "NA"
+    initials = "".join(part[0].upper() for part in words[:2])
+    return initials[:10] or "NA"
+
+
+def _normalize_stakeholder(stakeholder: Any) -> dict[str, str]:
+    if isinstance(stakeholder, dict):
+        name = str(
+            stakeholder.get("name")
+            or stakeholder.get("title")
+            or stakeholder.get("role")
+            or stakeholder.get("description")
+            or "Unknown stakeholder"
+        )
+        role = str(stakeholder.get("role") or stakeholder.get("title") or name)
+        user_id = str(
+            stakeholder.get("user_id")
+            or stakeholder.get("userId")
+            or stakeholder.get("id")
+            or name.lower().replace(" ", "_")
+        )
+        initials = str(stakeholder.get("initials") or _to_initials(name))
+        return {
+            "user_id": user_id,
+            "name": name,
+            "role": role,
+            "initials": initials,
+        }
+
+    name = str(stakeholder or "Unknown stakeholder")
+    return {
+        "user_id": name.lower().replace(" ", "_"),
+        "name": name,
+        "role": name,
+        "initials": _to_initials(name),
+    }
+
+
 def _normalize_proposal_change(change: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(change)
     section = str(normalized.get("section") or "")
@@ -132,8 +184,14 @@ def normalize_plan_content(content: dict[str, Any] | None) -> dict[str, Any]:
     normalized = _empty_plan_content()
     normalized["title"] = str(raw.get("title") or "")
     normalized["description"] = str(raw.get("description") or "")
-    normalized["objectives"] = list(raw.get("objectives") or [])
-    normalized["stakeholders"] = list(raw.get("stakeholders") or [])
+    normalized["objectives"] = [
+        _coerce_objective(objective)
+        for objective in list(raw.get("objectives") or [])
+    ]
+    normalized["stakeholders"] = [
+        _normalize_stakeholder(stakeholder)
+        for stakeholder in list(raw.get("stakeholders") or [])
+    ]
     normalized["phases"] = [_normalize_phase(phase) for phase in list(raw.get("phases") or [])]
     normalized["global_risks"] = [
         _normalize_risk(risk) for risk in list(raw.get("global_risks") or raw.get("risks") or [])
@@ -564,12 +622,28 @@ def _resolve_selected_changes(
     return selected
 
 
+def _apply_change_overrides(
+    selected_changes: list[dict[str, Any]],
+    *,
+    change_overrides: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not change_overrides:
+        return selected_changes
+    return [
+        {**change, "content": deepcopy(change_overrides[change["id"]])}
+        if change["id"] in change_overrides
+        else change
+        for change in selected_changes
+    ]
+
+
 async def approve_proposal(
     supabase: AsyncClient,
     *,
     project_id: str,
     approved_change_indexes: list[int] | None = None,
     change_ids: list[str] | None = None,
+    change_overrides: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     proposal = await get_pending_proposal(supabase, project_id)
     if not proposal:
@@ -582,6 +656,14 @@ async def approve_proposal(
         proposal,
         approved_change_indexes=approved_change_indexes,
         change_ids=change_ids,
+    )
+    selected_changes = _apply_change_overrides(
+        selected_changes,
+        change_overrides={
+            str(item["change_id"]): item["content"]
+            for item in list(change_overrides or [])
+            if item.get("change_id")
+        },
     )
     await get_agent_statuses(supabase, project_id)
     await set_agent_status(supabase, project_id=project_id, agent="updater", status="running")
@@ -637,8 +719,17 @@ async def accept_proposal_change(
     *,
     project_id: str,
     change_id: str,
+    content_override: Any | None = None,
 ) -> dict[str, Any]:
-    return await approve_proposal(supabase, project_id=project_id, change_ids=[change_id])
+    change_overrides = None
+    if content_override is not None:
+        change_overrides = [{"change_id": change_id, "content": content_override}]
+    return await approve_proposal(
+        supabase,
+        project_id=project_id,
+        change_ids=[change_id],
+        change_overrides=change_overrides,
+    )
 
 
 async def reject_proposal(supabase: AsyncClient, project_id: str) -> dict[str, Any]:

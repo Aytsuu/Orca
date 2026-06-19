@@ -775,6 +775,214 @@ async def test_agent_activity_endpoint_and_promote_actions(
 
 
 @pytest.mark.asyncio
+async def test_agent_activity_keeps_pending_proposal_changes_visible_across_runs(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+
+    first_run = fake_supabase.insert_row(
+        "agent_run",
+        {"project_id": project["id"], "triggered_by": "alpha", "status": "completed"},
+    )
+    first_planner_artifact = fake_supabase.insert_row(
+        "agent_artifact",
+        {
+            "run_id": first_run["id"],
+            "project_id": project["id"],
+            "agent": "planner",
+            "payload": {
+                "summary": "Planner drafted an initial phase.",
+                "changes": [
+                    {
+                        "id": "chg-1",
+                        "action": "add",
+                        "section": "phases",
+                        "content": [{"title": "Discovery"}],
+                        "justification": "Need a first phase.",
+                        "source_message_ids": ["m1"],
+                        "confidence": "medium",
+                    }
+                ],
+            },
+            "created_at": "2026-06-16T10:00:00+00:00",
+        },
+    )
+
+    promote_one = await client.post(
+        f"/api/v1/projects/{project['id']}/agents/activity/planner-change:{first_planner_artifact['id']}:chg-1/promote",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert promote_one.status_code == 200
+
+    second_run = fake_supabase.insert_row(
+        "agent_run",
+        {"project_id": project["id"], "triggered_by": "alpha", "status": "completed"},
+    )
+    fake_supabase.insert_row(
+        "agent_artifact",
+        {
+            "run_id": second_run["id"],
+            "project_id": project["id"],
+            "agent": "analyzer",
+            "payload": {
+                "gaps": [
+                    {
+                        "title": "Owner missing",
+                        "detail": "Assign an owner",
+                        "severity": "major",
+                    }
+                ]
+            },
+            "created_at": "2026-06-16T11:00:00+00:00",
+        },
+    )
+
+    activity_response = await client.get(
+        f"/api/v1/projects/{project['id']}/agents/activity",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert activity_response.status_code == 200
+    activity_items = activity_response.json()["data"]
+
+    pending_items = [item for item in activity_items if item["id"].startswith("pending-proposal-change:")]
+    assert [item["proposal_change"]["id"] for item in pending_items] == ["chg-1"]
+    assert pending_items[0]["actionable"] is False
+    assert pending_items[0]["artifact_id"] == fake_supabase.tables["plan_proposal"][0]["id"]
+
+    gap_items = [item for item in activity_items if item["kind"] == "gap"]
+    assert len(gap_items) == 1
+    assert gap_items[0]["title"] == "Owner missing"
+
+
+@pytest.mark.asyncio
+async def test_agent_activity_is_sorted_oldest_to_latest(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+
+    first_run = fake_supabase.insert_row(
+        "agent_run",
+        {"project_id": project["id"], "triggered_by": "alpha", "status": "completed"},
+    )
+    first_planner_artifact = fake_supabase.insert_row(
+        "agent_artifact",
+        {
+            "run_id": first_run["id"],
+            "project_id": project["id"],
+            "agent": "planner",
+            "payload": {
+                "changes": [
+                    {
+                        "id": "chg-1",
+                        "action": "add",
+                        "section": "phases",
+                        "content": [{"title": "Discovery"}],
+                        "justification": "Need a first phase.",
+                        "source_message_ids": ["m1"],
+                        "confidence": "medium",
+                    }
+                ],
+            },
+            "created_at": "2026-06-16T10:00:00+00:00",
+        },
+    )
+
+    promote_one = await client.post(
+        f"/api/v1/projects/{project['id']}/agents/activity/planner-change:{first_planner_artifact['id']}:chg-1/promote",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert promote_one.status_code == 200
+    fake_supabase.tables["plan_proposal"][0]["created_at"] = "2026-06-16T10:00:00+00:00"
+
+    second_run = fake_supabase.insert_row(
+        "agent_run",
+        {"project_id": project["id"], "triggered_by": "alpha", "status": "completed"},
+    )
+    fake_supabase.insert_row(
+        "agent_artifact",
+        {
+            "run_id": second_run["id"],
+            "project_id": project["id"],
+            "agent": "monitor",
+            "payload": {"summary_candidate": "Monitor summary"},
+            "created_at": "2026-06-16T11:00:00+00:00",
+        },
+    )
+    fake_supabase.insert_row(
+        "agent_artifact",
+        {
+            "run_id": second_run["id"],
+            "project_id": project["id"],
+            "agent": "analyzer",
+            "payload": {
+                "gaps": [
+                    {
+                        "title": "Owner missing",
+                        "detail": "Assign an owner",
+                        "severity": "major",
+                    }
+                ]
+            },
+            "created_at": "2026-06-16T12:00:00+00:00",
+        },
+    )
+    latest_planner_artifact = fake_supabase.insert_row(
+        "agent_artifact",
+        {
+            "run_id": second_run["id"],
+            "project_id": project["id"],
+            "agent": "planner",
+            "payload": {"summary": "Planner summary", "changes": []},
+            "created_at": "2026-06-16T13:00:00+00:00",
+        },
+    )
+
+    activity_response = await client.get(
+        f"/api/v1/projects/{project['id']}/agents/activity",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert activity_response.status_code == 200
+    activity_items = activity_response.json()["data"]
+
+    assert [item["id"] for item in activity_items] == [
+        f'pending-proposal-change:{fake_supabase.tables["plan_proposal"][0]["id"]}:chg-1',
+        "monitor-summary:" + next(
+            row["id"]
+            for row in fake_supabase.tables["agent_artifact"]
+            if row["run_id"] == second_run["id"] and row["agent"] == "monitor"
+        ),
+        "gap:" + next(
+            row["id"]
+            for row in fake_supabase.tables["agent_artifact"]
+            if row["run_id"] == second_run["id"] and row["agent"] == "analyzer"
+        ) + ":Owner missing",
+        f"planner-summary:{latest_planner_artifact['id']}",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_member_management_requires_approver(
     client: AsyncClient,
     fake_supabase: FakeSupabase,
@@ -959,6 +1167,80 @@ async def test_plan_approval_applies_changes_and_revert(
 
 
 @pytest.mark.asyncio
+async def test_accept_plan_change_applies_content_override(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "content": {
+                "title": "Initial",
+                "description": "Draft",
+                "objectives": [],
+                "stakeholders": [],
+                "phases": [],
+                "global_risks": [],
+            },
+            "version": 1,
+            "finalized_at": _iso_now(),
+        },
+    )
+    fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "changes": [
+                {
+                    "id": "chg-stakeholder",
+                    "section": "stakeholders",
+                    "action": "add",
+                    "content": [{"title": "Product Owner"}],
+                }
+            ],
+        },
+    )
+
+    response = await client.patch(
+        f"/api/v1/projects/{project['id']}/plan/proposal/changes/chg-stakeholder/accept",
+        headers={"X-Session-Id": "alpha"},
+        json={
+            "content": [
+                {
+                    "user_id": "product_owner",
+                    "name": "Priya Nair",
+                    "role": "Product Owner",
+                    "initials": "PN",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["stakeholders"] == [
+        {
+            "user_id": "product_owner",
+            "name": "Priya Nair",
+            "role": "Product Owner",
+            "initials": "PN",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_agents_status_and_trigger(
     client: AsyncClient,
     fake_supabase: FakeSupabase,
@@ -1097,6 +1379,128 @@ async def test_get_plan_returns_enriched_shape_without_breaking_legacy_fields(
     assert payload["objectives"] == ["Reduce churn"]
     assert payload["phases"][0]["id"] == "phase-1"
     assert payload["global_risks"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_plan_coerces_objective_objects_to_strings(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "content": {
+                "title": "Runway Q3 Launch",
+                "description": "AI-generated plan",
+                "objectives": [
+                    {"title": "Develop a messaging workflow for team productivity."},
+                    {"description": "Turn AI outputs into actionable planning steps."},
+                    "Keep explicit string objectives intact.",
+                ],
+                "stakeholders": [],
+                "phases": [],
+                "global_risks": [],
+            },
+            "version": 4,
+            "finalized_at": _iso_now(),
+        },
+    )
+
+    response = await client.get(
+        f"/api/v1/projects/{project['id']}/plan",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["objectives"] == [
+        "Develop a messaging workflow for team productivity.",
+        "Turn AI outputs into actionable planning steps.",
+        "Keep explicit string objectives intact.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_plan_coerces_stakeholder_objects_to_structured_shape(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "content": {
+                "title": "Runway Q3 Launch",
+                "description": "AI-generated plan",
+                "objectives": [],
+                "stakeholders": [
+                    {"title": "Product Owner"},
+                    {"title": "Development Team"},
+                    {"title": "End Users"},
+                    {"title": "Project Manager"},
+                ],
+                "phases": [],
+                "global_risks": [],
+            },
+            "version": 5,
+            "finalized_at": _iso_now(),
+        },
+    )
+
+    response = await client.get(
+        f"/api/v1/projects/{project['id']}/plan",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["stakeholders"] == [
+        {
+            "user_id": "product_owner",
+            "name": "Product Owner",
+            "role": "Product Owner",
+            "initials": "PO",
+        },
+        {
+            "user_id": "development_team",
+            "name": "Development Team",
+            "role": "Development Team",
+            "initials": "DT",
+        },
+        {
+            "user_id": "end_users",
+            "name": "End Users",
+            "role": "End Users",
+            "initials": "EU",
+        },
+        {
+            "user_id": "project_manager",
+            "name": "Project Manager",
+            "role": "Project Manager",
+            "initials": "PM",
+        },
+    ]
 
 
 @pytest.mark.asyncio

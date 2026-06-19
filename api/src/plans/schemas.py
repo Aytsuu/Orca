@@ -196,6 +196,16 @@ class ProposalOut(ApiModel):
 class PlanApprove(ApiModel):
     approved_change_indexes: list[int] | None = None
     change_ids: list[str] | None = None
+    change_overrides: list["ProposalChangeOverride"] | None = None
+
+
+class ProposalChangeOverride(ApiModel):
+    change_id: str = Field(min_length=1)
+    content: Any
+
+
+class ProposalChangeAccept(ApiModel):
+    content: Any | None = None
 
 
 class PlanReject(ApiModel):

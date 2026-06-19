@@ -89,6 +89,44 @@ const INITIAL_CHANGES: ProposedChange[] = [
   }
 ];
 
+function toDraftStakeholder(change: ProposedChange): Stakeholder[] {
+  const content = change.content;
+  const entries = Array.isArray(content)
+    ? content.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    : typeof content === 'object' && content !== null
+      ? [content as Record<string, unknown>]
+      : [];
+
+  const fallbackTitle = change.title || 'Stakeholder';
+  const normalizeText = (value: unknown, fallback = '') => (typeof value === 'string' && value.trim() ? value : fallback);
+  const toInitials = (value: string) =>
+    value
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || '')
+      .join('') || 'NA';
+
+  if (entries.length === 0) {
+    return [
+      {
+        userId: fallbackTitle.toLowerCase().replace(/\s+/g, '_'),
+        name: fallbackTitle,
+        role: fallbackTitle,
+        initials: toInitials(fallbackTitle),
+      },
+    ];
+  }
+
+  return entries.map((entry, index) => {
+    const name = normalizeText(entry.name ?? entry.title ?? entry.role ?? entry.description, fallbackTitle);
+    const role = normalizeText(entry.role ?? entry.title, name);
+    const userId = normalizeText(entry.user_id ?? entry.userId ?? entry.id, `${name.toLowerCase().replace(/\s+/g, '_')}_${index + 1}`);
+    const initials = normalizeText(entry.initials, toInitials(name)).slice(0, 10);
+    return { userId, name, role, initials };
+  });
+}
+
 // --- Inner PlanView component ---
 const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
   // --- States & React Query Hooks ---
@@ -174,6 +212,26 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     };
   }, []);
 
+  const pendingChanges: ProposedChange[] = pendingProposal?.changes || [];
+  const [proposalStakeholderDrafts, setProposalStakeholderDrafts] = useState<Record<string, Stakeholder[]>>({});
+
+  useEffect(() => {
+    setProposalStakeholderDrafts((current) => {
+      const next = { ...current };
+      for (const change of pendingChanges) {
+        if (change.section === 'stakeholders' && !next[change.id]) {
+          next[change.id] = toDraftStakeholder(change);
+        }
+      }
+      for (const changeId of Object.keys(next)) {
+        if (!pendingChanges.some((change) => change.id === changeId && change.section === 'stakeholders')) {
+          delete next[changeId];
+        }
+      }
+      return next;
+    });
+  }, [pendingChanges]);
+
   if (isPlanLoading || !activePlan) {
     return (
       <div className="flex-grow flex items-center justify-center bg-background text-text-muted text-sm py-16">
@@ -193,7 +251,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     activePlan.stakeholders.length === 0 &&
     activePlan.phases.length === 0 &&
     activePlan.globalRisks.length === 0;
-  const pendingChanges: ProposedChange[] = pendingProposal?.changes || [];
 
   const persistPlanMeta = async (
     nextValues: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives' | 'stakeholders'>>,
@@ -259,12 +316,20 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
   };
 
   // --- Handlers for Review Panel Action ---
+  const getStakeholderOverrideContent = (change: ProposedChange): unknown | undefined => {
+    if (change.section !== 'stakeholders') return undefined;
+    return proposalStakeholderDrafts[change.id];
+  };
+
   const applyChangeState = async (changeId: string, accept: boolean) => {
     const change = pendingChanges.find(c => c.id === changeId);
     if (!change) return;
     try {
       if (accept) {
-        await acceptProjectProposalChangeMutation.mutateAsync(changeId);
+        await acceptProjectProposalChangeMutation.mutateAsync({
+          changeId,
+          content: getStakeholderOverrideContent(change),
+        });
         addToast('success', `"${change.title}" accepted.`);
       } else {
         await rejectProjectProposalChangeMutation.mutateAsync(changeId);
@@ -278,7 +343,15 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
   const handleAcceptAll = async () => {
     if (pendingChanges.length === 0) return;
     try {
-      await approveProjectProposalMutation.mutateAsync(pendingChanges.map((change) => change.id));
+      await approveProjectProposalMutation.mutateAsync({
+        changeIds: pendingChanges.map((change) => change.id),
+        changeOverrides: pendingChanges
+          .filter((change) => change.section === 'stakeholders')
+          .map((change) => ({
+            changeId: change.id,
+            content: proposalStakeholderDrafts[change.id] || toDraftStakeholder(change),
+          })),
+      });
       addToast('success', 'All pending changes accepted.');
     } catch (error) {
       addToast('error', error instanceof Error ? error.message : 'Failed to accept all changes.');
@@ -731,8 +804,210 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                 {change.sourceQuote}
               </div>
             )}
+            {change.section === 'stakeholders' && (
+              <div className="mt-3 flex flex-col gap-2">
+                {(proposalStakeholderDrafts[change.id] || toDraftStakeholder(change)).map((stakeholder, index) => (
+                  <div
+                    key={`${change.id}-${stakeholder.userId}-${index}`}
+                    className="grid grid-cols-2 gap-2 rounded-lg border border-border-subtle bg-surface-raised/40 p-2"
+                  >
+                    <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
+                      <span>Name</span>
+                      <input
+                        value={stakeholder.name}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setProposalStakeholderDrafts((current) => ({
+                            ...current,
+                            [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, name: value } : item
+                            ),
+                          }));
+                        }}
+                        className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
+                      <span>Role</span>
+                      <input
+                        value={stakeholder.role}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setProposalStakeholderDrafts((current) => ({
+                            ...current,
+                            [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, role: value } : item
+                            ),
+                          }));
+                        }}
+                        className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
+                      <span>User ID</span>
+                      <input
+                        value={stakeholder.userId}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setProposalStakeholderDrafts((current) => ({
+                            ...current,
+                            [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, userId: value } : item
+                            ),
+                          }));
+                        }}
+                        className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
+                      <span>Initials</span>
+                      <input
+                        value={stakeholder.initials}
+                        onChange={(event) => {
+                          const value = event.target.value.toUpperCase().slice(0, 10);
+                          setProposalStakeholderDrafts((current) => ({
+                            ...current,
+                            [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, initials: value } : item
+                            ),
+                          }));
+                        }}
+                        className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
+                      />
+                    </label>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ))}
+      </div>
+    );
+  };
+
+  const renderPendingReviewCard = (change: ProposedChange) => {
+    let actionPrefix = 'ADD TASK';
+    if (change.action === 'update') {
+      actionPrefix = 'UPDATE PRIORITY';
+    } else if (change.action === 'remove') {
+      actionPrefix = 'REMOVE TASK';
+    }
+
+    return (
+      <div
+        key={change.id}
+        className="bg-background/50 border border-border rounded-xl p-4 flex flex-col gap-2.5 transition-all select-text"
+      >
+        <div className="flex items-center justify-between select-none">
+          <span className="text-[9px] uppercase tracking-widest font-bold text-primary">
+            {actionPrefix}
+          </span>
+        </div>
+
+        <div className="text-xs font-bold text-text-primary leading-snug">
+          &quot;{change.title}&quot;
+        </div>
+
+        <div className="text-[10px] text-text-muted leading-relaxed select-none">
+          {change.detail}
+        </div>
+
+        {change.sourceQuote && (
+          <div className="text-[10px] text-text-muted italic border-l border-border-subtle pl-2 select-text leading-normal">
+            {change.sourceQuote}
+          </div>
+        )}
+
+        {change.section === 'stakeholders' && (
+          <div className="mt-1 flex flex-col gap-2">
+            {(proposalStakeholderDrafts[change.id] || toDraftStakeholder(change)).map((stakeholder, index) => (
+              <div
+                key={`${change.id}-${stakeholder.userId}-${index}`}
+                className="grid grid-cols-2 gap-2 rounded-lg border border-border-subtle bg-surface-raised/40 p-2"
+              >
+                <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
+                  <span>Name</span>
+                  <input
+                    value={stakeholder.name}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setProposalStakeholderDrafts((current) => ({
+                        ...current,
+                        [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, name: value } : item
+                        ),
+                      }));
+                    }}
+                    className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
+                  <span>Role</span>
+                  <input
+                    value={stakeholder.role}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setProposalStakeholderDrafts((current) => ({
+                        ...current,
+                        [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, role: value } : item
+                        ),
+                      }));
+                    }}
+                    className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
+                  <span>User ID</span>
+                  <input
+                    value={stakeholder.userId}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setProposalStakeholderDrafts((current) => ({
+                        ...current,
+                        [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, userId: value } : item
+                        ),
+                      }));
+                    }}
+                    className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
+                  <span>Initials</span>
+                  <input
+                    value={stakeholder.initials}
+                    onChange={(event) => {
+                      const value = event.target.value.toUpperCase().slice(0, 10);
+                      setProposalStakeholderDrafts((current) => ({
+                        ...current,
+                        [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, initials: value } : item
+                        ),
+                      }));
+                    }}
+                    className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex gap-2 mt-1.5 select-none">
+          <button
+            onClick={() => applyChangeState(change.id, true)}
+            className="flex-1 py-1 rounded bg-success/15 hover:bg-success text-success hover:text-text-inverse text-[10px] font-bold transition-all"
+          >
+            Accept
+          </button>
+          <button
+            onClick={() => applyChangeState(change.id, false)}
+            className="flex-1 py-1 rounded bg-error/15 hover:bg-error text-error hover:text-text-inverse text-[10px] font-bold transition-all"
+          >
+            Reject
+          </button>
+        </div>
       </div>
     );
   };
@@ -1949,58 +2224,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
 
             {/* Scrollable list of cards */}
             <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
-              {pendingChanges.map(change => {
-                // Heading action prefix formatting
-                let actionPrefix = 'ADD TASK';
-                if (change.action === 'update') {
-                  actionPrefix = 'UPDATE PRIORITY';
-                } else if (change.action === 'remove') {
-                  actionPrefix = 'REMOVE TASK';
-                }
-
-                return (
-                  <div
-                    key={change.id}
-                    className="bg-background/50 border border-border rounded-xl p-4 flex flex-col gap-2.5 transition-all select-text"
-                  >
-                    <div className="flex items-center justify-between select-none">
-                      <span className="text-[9px] uppercase tracking-widest font-bold text-primary">
-                        {actionPrefix}
-                      </span>
-                    </div>
-
-                    <div className="text-xs font-bold text-text-primary leading-snug">
-                      &quot;{change.title}&quot;
-                    </div>
-
-                    <div className="text-[10px] text-text-muted leading-relaxed select-none">
-                      {change.detail}
-                    </div>
-
-                    {change.sourceQuote && (
-                      <div className="text-[10px] text-text-muted italic border-l border-border-subtle pl-2 select-text leading-normal">
-                        {change.sourceQuote}
-                      </div>
-                    )}
-
-                    {/* Accept/Reject individual buttons */}
-                    <div className="flex gap-2 mt-1.5 select-none">
-                      <button
-                        onClick={() => applyChangeState(change.id, true)}
-                        className="flex-1 py-1 rounded bg-success/15 hover:bg-success text-success hover:text-text-inverse text-[10px] font-bold transition-all"
-                      >
-                        Accept
-                      </button>
-                      <button
-                        onClick={() => applyChangeState(change.id, false)}
-                        className="flex-1 py-1 rounded bg-error/15 hover:bg-error text-error hover:text-text-inverse text-[10px] font-bold transition-all"
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+              {pendingChanges.map(renderPendingReviewCard)}
 
               {pendingChanges.length === 0 && (
                 /* Empty state */
@@ -2083,49 +2307,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
 
             {/* Change list */}
             <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
-              {pendingChanges.map(change => {
-                return (
-                  <div
-                    key={change.id}
-                    className="bg-background/50 border border-border rounded-md p-4 flex flex-col gap-2 select-text"
-                  >
-                    <div className="flex items-center justify-between select-none">
-                      <span className="text-[9px] uppercase tracking-widest font-bold text-primary">
-                        ? {change.action.toUpperCase()} TASK
-                      </span>
-                    </div>
-
-                    <div className="text-xs font-bold text-text-primary select-text">
-                      &quot;{change.title}&quot;
-                    </div>
-
-                    <div className="text-[10px] text-text-muted select-none">
-                      {change.detail}
-                    </div>
-
-                    {change.sourceQuote && (
-                      <div className="text-[10px] text-text-muted italic border-l border-border-subtle pl-2">
-                        {change.sourceQuote}
-                      </div>
-                    )}
-
-                    <div className="flex gap-2 mt-2 select-none">
-                      <button
-                        onClick={() => applyChangeState(change.id, true)}
-                        className="flex-1 py-1 rounded bg-success/15 hover:bg-success text-success hover:text-text-inverse text-[10px] font-bold transition-all"
-                      >
-                        ? Accept
-                      </button>
-                      <button
-                        onClick={() => applyChangeState(change.id, false)}
-                        className="flex-1 py-1 rounded bg-error/15 hover:bg-error text-error hover:text-text-inverse text-[10px] font-bold transition-all"
-                      >
-                        ? Reject
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+              {pendingChanges.map(renderPendingReviewCard)}
 
               {pendingChanges.length === 0 && (
                 <div className="flex flex-col items-center justify-center text-center p-8 py-20 text-text-muted">

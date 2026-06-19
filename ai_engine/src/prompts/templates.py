@@ -17,6 +17,21 @@ Context:
 {context}
 """
 
+QUESTION_ANALYZER_PROMPT = """
+You are the Question Analyzer step for a planning workspace.
+The latest message thread is exploratory or open-ended rather than a concrete plan diff.
+
+Interpret the user's likely planning intent, identify what information is still missing,
+propose clarifying questions, and provide concise panel suggestions for what to do next.
+Do not invent concrete gaps, risks, conflicts, or plan changes unless they are explicit.
+Ground the result only in the supplied context and cite only real source_message_ids from it.
+
+Return JSON only.
+
+Context:
+{context}
+"""
+
 RELEVANCE_PROMPT = """
 You are a lightweight message relevance scorer for a planning workspace.
 Decide whether the supplied new messages contain actionable planning information or

@@ -7,7 +7,13 @@ from typing import Callable
 
 from src.agents.base import StepResult
 from src.agents.schemas import RelevanceOutput
-from src.agents.steps import AnalyzerStep, MonitorStep, PlannerStep
+from src.agents.steps import (
+    AnalyzerStep,
+    MonitorStep,
+    PlannerStep,
+    QuestionAnalyzerStep,
+    is_question_only_monitor_output,
+)
 from src.config import get_settings
 from src.context.builder import ContextBuilder
 from src.exceptions import (
@@ -369,13 +375,7 @@ async def run_project_pipeline(
                     extra_payload={"relevance_gate": relevance.model_dump(mode="json")},
                 )
 
-        steps = [
-            MonitorStep(llm),
-            AnalyzerStep(llm),
-            PlannerStep(llm, safety),
-        ]
-        if soft_budget_reached:
-            steps = steps[:2]
+        steps = [MonitorStep(llm)]
         for step in steps:
             active_agent = step.agent_name
             await set_agent_status(
@@ -420,9 +420,22 @@ async def run_project_pipeline(
                         source_message_ids=[message["id"] for message in context.new_messages],
                         last_message_created_at=context.new_messages[-1]["created_at"],
                     )
+                if result.should_continue:
+                    if is_question_only_monitor_output(monitor_output):
+                        steps.append(QuestionAnalyzerStep(llm))
+                        steps.append(PlannerStep(llm, safety))
+                    else:
+                        steps.append(AnalyzerStep(llm))
+                        if not soft_budget_reached:
+                            steps.append(PlannerStep(llm, safety))
 
             if not result.should_continue:
                 remaining_steps = steps[len(results) :]
+                if not remaining_steps and result.agent == "monitor":
+                    remaining_steps = [
+                        AnalyzerStep(llm),
+                        PlannerStep(llm, safety),
+                    ]
                 for pending_step in remaining_steps:
                     skipped_payload = {"skipped": True, "reason": "no_actionable_input"}
                     await create_agent_artifact(

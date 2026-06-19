@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.agents.schemas import AnalyzerOutput, MonitorOutput, RelevanceOutput
+from src.agents.schemas import AnalyzerOutput, MonitorOutput, QuestionAnalyzerOutput, RelevanceOutput
 from src.exceptions import (
     ConfigurationError,
     InvalidOutputError,
@@ -162,6 +162,102 @@ async def test_pipeline_persists_planner_proposal(fake_supabase) -> None:
 
 
 @pytest.mark.asyncio
+async def test_pipeline_appends_new_planner_changes_to_existing_pending_proposal(fake_supabase) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha"})
+    message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Add a QA sign-off task",
+        },
+    )
+    fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "changes": [
+                {
+                    "id": "chg-1",
+                    "section": "tasks",
+                    "action": "add",
+                    "content": [{"title": "Existing task"}],
+                    "justification": "Earlier approved draft work.",
+                    "source_message_ids": [message["id"]],
+                    "confidence": "medium",
+                }
+            ],
+        },
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [message["id"]],
+        },
+    )
+    llm = FakeJsonLlmClient(
+        responses=[
+            MonitorOutput(
+                tasks=[
+                    {
+                        "kind": "task",
+                        "content": "Add QA sign-off task",
+                        "source_message_ids": [message["id"]],
+                        "excerpt": "Add a QA sign-off task",
+                        "confidence": "medium",
+                    }
+                ],
+                summary_candidate="requested qa sign-off task",
+            ),
+            AnalyzerOutput(
+                gaps=[
+                    {
+                        "title": "QA sign-off missing",
+                        "detail": "Plan needs an explicit QA sign-off task",
+                        "severity": "major",
+                        "source_message_ids": [message["id"]],
+                    }
+                ]
+            ),
+            {
+                "changes": [
+                    {
+                        "id": "chg-2",
+                        "section": "tasks",
+                        "action": "add",
+                        "content": [{"title": "QA sign-off task"}],
+                        "justification": "Supported by the latest request",
+                        "source_message_ids": [message["id"]],
+                        "confidence": "medium",
+                    }
+                ],
+                "summary": "Add QA sign-off task",
+            },
+            {"safe": True, "violations": []},
+        ]
+    )
+
+    results = await run_project_pipeline(
+        fake_supabase,
+        run["id"],
+        llm_client=llm,
+        safety_client=llm,
+    )
+
+    assert [result.agent for result in results] == ["monitor", "analyzer", "planner"]
+    assert len(fake_supabase.tables["plan_proposal"]) == 1
+    assert fake_supabase.tables["plan_proposal"][0]["status"] == "pending"
+    assert [change["id"] for change in fake_supabase.tables["plan_proposal"][0]["changes"]] == [
+        "chg-1",
+        "chg-2",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_uses_relevance_gate_for_ambiguous_messages(fake_supabase) -> None:
     project = fake_supabase.insert_row("project", {"name": "Alpha"})
     message = fake_supabase.insert_row(
@@ -198,6 +294,73 @@ async def test_pipeline_uses_relevance_gate_for_ambiguous_messages(fake_supabase
 
     assert [result.agent for result in results] == ["monitor"]
     assert [call["schema"] for call in llm.calls] == ["RelevanceOutput", "MonitorOutput"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_routes_question_only_monitor_output_to_question_analyzer(fake_supabase) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha"})
+    message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "What should the first phase of the plan focus on?",
+        },
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [message["id"]],
+        },
+    )
+    llm = FakeJsonLlmClient(
+        responses=[
+            MonitorOutput(
+                open_questions=[
+                    {
+                        "kind": "detail",
+                        "content": "Clarify the first phase focus.",
+                        "source_message_ids": [message["id"]],
+                        "excerpt": "What should the first phase of the plan focus on?",
+                        "confidence": "medium",
+                    }
+                ],
+                summary_candidate="Asked for direction on the first phase.",
+            ),
+            QuestionAnalyzerOutput(
+                interpreted_intent="The user wants guidance on how to shape the first phase.",
+                missing_information=["Success criteria for phase one are not defined."],
+                clarifying_questions=["Is the first phase primarily discovery, delivery, or validation?"],
+                panel_suggestions=["Review the current plan and decide whether phase one is for discovery or execution."],
+                source_message_ids=[message["id"]],
+            ),
+        ]
+    )
+
+    results = await run_project_pipeline(
+        fake_supabase,
+        run["id"],
+        llm_client=llm,
+        safety_client=llm,
+    )
+
+    assert [result.agent for result in results] == ["monitor", "analyzer"]
+    assert [call["schema"] for call in llm.calls] == ["MonitorOutput", "QuestionAnalyzerOutput"]
+    analyzer_artifact = next(
+        row for row in fake_supabase.tables["agent_artifact"] if row["agent"] == "analyzer"
+    )
+    assert analyzer_artifact["payload"]["mode"] == "question_analyzer"
+    assert analyzer_artifact["payload"]["panel_suggestions"] == [
+        "Review the current plan and decide whether phase one is for discovery or execution."
+    ]
+    planner_artifact = next(
+        row for row in fake_supabase.tables["agent_artifact"] if row["agent"] == "planner"
+    )
+    assert planner_artifact["payload"] == {"skipped": True, "reason": "no_actionable_input"}
+    assert fake_supabase.tables["plan_proposal"] == []
 
 
 @pytest.mark.asyncio

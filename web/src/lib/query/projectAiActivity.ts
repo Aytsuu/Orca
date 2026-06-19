@@ -43,7 +43,6 @@ export interface ActivitySuggestion {
   type: 'SUGGESTION' | 'GAP' | 'TASK' | 'INSIGHT';
   content: string;
   actionable: boolean;
-  actionLabel?: string;
 }
 
 export interface ActivityItem {
@@ -141,7 +140,6 @@ function mapActivityItem(item: ApiActivityItem): ActivityItem {
 
 function mapActivitySuggestion(item: ApiActivityItem): ActivitySuggestion {
   let type: ActivitySuggestion['type'] = 'SUGGESTION';
-  let actionLabel: string | undefined;
 
   if (item.kind === 'gap') {
     type = 'GAP';
@@ -149,7 +147,6 @@ function mapActivitySuggestion(item: ApiActivityItem): ActivitySuggestion {
     type = 'GAP';
   } else if (item.kind === 'proposal_change') {
     type = 'TASK';
-    actionLabel = 'Send to review';
   } else if (item.kind === 'insight') {
     type = 'INSIGHT';
   }
@@ -159,7 +156,6 @@ function mapActivitySuggestion(item: ApiActivityItem): ActivitySuggestion {
     type,
     content: item.detail || item.title,
     actionable: item.actionable,
-    actionLabel,
   };
 }
 

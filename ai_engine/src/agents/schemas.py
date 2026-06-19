@@ -44,6 +44,14 @@ class AnalyzerOutput(EngineModel):
     panel_suggestions: list[str] = Field(default_factory=list)
 
 
+class QuestionAnalyzerOutput(EngineModel):
+    interpreted_intent: str | None = None
+    missing_information: list[str] = Field(default_factory=list)
+    clarifying_questions: list[str] = Field(default_factory=list)
+    panel_suggestions: list[str] = Field(default_factory=list)
+    source_message_ids: list[str] = Field(min_length=1)
+
+
 class RelevanceOutput(EngineModel):
     should_trigger: bool
     confidence: Confidence

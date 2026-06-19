@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import Any
 
 from src.agents.base import AgentStep, StepResult
-from src.agents.schemas import AnalyzerOutput, MonitorOutput, PlannerOutput, SafetyCheckOutput
+from src.agents.schemas import (
+    AnalyzerOutput,
+    MonitorOutput,
+    PlannerOutput,
+    QuestionAnalyzerOutput,
+    SafetyCheckOutput,
+)
 from src.config import get_settings
 from src.context.builder import AssembledContext
 from src.guardrails import (
@@ -18,6 +25,7 @@ from src.prompts.templates import (
     ANALYZER_PROMPT,
     MONITOR_PROMPT,
     PLANNER_PROMPT,
+    QUESTION_ANALYZER_PROMPT,
     SAFETY_CHECK_PROMPT,
 )
 
@@ -65,7 +73,7 @@ def _build_reasoning_context(
     context: AssembledContext,
     *,
     monitor_output: MonitorOutput | None = None,
-    analyzer_output: AnalyzerOutput | None = None,
+    analyzer_output: Any | None = None,
 ) -> dict:
     payload = {
         "context": {
@@ -79,9 +87,22 @@ def _build_reasoning_context(
     }
     if monitor_output is not None:
         payload["monitor"] = monitor_output.model_dump(mode="json")
-    if analyzer_output is not None:
+    if analyzer_output is not None and hasattr(analyzer_output, "model_dump"):
         payload["analyzer"] = analyzer_output.model_dump(mode="json")
     return payload
+
+
+def is_question_only_monitor_output(output: MonitorOutput) -> bool:
+    has_questions = bool(output.open_questions)
+    has_concrete_items = any(
+        [
+            output.decisions,
+            output.tasks,
+            output.requirements,
+            output.risks,
+        ]
+    )
+    return has_questions and not has_concrete_items
 
 
 class MonitorStep(AgentStep):
@@ -178,6 +199,51 @@ class AnalyzerStep(AgentStep):
             agent=self.agent_name,
             output=output,
             should_continue=actionable,
+            artifacts=artifacts,
+        )
+
+
+class QuestionAnalyzerStep(AgentStep):
+    agent_name = "analyzer"
+
+    def __init__(self, llm_client: JsonLlmClient) -> None:
+        self._llm_client = llm_client
+        self._settings = get_settings()
+
+    async def execute(
+        self,
+        context: AssembledContext,
+        prior_results: list[StepResult],
+    ) -> StepResult:
+        monitor_output = prior_results[-1].output
+        output = await self._llm_client.generate_json(
+            QUESTION_ANALYZER_PROMPT.format(
+                context=_build_reasoning_context(
+                    context,
+                    monitor_output=monitor_output,
+                )
+            ),
+            QuestionAnalyzerOutput,
+            model=self._settings.llm_model,
+            temperature=0.1,
+        )
+        valid_ids = collect_context_source_message_ids(
+            messages=context.new_messages,
+            memory=context.memory,
+            summaries=context.summaries,
+            current_plan=context.current_plan,
+        )
+        validate_source_message_ids(valid_ids, output.source_message_ids)
+
+        artifacts = output.model_dump(mode="json")
+        artifacts["mode"] = "question_analyzer"
+        metadata = _llm_metadata(self._llm_client)
+        if metadata:
+            artifacts["llm"] = metadata
+        return StepResult(
+            agent=self.agent_name,
+            output=output,
+            should_continue=False,
             artifacts=artifacts,
         )
 

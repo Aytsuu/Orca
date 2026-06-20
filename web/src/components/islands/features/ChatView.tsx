@@ -413,13 +413,13 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
             expanded
               ? undefined
               : {
-                  display: '-webkit-box',
-                  WebkitLineClamp: 5,
-                  WebkitBoxOrient: 'vertical',
-                  overflow: 'hidden',
-                  maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
-                  WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
-                }
+                display: '-webkit-box',
+                WebkitLineClamp: 5,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+                maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
+                WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
+              }
           }
         >
           {text}
@@ -770,9 +770,8 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
 
                     {/* Reply Action Button */}
                     <div
-                      className={`absolute -top-3 opacity-0 group-hover/msg-content:opacity-100 transition-opacity duration-150 z-20 ${
-                        isUser ? 'left-3' : 'right-3'
-                      }`}
+                      className={`absolute -top-3 opacity-0 group-hover/msg-content:opacity-100 transition-opacity duration-150 z-20 ${isUser ? 'left-3' : 'right-3'
+                        }`}
                     >
                       <div className="relative group/reply-btn">
                         <button
@@ -790,7 +789,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
                         >
                           <Reply className="w-3.5 h-3.5" />
                         </button>
-                        
+
                         {/* Tooltip */}
                         <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 opacity-0 group-hover/reply-btn:opacity-100 transition-opacity duration-200 pointer-events-none z-30 flex flex-col items-center">
                           <div className="bg-surface-raised border border-border-subtle text-text-primary text-[10px] px-2.5 py-1 rounded-md shadow-lg font-medium tracking-wide whitespace-nowrap">
@@ -933,7 +932,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
         className={`w-full lg:w-[28%] lg:min-w-[300px] lg:max-w-[380px] border-l border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface py-6 pl-6 pr-0 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'ai' ? 'flex absolute inset-0 z-10' : 'hidden'
           }`}
       >
-        <div className="flex items-center justify-between gap-3 shrink-0 pr-6">
+        <div className="flex items-center justify-between gap-3 shrink-0 pr-6 pt-.5">
           <span className="section-label">AI Activity</span>
           {actionableSuggestionCount > 1 && (
             <button
@@ -987,7 +986,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
                       )}
                     </div>
                   )}
- 
+
                   {/* 2. Analyzer Orca */}
                   {showAnalyzer && (
                     <div className="flex flex-col gap-1.5">
@@ -1021,7 +1020,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
                       {analyzerStatus === 'idle' && renderAgentSuggestions('analyzer')}
                     </div>
                   )}
- 
+
                   {/* 3. Planner Orca */}
                   {showPlanner && (
                     <div className="flex flex-col gap-1.5">

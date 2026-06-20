@@ -43,6 +43,7 @@ export interface ActivitySuggestion {
   type: 'SUGGESTION' | 'GAP' | 'TASK' | 'INSIGHT';
   content: string;
   actionable: boolean;
+  agent: AgentName;
 }
 
 export interface ActivityItem {
@@ -158,6 +159,7 @@ export function mapActivitySuggestion(item: ApiActivityItem): ActivitySuggestion
     type,
     content: item.detail || item.title,
     actionable,
+    agent: item.agent,
   };
 }
 

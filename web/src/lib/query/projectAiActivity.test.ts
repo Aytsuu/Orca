@@ -20,6 +20,7 @@ describe('mapActivitySuggestion', () => {
       type: 'TASK',
       content: 'Create a rollout phase covering deployment and validation.',
       actionable: false,
+      agent: 'planner',
     });
   });
 });

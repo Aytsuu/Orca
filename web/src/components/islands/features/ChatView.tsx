@@ -126,6 +126,9 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   } | null>(null);
 
   const [showTabletFiles, setShowTabletFiles] = useState(false);
+  const [monitorResponseExpanded, setMonitorResponseExpanded] = useState(false);
+  const [analyzerResponseExpanded, setAnalyzerResponseExpanded] = useState(false);
+  const [plannerResponseExpanded, setPlannerResponseExpanded] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -374,9 +377,163 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     UPDATER: 'idle',
   };
   const recentOrcaActivity = aiActivity?.recentActivity || null;
-  const panelSuggestions = aiActivity?.suggestions || [];
+  const rawSuggestions = aiActivity?.suggestions || [];
+  const panelSuggestions = rawSuggestions.filter(
+    (s) => !s.id.startsWith('monitor-summary') && !s.id.startsWith('planner-summary') && !s.id.startsWith('panel')
+  );
+  const monitorStatus = agentStatus.MONITOR || 'idle';
+  const analyzerStatus = agentStatus.ANALYZER || 'idle';
+  const plannerStatus = agentStatus.PLANNER || 'idle';
+  const monitorResponse = [...(aiActivity?.items || [])].reverse().find((item) => item.agent === 'monitor' && item.kind === 'insight')?.detail;
+  const analyzerResponse = [...(aiActivity?.items || [])].reverse().find((item) => item.agent === 'analyzer' && item.kind === 'insight')?.detail;
+  const plannerResponse = [...(aiActivity?.items || [])].reverse().find((item) => item.agent === 'planner' && item.kind === 'insight')?.detail;
+  const showMonitor = monitorStatus === 'active' || monitorStatus === 'error' || (monitorStatus === 'idle' && Boolean(monitorResponse) && panelSuggestions.length > 0);
+  const showAnalyzer = analyzerStatus === 'active' || analyzerStatus === 'error' || (analyzerStatus === 'idle' && (Boolean(analyzerResponse) || panelSuggestions.some((s) => s.agent === 'analyzer')) && panelSuggestions.length > 0);
+  const showPlanner = plannerStatus === 'active' || plannerStatus === 'error' || (plannerStatus === 'idle' && (Boolean(plannerResponse) || panelSuggestions.some((s) => s.agent === 'planner')) && panelSuggestions.length > 0);
+  const showAiActivity = showMonitor || showAnalyzer || showPlanner || panelSuggestions.length > 0;
   const actionableSuggestionCount = panelSuggestions.filter((suggestion) => suggestion.actionable).length;
-  const suggestionClusters = buildSuggestionClusters(panelSuggestions);
+
+  const CollapsibleText: React.FC<{ text: string; expanded: boolean; onToggle: () => void }> = ({ text, expanded, onToggle }) => {
+    const lines = text.split('\n');
+    const needsTruncation = lines.length >= 5 || text.length > 250;
+
+    if (!needsTruncation) {
+      return (
+        <div className="mt-1 bg-background/40 border border-border-subtle p-3 rounded-lg text-[11px] text-text-secondary select-text whitespace-pre-wrap leading-relaxed animate-fade-in">
+          {text}
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-1 bg-background/40 border border-border-subtle p-3 rounded-lg text-[11px] text-text-secondary select-text leading-relaxed animate-fade-in flex flex-col gap-1.5">
+        <div
+          className="whitespace-pre-wrap"
+          style={
+            expanded
+              ? undefined
+              : {
+                  display: '-webkit-box',
+                  WebkitLineClamp: 5,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                  maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
+                  WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
+                }
+          }
+        >
+          {text}
+        </div>
+        <button
+          type="button"
+          onClick={onToggle}
+          className="self-end text-[10px] font-bold text-text-muted hover:text-text-primary transition-colors mt-1 cursor-pointer"
+        >
+          {expanded ? 'View Less' : 'View More'}
+        </button>
+      </div>
+    );
+  };
+
+  const renderAgentSuggestions = (agentName: 'monitor' | 'analyzer' | 'planner') => {
+    const agentSuggestions = panelSuggestions.filter((s) => s.agent === agentName);
+    if (agentSuggestions.length === 0) return null;
+    const clusters = buildSuggestionClusters(agentSuggestions);
+
+    return (
+      <div className="flex flex-col gap-3 mt-2.5 shrink-0">
+        {clusters.map((cluster) => {
+          const isExpanded = !cluster.collapsible || expandedSuggestionClusterKeys.includes(cluster.key);
+          let iconNode = <Zap className="w-3.5 h-3.5 text-primary shrink-0" />;
+          let color = 'text-primary';
+
+          if (cluster.type === 'GAP') {
+            iconNode = <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />;
+            color = 'text-warning';
+          } else if (cluster.type === 'TASK') {
+            iconNode = <Zap className="w-3.5 h-3.5 text-success shrink-0" />;
+            color = 'text-success';
+          } else if (cluster.type === 'INSIGHT') {
+            iconNode = <Info className="w-3.5 h-3.5 text-text-muted shrink-0" />;
+            color = 'text-text-muted';
+          }
+
+          return (
+            <div
+              key={cluster.key}
+              className="bg-background/50 border border-border-subtle rounded-xl p-4 flex flex-col gap-3 transition-all min-w-0 shrink-0"
+            >
+              <div className="flex items-center justify-between gap-3 text-xs font-bold">
+                <div className="flex items-center gap-1.5">
+                  {iconNode}
+                  <span className={`tracking-wider uppercase ${color}`}>
+                    {cluster.type}
+                    {cluster.collapsible ? ` (${cluster.suggestions.length})` : ''}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {cluster.type === 'TASK' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigate(`/project/${projectId}/plan`);
+                      }}
+                      className="px-2.5 py-1 rounded-md border border-border bg-surface-raised text-[10px] font-bold text-text-primary hover:border-primary/40 hover:text-primary transition-colors"
+                    >
+                      Preview
+                    </button>
+                  )}
+                  {cluster.collapsible && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExpandedSuggestionClusterKeys((currentKeys) =>
+                          currentKeys.includes(cluster.key)
+                            ? currentKeys.filter((key) => key !== cluster.key)
+                            : [...currentKeys, cluster.key]
+                        );
+                      }}
+                      className="text-[10px] font-bold text-text-muted hover:text-text-primary"
+                    >
+                      {isExpanded ? 'Collapse' : 'Expand'}
+                    </button>
+                  )}
+                </div>
+              </div>
+              {isExpanded && (
+                <div className="flex flex-col gap-3">
+                  {cluster.suggestions.map((suggestion, index) => (
+                    <div
+                      key={suggestion.id}
+                      className={index > 0 ? 'border-t border-border-subtle pt-3' : ''}
+                    >
+                      <p className="text-xs text-text-secondary leading-relaxed select-text">
+                        {suggestion.content}
+                      </p>
+                      {suggestion.actionable && (
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handlePromoteSuggestion(suggestion.id);
+                            }}
+                            disabled={promoteAiActivityItemMutation.isPending}
+                            className="text-[10px] font-bold text-primary hover:text-primary-hover disabled:opacity-50"
+                          >
+                            {promoteAiActivityItemMutation.isPending ? 'Sending...' : 'Send to review'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   const renderedMessages = (projectMessages ?? []).map((message) => {
     const teammate = detail.teammates.find((member) => member.sessionId === message.sessionId);
@@ -773,207 +930,137 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
 
       {/* 3. AI Activity Panel (Right Column) */}
       <aside
-        className={`w-full lg:w-[28%] lg:min-w-[300px] lg:max-w-[380px] border-l border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface p-6 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'ai' ? 'flex absolute inset-0 z-10' : 'hidden'
+        className={`w-full lg:w-[28%] lg:min-w-[300px] lg:max-w-[380px] border-l border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface py-6 pl-6 pr-0 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'ai' ? 'flex absolute inset-0 z-10' : 'hidden'
           }`}
       >
-        <span className="section-label shrink-0">AI Activity</span>
-
-        {/* Agents statuses */}
-        <div className="flex flex-col gap-2 shrink-0">
-          <span className="text-xs font-bold text-text-primary tracking-wider uppercase">ORCAS</span>
-
-          <div className="relative flex items-center justify-between px-6 py-4 bg-background/50 rounded-xl border border-border-subtle">
-            {/* Connector Line */}
-            <div className="absolute left-[42px] right-[42px] h-0.5 bg-border-subtle top-1/2 -translate-y-1/2 z-0" />
-
-            {['MONITOR', 'ANALYZER', 'PLANNER', 'UPDATER'].map((key) => {
-              const status = agentStatus[key] || 'idle';
-              const agentInfo = agentDetails[key];
-              if (!agentInfo) return null;
-
-              const IconComponent = agentInfo.icon;
-              const isActive = status === 'active';
-              const isError = status === 'error';
-
-              let iconContainerClass = '';
-
-              if (isActive) {
-                iconContainerClass = 'border-primary text-primary bg-primary/15 shadow-sm shadow-primary-glow/20';
-              } else if (isError) {
-                iconContainerClass = 'border-error/50 text-error bg-error/10';
-              } else {
-                iconContainerClass = 'border-border-subtle text-text-muted bg-surface-raised/50';
-              }
-
-              return (
-                <div key={key} className="relative z-10 flex flex-col items-center group cursor-help" title={`${agentInfo.name}: ${status}`}>
-                  {/* Tooltip */}
-                  <div className="absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-30 flex flex-col items-center">
-                    <div className="bg-surface-raised border border-border-subtle text-text-primary text-[10px] px-2.5 py-1 rounded-md shadow-lg font-medium tracking-wide whitespace-nowrap">
-                      <span className="font-semibold text-text-primary">{agentInfo.name}</span>
-                      <span className="mx-1 text-text-muted">•</span>
-                      <span className={`uppercase text-[9px] font-bold ${isActive ? 'text-primary animate-pulse' : isError ? 'text-error' : 'text-text-muted'
-                        }`}>{status}</span>
-                    </div>
-                    <div className="w-1.5 h-1.5 bg-surface-raised border-r border-b border-border-subtle transform rotate-45 -mt-1" />
-                  </div>
-
-                  {/* Icon Container with solid backing to mask the line */}
-                  <div className="relative transition-transform duration-300 hover:scale-110">
-                    {/* Solid Mask */}
-                    <div className="absolute inset-0 rounded-full bg-surface -z-10" />
-
-                    {/* Pulsing ring for active state */}
-                    {isActive && (
-                      <div className="absolute -inset-1 rounded-full bg-primary/25 animate-ping -z-10" />
-                    )}
-
-                    <div className={`h-9 w-9 rounded-full flex items-center justify-center border transition-all duration-300 ${iconContainerClass}`}>
-                      <IconComponent
-                        className={`w-4.5 h-4.5 ${isActive && key !== 'UPDATER' ? 'animate-pulse' : ''
-                          } ${isActive && key === 'UPDATER' ? 'animate-spin' : ''
-                          }`}
-                        style={isActive && key === 'UPDATER' ? { animationDuration: '3s' } : undefined}
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {recentOrcaActivity && (
-            <div className="px-1 text-[11px] text-text-muted leading-relaxed select-text">
-              {recentOrcaActivity}
-            </div>
+        <div className="flex items-center justify-between gap-3 shrink-0 pr-6">
+          <span className="section-label">AI Activity</span>
+          {actionableSuggestionCount > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                void handlePromoteAllSuggestions();
+              }}
+              disabled={promoteAllAiActivityMutation.isPending}
+              className="text-[10px] font-bold text-primary hover:text-primary-hover disabled:opacity-50"
+            >
+              {promoteAllAiActivityMutation.isPending ? 'Sending...' : `Send All (${actionableSuggestionCount})`}
+            </button>
           )}
         </div>
 
-        <div className="border-t border-border-subtle pt-4 flex flex-col gap-3 flex-1 min-h-0 overflow-hidden">
-          <div className="flex items-center justify-between gap-3 shrink-0">
-            <span className="text-xs font-bold text-text-primary tracking-wider uppercase">SUGGESTIONS</span>
-            {actionableSuggestionCount > 1 && (
-              <button
-                type="button"
-                onClick={() => {
-                  void handlePromoteAllSuggestions();
-                }}
-                disabled={promoteAllAiActivityMutation.isPending}
-                className="text-[10px] font-bold text-primary hover:text-primary-hover disabled:opacity-50"
-              >
-                {promoteAllAiActivityMutation.isPending ? 'Sending...' : `Send All (${actionableSuggestionCount})`}
-              </button>
-            )}
-          </div>
-
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-3 pr-1 pb-6">
-            {suggestionClusters.map((cluster) => {
-              const isInsight = cluster.type === 'INSIGHT';
-              const isExpanded = !cluster.collapsible || expandedSuggestionClusterKeys.includes(cluster.key);
-              let iconNode = <Zap className="w-3.5 h-3.5 text-primary shrink-0" />;
-              let color = 'text-primary';
-
-              if (cluster.type === 'GAP') {
-                iconNode = <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />;
-                color = 'text-warning';
-              } else if (cluster.type === 'TASK') {
-                iconNode = <Zap className="w-3.5 h-3.5 text-success shrink-0" />;
-                color = 'text-success';
-              } else if (cluster.type === 'INSIGHT') {
-                iconNode = <Info className="w-3.5 h-3.5 text-text-muted shrink-0" />;
-                color = 'text-text-muted';
-              }
-
-              if (isInsight) {
-                return (
-                  <div
-                    key={cluster.key}
-                    className="min-w-0 shrink-0 text-xs text-text-secondary leading-relaxed"
-                  >
-                    <p className="select-text">
-                      {cluster.suggestions[0]?.content}
-                    </p>
-                  </div>
-                );
-              }
-
-              return (
-                <div
-                  key={cluster.key}
-                  className="bg-background/50 border border-border-subtle rounded-xl p-4 flex flex-col gap-3 transition-all min-w-0 shrink-0"
-                >
-                  <div className="flex items-center justify-between gap-3 text-xs font-bold">
-                    <div className="flex items-center gap-1.5">
-                      {iconNode}
-                      <span className={`tracking-wider uppercase ${color}`}>
-                        {cluster.type}
-                        {cluster.collapsible ? ` (${cluster.suggestions.length})` : ''}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {cluster.type === 'TASK' && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void navigate(`/project/${projectId}/plan`);
-                          }}
-                          className="px-2.5 py-1 rounded-md border border-border bg-surface-raised text-[10px] font-bold text-text-primary hover:border-primary/40 hover:text-primary transition-colors"
-                        >
-                          Preview
-                        </button>
-                      )}
-                      {cluster.collapsible && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setExpandedSuggestionClusterKeys((currentKeys) =>
-                              currentKeys.includes(cluster.key)
-                                ? currentKeys.filter((key) => key !== cluster.key)
-                                : [...currentKeys, cluster.key]
-                            );
-                          }}
-                          className="text-[10px] font-bold text-text-muted hover:text-text-primary"
-                        >
-                          {isExpanded ? 'Collapse' : 'Expand'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  {isExpanded && (
-                    <div className="flex flex-col gap-3">
-                      {cluster.suggestions.map((suggestion, index) => (
-                        <div
-                          key={suggestion.id}
-                          className={index > 0 ? 'border-t border-border-subtle pt-3' : ''}
-                        >
-                          <p className="text-xs text-text-secondary leading-relaxed select-text">
-                            {suggestion.content}
-                          </p>
-                          {suggestion.actionable && (
-                            <div className="flex items-center gap-2 mt-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void handlePromoteSuggestion(suggestion.id);
-                                }}
-                                disabled={promoteAiActivityItemMutation.isPending}
-                                className="text-[10px] font-bold text-primary hover:text-primary-hover disabled:opacity-50"
-                              >
-                                {promoteAiActivityItemMutation.isPending ? 'Sending...' : 'Send to review'}
-                              </button>
-                            </div>
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-6 pr-6 pb-6">
+          {showAiActivity ? (
+            <>
+              {/* ORCAS status log */}
+              {(showMonitor || showAnalyzer || showPlanner) && (
+                <div className="flex flex-col gap-5 shrink-0 py-2">
+                  {/* 1. Monitor Orca */}
+                  {showMonitor && (
+                    <div className="flex flex-col gap-1.5">
+                      {monitorStatus === 'active' ? (
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-primary animate-pulse">
+                          <span>Monitor orca executing conversation checks</span>
+                          <Eye className="w-3.5 h-3.5 animate-bounce text-text-muted" />
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium mt-0.5">
+                          {monitorStatus === 'error' ? (
+                            <>
+                              <AlertCircle className="w-3 h-3 text-error shrink-0" />
+                              <span className="text-error">Checking failed</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-3 h-3 text-success shrink-0" />
+                              <span className="text-text-muted">Checking completed</span>
+                            </>
                           )}
                         </div>
-                      ))}
+                      )}
+                      {monitorStatus === 'idle' && monitorResponse && (
+                        <CollapsibleText
+                          text={monitorResponse}
+                          expanded={monitorResponseExpanded}
+                          onToggle={() => setMonitorResponseExpanded(!monitorResponseExpanded)}
+                        />
+                      )}
+                    </div>
+                  )}
+ 
+                  {/* 2. Analyzer Orca */}
+                  {showAnalyzer && (
+                    <div className="flex flex-col gap-1.5">
+                      {analyzerStatus === 'active' ? (
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-primary animate-pulse">
+                          <span>Analyzer orca executing message analysis</span>
+                          <Compass className="w-3.5 h-3.5 animate-spin text-text-muted" style={{ animationDuration: '3s' }} />
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium mt-0.5">
+                          {analyzerStatus === 'error' ? (
+                            <>
+                              <AlertCircle className="w-3 h-3 text-error shrink-0" />
+                              <span className="text-error">Analysis failed</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-3 h-3 text-success shrink-0" />
+                              <span className="text-text-muted">Analysis completed</span>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      {analyzerStatus === 'idle' && analyzerResponse && (
+                        <CollapsibleText
+                          text={analyzerResponse}
+                          expanded={analyzerResponseExpanded}
+                          onToggle={() => setAnalyzerResponseExpanded(!analyzerResponseExpanded)}
+                        />
+                      )}
+                      {analyzerStatus === 'idle' && renderAgentSuggestions('analyzer')}
+                    </div>
+                  )}
+ 
+                  {/* 3. Planner Orca */}
+                  {showPlanner && (
+                    <div className="flex flex-col gap-1.5">
+                      {plannerStatus === 'active' ? (
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-primary animate-pulse">
+                          <span>Planner orca executing planning</span>
+                          <Calendar className="w-3.5 h-3.5 animate-bounce text-text-muted" />
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium mt-0.5">
+                          {plannerStatus === 'error' ? (
+                            <>
+                              <AlertCircle className="w-3 h-3 text-error shrink-0" />
+                              <span className="text-error">Planning failed</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-3 h-3 text-success shrink-0" />
+                              <span className="text-text-muted">Planning completed</span>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      {plannerStatus === 'idle' && plannerResponse && (
+                        <CollapsibleText
+                          text={plannerResponse}
+                          expanded={plannerResponseExpanded}
+                          onToggle={() => setPlannerResponseExpanded(!plannerResponseExpanded)}
+                        />
+                      )}
+                      {plannerStatus === 'idle' && renderAgentSuggestions('planner')}
                     </div>
                   )}
                 </div>
-              );
-            })}
-
-            {suggestionClusters.length === 0 && (
-              <div className="text-xs text-text-muted italic py-4">No active warnings or suggestions.</div>
-            )}
-          </div>
+              )}
+            </>
+          ) : (
+            <div className="text-xs text-text-muted italic py-4">No active warnings or suggestions.</div>
+          )}
         </div>
       </aside>
 

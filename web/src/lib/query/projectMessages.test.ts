@@ -12,7 +12,7 @@ describe('projectMessages helpers', () => {
   it('builds an optimistic project message for the current session', () => {
     const now = new Date('2026-06-17T10:00:00Z');
 
-    const message = buildOptimisticProjectMessage('proj_1', 'alpha', 'Ship it', now);
+    const message = buildOptimisticProjectMessage('proj_1', 'alpha', 'Ship it', [], now);
 
     expect(message).toMatchObject({
       projectId: 'proj_1',
@@ -30,6 +30,7 @@ describe('projectMessages helpers', () => {
       projectId: 'proj_1',
       sessionId: 'alpha',
       content: 'Ship it',
+      attachments: [],
       createdAt: '2026-06-17T10:00:00.000Z',
       isOptimistic: true,
     };
@@ -38,6 +39,7 @@ describe('projectMessages helpers', () => {
       projectId: 'proj_1',
       sessionId: 'alpha',
       content: 'Ship it',
+      attachments: [],
       createdAt: '2026-06-17T10:00:01.000Z',
     };
 
@@ -52,6 +54,7 @@ describe('projectMessages helpers', () => {
       projectId: 'proj_1',
       sessionId: 'alpha',
       content: 'Ship it',
+      attachments: [],
       createdAt: '2026-06-17T10:00:00.000Z',
       isOptimistic: true,
     };
@@ -60,6 +63,7 @@ describe('projectMessages helpers', () => {
       projectId: 'proj_1',
       sessionId: 'alpha',
       content: 'Ship it',
+      attachments: [],
       createdAt: '2026-06-17T10:00:01.000Z',
     };
 
@@ -74,6 +78,7 @@ describe('projectMessages helpers', () => {
       projectId: 'proj_1',
       sessionId: 'alpha',
       content: 'Ship it',
+      attachments: [],
       createdAt: '2026-06-17T10:00:01.000Z',
     };
 
@@ -126,7 +131,7 @@ describe('projectMessages helpers', () => {
     expect(subscribe).toHaveBeenCalledTimes(1);
     expect(realtimeCallback).not.toBeNull();
 
-    realtimeCallback?.({
+    (realtimeCallback as any)?.({
       new: {
         id: 'msg_1',
         project_id: 'proj_1',
@@ -145,6 +150,7 @@ describe('projectMessages helpers', () => {
       projectId: 'proj_1',
       sessionId: 'alpha',
       content: 'Ship it',
+      attachments: [],
       createdAt: '2026-06-17T10:00:00.000Z',
       isOptimistic: true,
     };
@@ -155,6 +161,7 @@ describe('projectMessages helpers', () => {
         projectId: 'proj_1',
         sessionId: 'alpha',
         content: 'Ship it',
+        attachments: [],
         createdAt: '2026-06-17T10:00:01.000Z',
       },
     ]);

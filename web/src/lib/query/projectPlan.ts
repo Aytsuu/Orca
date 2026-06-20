@@ -992,7 +992,7 @@ export function useRevertProjectPlan(projectId: string) {
 export function useCreateProjectPhase(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (variables: { title: string; goal: string; description: string; timeframe: string }) =>
+    mutationFn: (variables: { title: string; goal: string; description: string; timeframe: string; assignedMembers: PhaseAssignedMember[] }) =>
       defaultProjectRepository.createProjectPhase(projectId, variables.title, variables.goal, variables.description, variables.timeframe, variables.assignedMembers, sessionId.get()),
     onMutate: (variables) => {
       const optimisticPhase = buildOptimisticPhase(variables.title, variables.description, variables.goal, variables.timeframe, variables.assignedMembers);
@@ -1010,7 +1010,7 @@ export function useCreateProjectPhase(projectId: string) {
 export function useUpdateProjectPhase(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (variables: { phaseId: string; title: string; goal: string; description: string; timeframe: string }) =>
+    mutationFn: (variables: { phaseId: string; title: string; goal: string; description: string; timeframe: string; assignedMembers: PhaseAssignedMember[] }) =>
       defaultProjectRepository.updateProjectPhase(projectId, variables.phaseId, variables.title, variables.goal, variables.description, variables.timeframe, variables.assignedMembers, sessionId.get()),
     onMutate: (variables) =>
       prepareOptimisticPlanUpdate(queryClient, projectId, (plan) => applyPhasePatch(plan, variables)),

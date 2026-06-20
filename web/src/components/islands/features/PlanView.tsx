@@ -1583,11 +1583,10 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                                         onClick={() => {
                                           void togglePhaseAssignedMember(phase, member);
                                         }}
-                                        className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors ${
-                                          isAssigned
+                                        className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors ${isAssigned
                                             ? 'border-primary/40 bg-primary/10 text-text-primary'
                                             : 'border-border-subtle bg-background text-text-secondary hover:border-border hover:text-text-primary'
-                                        }`}
+                                          }`}
                                       >
                                         <span className="flex items-center gap-2">
                                           <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-surface-raised text-[11px] font-bold text-text-primary">

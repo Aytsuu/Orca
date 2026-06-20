@@ -22,7 +22,8 @@ import {
   Loader2,
   Compass,
   Calendar,
-  RefreshCw
+  RefreshCw,
+  Reply
 } from 'lucide-react';
 import {
   addToast,
@@ -106,6 +107,11 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const currentProject = projectList.find((p) => p.id === projectId);
 
   const [messageText, setMessageText] = useState('');
+  const [replyToMessage, setReplyToMessage] = useState<{
+    id: string;
+    senderName: string;
+    content: string;
+  } | null>(null);
   const [mobileTab, setMobileTab] = useState<'files' | 'chat' | 'ai'>('chat');
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [expandedSuggestionClusterKeys, setExpandedSuggestionClusterKeys] = useState<string[]>([]);
@@ -124,6 +130,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const [files, setFiles] = useState<Array<{
     id: string;
     name: string;
@@ -240,6 +247,16 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     if (!content && pendingChatFiles.length === 0) return;
     setMessageText('');
 
+    let finalContent = content;
+    if (replyToMessage) {
+      const excerpt = replyToMessage.content.replace(/\*/g, '').split('\n')[0] || 'Shared attachment(s)';
+      const truncatedExcerpt = excerpt.length > 60 ? excerpt.slice(0, 57) + '...' : excerpt;
+      finalContent = content
+        ? `> **Replying to @${replyToMessage.senderName}**: *${truncatedExcerpt}*\n\n${content}`
+        : `> **Replying to @${replyToMessage.senderName}**: *${truncatedExcerpt}*`;
+      setReplyToMessage(null);
+    }
+
     try {
       const uploadedAttachments = await Promise.all(
         pendingChatFiles.map((file) =>
@@ -250,7 +267,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
         )
       );
       await sendMessageMutation.mutateAsync({
-        content,
+        content: finalContent,
         attachments: uploadedAttachments.map((file) => ({
           uploadedFileId: file.id,
           filename: file.filename,
@@ -262,6 +279,10 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
       setPendingChatFiles([]);
     } catch (sendError) {
       setMessageText(content);
+      if (replyToMessage) {
+        // Restore reply state if mutation failed
+        setReplyToMessage(replyToMessage);
+      }
       if (pendingChatFiles.length > 0) {
         setPendingChatFiles([...pendingChatFiles]);
       }
@@ -537,57 +558,92 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
                     <span className="text-[10px] text-text-muted font-medium">{msg.timestamp}</span>
                   </div>
 
-                  {/* Message Bubble Container - Only for Text */}
-                  {renderMessageText(msg.content, msg.attachments) && (
-                    <div
-                      className={`rounded-2xl py-2 px-4 text-sm max-w-[85%] select-text whitespace-pre-wrap leading-relaxed ${isUser
-                        ? 'bg-primary-muted border border-primary/10 text-text-primary rounded-tr-none'
-                        : 'bg-surface-raised border border-border-subtle text-text-secondary rounded-tl-none'
-                        }`}
-                    >
-                      {renderMessageText(msg.content, msg.attachments)}
-                    </div>
-                  )}
+                  <div className="relative group/msg-content max-w-[85%] w-fit flex flex-col gap-1.5">
+                    {/* Message Bubble Container - Only for Text */}
+                    {renderMessageText(msg.content, msg.attachments) && (
+                      <div
+                        className={`rounded-2xl py-2 px-4 text-sm select-text leading-relaxed ${isUser
+                          ? 'bg-primary-muted border border-primary/10 text-text-primary rounded-tr-none'
+                          : 'bg-surface-raised border border-border-subtle text-text-secondary rounded-tl-none'
+                          }`}
+                      >
+                        {renderBubbleText(msg.content, msg.attachments)}
+                      </div>
+                    )}
 
-                  {/* Attachments rendered outside of the text bubble container */}
-                  {msg.attachments.length > 0 && (
-                    <div className="flex flex-col gap-2 w-full max-w-[85%] sm:max-w-[360px]">
-                      {msg.attachments.map((attachment) => {
-                        const isInSources = sourceFileIds.has(attachment.uploadedFileId);
-                        return (
-                          <div
-                            key={attachment.uploadedFileId}
-                            className="rounded-xl border border-border-subtle bg-background/60 px-3 py-3 flex flex-col gap-3"
-                          >
-                            <ChatAttachmentPreview
-                              projectId={projectId}
-                              attachment={attachment}
-                              onOpenMedia={(media) =>
-                                setActiveMediaAttachment({
-                                  ...media,
-                                  uploadedFileId: attachment.uploadedFileId,
-                                  sizeBytes: attachment.sizeBytes,
-                                  isInSources,
-                                  canRemove: canManageAnyFile || msg.isCurrentUser,
-                                })
-                              }
-                            />
-                            <div className="min-w-0 flex items-center gap-2">
-                              <FileText className="w-4 h-4 text-text-muted shrink-0" />
-                              <div className="min-w-0">
-                                <div className="text-xs font-semibold text-text-primary truncate">
-                                  {attachment.filename}
-                                </div>
-                                <div className="text-[11px] text-text-muted">
-                                  {attachment.mimeType.split('/').pop()?.toUpperCase() || 'FILE'} / {formatFileSize(attachment.sizeBytes)}
+                    {/* Attachments rendered outside of the text bubble container */}
+                    {msg.attachments.length > 0 && (
+                      <div className="flex flex-col gap-2 w-full sm:max-w-[360px]">
+                        {msg.attachments.map((attachment) => {
+                          const isInSources = sourceFileIds.has(attachment.uploadedFileId);
+                          return (
+                            <div
+                              key={attachment.uploadedFileId}
+                              className="rounded-xl border border-border-subtle bg-background/60 px-3 py-3 flex flex-col gap-3"
+                            >
+                              <ChatAttachmentPreview
+                                projectId={projectId}
+                                attachment={attachment}
+                                onOpenMedia={(media) =>
+                                  setActiveMediaAttachment({
+                                    ...media,
+                                    uploadedFileId: attachment.uploadedFileId,
+                                    sizeBytes: attachment.sizeBytes,
+                                    isInSources,
+                                    canRemove: canManageAnyFile || msg.isCurrentUser,
+                                  })
+                                }
+                              />
+                              <div className="min-w-0 flex items-center gap-2">
+                                <FileText className="w-4 h-4 text-text-muted shrink-0" />
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-text-primary truncate">
+                                    {attachment.filename}
+                                  </div>
+                                  <div className="text-[11px] text-text-muted">
+                                    {attachment.mimeType.split('/').pop()?.toUpperCase() || 'FILE'} / {formatFileSize(attachment.sizeBytes)}
+                                  </div>
                                 </div>
                               </div>
                             </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Reply Action Button */}
+                    <div
+                      className={`absolute -top-3 opacity-0 group-hover/msg-content:opacity-100 transition-opacity duration-150 z-20 ${
+                        isUser ? 'left-3' : 'right-3'
+                      }`}
+                    >
+                      <div className="relative group/reply-btn">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReplyToMessage({
+                              id: msg.id,
+                              senderName: msg.senderName,
+                              content: renderMessageText(msg.content, msg.attachments),
+                            });
+                            chatInputRef.current?.focus();
+                          }}
+                          className="flex h-7 w-7 items-center justify-center rounded-full border border-border-subtle bg-surface shadow-sm hover:bg-surface-raised hover:text-primary hover:border-primary/30 hover:scale-110 active:scale-95 transition-all duration-150 cursor-pointer"
+                          aria-label="Reply to this message"
+                        >
+                          <Reply className="w-3.5 h-3.5" />
+                        </button>
+                        
+                        {/* Tooltip */}
+                        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 opacity-0 group-hover/reply-btn:opacity-100 transition-opacity duration-200 pointer-events-none z-30 flex flex-col items-center">
+                          <div className="bg-surface-raised border border-border-subtle text-text-primary text-[10px] px-2.5 py-1 rounded-md shadow-lg font-medium tracking-wide whitespace-nowrap">
+                            Reply to this message
                           </div>
-                        );
-                      })}
+                          <div className="w-1.5 h-1.5 bg-surface-raised border-r border-b border-border-subtle transform rotate-45 -mt-1" />
+                        </div>
+                      </div>
                     </div>
-                  )}
+                  </div>
 
                   {isUser && (msg.isOptimistic || msg.id === lastUserMessageId) && (
                     <div className="mt-0.5 flex justify-end items-center text-text-muted select-none">
@@ -616,6 +672,28 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
           onSubmit={handleSend}
           className="p-6 border-t border-border-subtle bg-surface flex flex-col shrink-0"
         >
+          {replyToMessage && (
+            <div className="mb-3 flex items-center justify-between rounded-lg bg-surface-raised border border-border-subtle px-4 py-2 text-xs text-text-secondary animate-fade-in select-none">
+              <div className="flex flex-col gap-0.5 min-w-0">
+                <div className="flex items-center gap-1.5 font-semibold text-text-primary">
+                  <Reply className="w-3 h-3 text-primary shrink-0" />
+                  <span>Replying to {replyToMessage.senderName}</span>
+                </div>
+                <div className="truncate text-text-muted select-text">
+                  {replyToMessage.content || 'Shared attachment(s)'}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReplyToMessage(null)}
+                className="text-text-muted hover:text-text-primary p-1 rounded-full hover:bg-border transition-colors shrink-0 ml-4 cursor-pointer"
+                aria-label="Cancel reply"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {pendingChatFiles.length > 0 && (
             <div className="mb-3 flex flex-wrap gap-2">
               {pendingChatFiles.map((file) => (
@@ -651,6 +729,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
             className="flex items-center gap-3 bg-transparent border border-border rounded-xl pr-3 pl-5 py-2 w-full focus-within:border-text-muted transition-colors"
           >
             <textarea
+              ref={chatInputRef}
               placeholder="Type your message here..."
               value={messageText}
               onChange={(e) => setMessageText(e.target.value)}
@@ -1027,6 +1106,31 @@ function renderMessageText(
   }
 
   return content;
+}
+
+function renderBubbleText(content: string, attachments: any[]) {
+  const rawText = renderMessageText(content, attachments);
+  if (!rawText) return null;
+
+  const replyRegex = /^>\s*\*\*Replying to @([^\*\*]+)\*\*:\s*\*([^*]+)\*(?:\n\n([\s\S]*))?$/;
+  const match = rawText.match(replyRegex);
+
+  if (match) {
+    const replyToUser = match[1];
+    const replyExcerpt = match[2];
+    const body = match[3] || '';
+
+    return (
+      <div className="flex flex-col gap-1.5">
+        <div className="border-l-2 border-primary/40 pl-2.5 py-0.5 text-xs text-text-muted italic bg-black/10 dark:bg-white/5 rounded-r max-w-full truncate select-none">
+          <span className="font-semibold text-text-secondary">Replying to @{replyToUser}</span>: {replyExcerpt}
+        </div>
+        {body && <div className="whitespace-pre-wrap">{body}</div>}
+      </div>
+    );
+  }
+
+  return <div className="whitespace-pre-wrap">{rawText}</div>;
 }
 
 type ChatAttachmentDisplay = {

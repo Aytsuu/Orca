@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from src.tasks import worker
 
 
@@ -46,3 +48,25 @@ def test_build_worker_class_applies_selected_death_penalty() -> None:
     assert configured_class is not base_class
     assert issubclass(configured_class, base_class)
     assert configured_class.death_penalty_class is death_penalty_class
+
+
+def test_transcribe_source_file_job_runs_async_transcription(monkeypatch) -> None:
+    recorded: dict[str, str] = {}
+    real_asyncio_run = asyncio.run
+
+    async def fake_run_transcription(uploaded_file_id: str, project_id: str) -> None:
+        recorded["uploaded_file_id"] = uploaded_file_id
+        recorded["project_id"] = project_id
+
+    def fake_asyncio_run(coroutine):
+        return real_asyncio_run(coroutine)
+
+    monkeypatch.setattr(worker, "_run_transcription", fake_run_transcription)
+    monkeypatch.setattr(worker.asyncio, "run", fake_asyncio_run)
+
+    worker.transcribe_source_file_job("file-123", "project-456")
+
+    assert recorded == {
+        "uploaded_file_id": "file-123",
+        "project_id": "project-456",
+    }

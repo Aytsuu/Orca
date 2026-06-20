@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any
 
 from src.agents.base import AgentStep, StepResult
@@ -83,7 +82,11 @@ def _build_reasoning_context(
             "new_messages": _serialize_prompt_messages(context.new_messages),
             "memory": _strip_non_citation_ids(context.memory),
             "summaries": _strip_non_citation_ids(context.summaries),
-            "files": _strip_non_citation_ids(context.files),
+            "transcript_chunks": [
+                str(chunk.get("chunk_text") or "").strip()
+                for chunk in context.transcript_chunks
+                if str(chunk.get("chunk_text") or "").strip()
+            ],
             "warnings": list(context.warnings),
         }
     }
@@ -125,7 +128,7 @@ class MonitorStep(AgentStep):
     ) -> StepResult:
         del prior_results
         output = await self._llm_client.generate_json(
-            MONITOR_PROMPT.format(context=asdict(context)),
+            MONITOR_PROMPT.format(context=_build_reasoning_context(context)["context"]),
             MonitorOutput,
             model=self._settings.llm_fast_model,
             temperature=0.0,

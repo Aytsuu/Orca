@@ -8,6 +8,8 @@ from supabase import AsyncClient
 
 from src.agents.queue import QueueProducer, get_queue_producer
 from src.agents.service import trigger_agents
+from src.chat.delete_service import delete_uploaded_file
+from src.chat.relevance import classify_message_for_agent_trigger
 from src.chat.schemas import (
     FileAccessUrlOut,
     MessageCreate,
@@ -17,11 +19,9 @@ from src.chat.schemas import (
     UploadUrlOut,
     UploadUrlRequest,
 )
-from src.chat.relevance import classify_message_for_agent_trigger
-from src.chat.delete_service import delete_uploaded_file
 from src.chat.service import (
-    create_signed_file_access_url,
     create_message,
+    create_signed_file_access_url,
     create_signed_upload,
     create_uploaded_file,
     list_messages,
@@ -31,6 +31,7 @@ from src.chat.service import (
 from src.models import DataEnvelope
 from src.projects.dependencies import get_project_context
 from src.supabase_client import get_supabase_admin
+from src.transcription.queue import TranscriptQueueProducer, get_transcript_queue_producer
 
 router = APIRouter(tags=["chat"])
 
@@ -109,7 +110,10 @@ async def create_uploaded_file_endpoint(
     payload: UploadedFileCreate,
     project_context: Annotated[dict, Depends(get_project_context)],
     supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
-    queue_producer: Annotated[QueueProducer, Depends(get_queue_producer)],
+    transcript_producer: Annotated[
+        TranscriptQueueProducer,
+        Depends(get_transcript_queue_producer),
+    ],
 ) -> DataEnvelope[UploadedFileOut]:
     uploaded_file = await create_uploaded_file(
         supabase,
@@ -121,13 +125,10 @@ async def create_uploaded_file_endpoint(
         size_bytes=payload.size_bytes,
         purpose=payload.purpose,
     )
-    if uploaded_file["is_ai_context"]:
-        await trigger_agents(
-            supabase,
-            queue_producer,
+    if uploaded_file["is_ai_context"] and uploaded_file["purpose"] == "source":
+        transcript_producer.enqueue_transcription(
+            uploaded_file_id=uploaded_file["id"],
             project_id=str(project_id),
-            triggered_by=project_context["session_id"],
-            file_ids=[uploaded_file["id"]],
         )
     return DataEnvelope(data=UploadedFileOut.model_validate(uploaded_file))
 
@@ -171,12 +172,21 @@ async def promote_uploaded_file_endpoint(
     uploaded_file_id: UUID,
     _: Annotated[dict, Depends(get_project_context)],
     supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
+    transcript_producer: Annotated[
+        TranscriptQueueProducer,
+        Depends(get_transcript_queue_producer),
+    ],
 ) -> DataEnvelope[UploadedFileOut]:
-    uploaded_file, _promoted = await promote_uploaded_file_to_ai_context(
+    uploaded_file, promoted = await promote_uploaded_file_to_ai_context(
         supabase,
         project_id=str(project_id),
         uploaded_file_id=str(uploaded_file_id),
     )
+    if promoted and uploaded_file["is_ai_context"] and uploaded_file["purpose"] == "source":
+        transcript_producer.enqueue_transcription(
+            uploaded_file_id=uploaded_file["id"],
+            project_id=str(project_id),
+        )
     return DataEnvelope(data=UploadedFileOut.model_validate(uploaded_file))
 
 

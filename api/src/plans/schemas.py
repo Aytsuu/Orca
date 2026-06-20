@@ -14,6 +14,7 @@ ChangeSection = Literal[
     "title",
     "description",
     "objectives",
+    "stakeholders",
     "technology_stack",
     "tasks",
     "phases",
@@ -94,6 +95,13 @@ class TechnologyStackItemOut(ApiModel):
     value: str = ""
 
 
+class StakeholderOut(ApiModel):
+    user_id: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=200)
+    role: str = Field(min_length=1, max_length=200)
+    initials: str = Field(min_length=1, max_length=10)
+
+
 class StructuredPlanOut(ApiModel):
     id: UUID
     project_id: UUID
@@ -103,6 +111,7 @@ class StructuredPlanOut(ApiModel):
     title: str = ""
     description: str = ""
     objectives: list[str] = Field(default_factory=list)
+    stakeholders: list[StakeholderOut] = Field(default_factory=list)
     technology_stack: list[TechnologyStackItemOut] = Field(default_factory=list)
     phases: list[PhaseOut] = Field(default_factory=list)
     global_risks: list[RiskOut] = Field(default_factory=list)
@@ -136,7 +145,9 @@ class ProposedChangeOut(ApiModel):
         content = normalized.get("content")
 
         if not normalized.get("title"):
-            normalized["title"] = cls._derive_title(content, normalized.get("section"), normalized.get("action"))
+            normalized["title"] = cls._derive_title(
+                content, normalized.get("section"), normalized.get("action")
+            )
 
         if not normalized.get("detail"):
             normalized["detail"] = normalized.get("justification") or ""

@@ -214,13 +214,33 @@ class FakeQueueProducer:
         return f"job:{run_id}"
 
 
+class FakeTranscriptQueueProducer:
+    def __init__(self) -> None:
+        self.enqueued_transcriptions: list[dict[str, str]] = []
+
+    def enqueue_transcription(self, uploaded_file_id: str, project_id: str) -> str:
+        self.enqueued_transcriptions.append(
+            {"uploaded_file_id": uploaded_file_id, "project_id": project_id}
+        )
+        return f"transcript:{uploaded_file_id}"
+
+
 @pytest.fixture
 def fake_queue_producer() -> FakeQueueProducer:
     return FakeQueueProducer()
 
 
+@pytest.fixture
+def fake_transcript_queue_producer() -> FakeTranscriptQueueProducer:
+    return FakeTranscriptQueueProducer()
+
+
 @pytest.fixture(autouse=True)
-def override_dependencies(fake_supabase: FakeSupabase, fake_queue_producer: FakeQueueProducer):
+def override_dependencies(
+    fake_supabase: FakeSupabase,
+    fake_queue_producer: FakeQueueProducer,
+    fake_transcript_queue_producer: FakeTranscriptQueueProducer,
+):
     async def _get_supabase_admin() -> FakeSupabase:
         return fake_supabase
 
@@ -229,6 +249,14 @@ def override_dependencies(fake_supabase: FakeSupabase, fake_queue_producer: Fake
 
     app.dependency_overrides[get_supabase_admin] = _get_supabase_admin
     app.dependency_overrides[get_queue_producer] = _get_queue_producer
+    try:
+        from src.transcription.queue import get_transcript_queue_producer
+    except ImportError:
+        get_transcript_queue_producer = None
+    if get_transcript_queue_producer is not None:
+        app.dependency_overrides[get_transcript_queue_producer] = (
+            lambda: fake_transcript_queue_producer
+        )
     yield
     app.dependency_overrides.clear()
 
@@ -525,6 +553,7 @@ async def test_finalize_and_list_uploaded_files(
     client: AsyncClient,
     fake_supabase: FakeSupabase,
     fake_queue_producer: FakeQueueProducer,
+    fake_transcript_queue_producer: FakeTranscriptQueueProducer,
 ):
     project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
     fake_supabase.insert_row(
@@ -563,9 +592,11 @@ async def test_finalize_and_list_uploaded_files(
     assert uploaded["size_bytes"] == 2048
     assert uploaded["purpose"] == "source"
     assert uploaded["is_ai_context"] is True
-    assert len(fake_supabase.tables["agent_run"]) == 1
-    assert fake_supabase.tables["agent_run"][0]["new_file_ids"] == [uploaded["id"]]
-    assert fake_queue_producer.enqueued_run_ids == [fake_supabase.tables["agent_run"][0]["id"]]
+    assert fake_supabase.tables["agent_run"] == []
+    assert fake_queue_producer.enqueued_run_ids == []
+    assert fake_transcript_queue_producer.enqueued_transcriptions == [
+        {"uploaded_file_id": uploaded["id"], "project_id": project["id"]}
+    ]
 
     files_response = await client.get(
         f"/api/v1/projects/{project['id']}/files",
@@ -611,6 +642,7 @@ async def test_chat_file_upload_does_not_enqueue_and_can_be_added_to_sources(
     client: AsyncClient,
     fake_supabase: FakeSupabase,
     fake_queue_producer: FakeQueueProducer,
+    fake_transcript_queue_producer: FakeTranscriptQueueProducer,
 ):
     project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
     fake_supabase.insert_row(
@@ -642,6 +674,7 @@ async def test_chat_file_upload_does_not_enqueue_and_can_be_added_to_sources(
     assert uploaded["is_ai_context"] is False
     assert fake_supabase.tables["agent_run"] == []
     assert fake_queue_producer.enqueued_run_ids == []
+    assert fake_transcript_queue_producer.enqueued_transcriptions == []
 
     files_response = await client.get(
         f"/api/v1/projects/{project['id']}/files",
@@ -660,6 +693,9 @@ async def test_chat_file_upload_does_not_enqueue_and_can_be_added_to_sources(
     assert promoted["is_ai_context"] is True
     assert fake_queue_producer.enqueued_run_ids == []
     assert fake_supabase.tables["agent_run"] == []
+    assert fake_transcript_queue_producer.enqueued_transcriptions == [
+        {"uploaded_file_id": uploaded["id"], "project_id": project["id"]}
+    ]
 
 
 @pytest.mark.asyncio
@@ -667,6 +703,7 @@ async def test_attachment_only_chat_message_is_persisted_without_triggering_agen
     client: AsyncClient,
     fake_supabase: FakeSupabase,
     fake_queue_producer: FakeQueueProducer,
+    fake_transcript_queue_producer: FakeTranscriptQueueProducer,
 ):
     project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
     fake_supabase.insert_row(
@@ -724,6 +761,7 @@ async def test_attachment_only_chat_message_is_persisted_without_triggering_agen
     ]
     assert fake_supabase.tables["agent_run"] == []
     assert fake_queue_producer.enqueued_runs == []
+    assert fake_transcript_queue_producer.enqueued_transcriptions == []
 
 
 @pytest.mark.asyncio

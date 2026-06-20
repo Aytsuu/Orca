@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from datetime import datetime, timezone
-import re
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -35,6 +35,7 @@ def _empty_plan_content() -> dict[str, Any]:
         "title": "",
         "description": "",
         "objectives": [],
+        "stakeholders": [],
         "technology_stack": [],
         "phases": [],
         "global_risks": [],
@@ -93,9 +94,7 @@ def _normalize_phase(phase: dict[str, Any]) -> dict[str, Any]:
     normalized["assigned_members"] = [
         _normalize_phase_assigned_member(member)
         for member in list(
-            normalized.get("assigned_members")
-            or normalized.get("assignedMembers")
-            or []
+            normalized.get("assigned_members") or normalized.get("assignedMembers") or []
         )
     ]
     normalized["tasks"] = [_normalize_task(task) for task in list(normalized.get("tasks") or [])]
@@ -125,6 +124,33 @@ def _normalize_technology_stack_item(item: Any) -> dict[str, str]:
     if isinstance(item, str):
         return {"title": item.strip(), "value": ""}
     return {"title": str(item).strip(), "value": ""}
+
+
+def _normalize_stakeholder(item: Any) -> dict[str, str]:
+    if isinstance(item, dict):
+        name = str(item.get("name") or item.get("title") or item.get("role") or "Unknown").strip()
+        role = str(item.get("role") or item.get("title") or name).strip() or name
+        user_id = str(
+            item.get("user_id")
+            or item.get("userId")
+            or item.get("session_id")
+            or name.lower().replace(" ", "_")
+        ).strip()
+        initials = str(item.get("initials") or _to_initials(name)).strip() or _to_initials(name)
+        return {
+            "user_id": user_id,
+            "name": name,
+            "role": role,
+            "initials": initials[:10],
+        }
+
+    name = str(item or "Unknown").strip() or "Unknown"
+    return {
+        "user_id": name.lower().replace(" ", "_"),
+        "name": name,
+        "role": name,
+        "initials": _to_initials(name),
+    }
 
 
 def _coerce_objective(value: Any) -> str:
@@ -241,9 +267,7 @@ def _normalize_proposal_change(change: dict[str, Any]) -> dict[str, Any]:
 def _sanitize_proposal_row(proposal: dict[str, Any]) -> dict[str, Any]:
     sanitized = deepcopy(proposal)
     sanitized["changes"] = [
-        _normalize_proposal_change(change)
-        for change in list(sanitized.get("changes") or [])
-        if str(change.get("section") or "") != "stakeholders"
+        _normalize_proposal_change(change) for change in list(sanitized.get("changes") or [])
     ]
     return sanitized
 
@@ -254,12 +278,13 @@ def normalize_plan_content(content: dict[str, Any] | None) -> dict[str, Any]:
     normalized["title"] = str(raw.get("title") or "")
     normalized["description"] = str(raw.get("description") or "")
     normalized["objectives"] = [
-        _coerce_objective(objective)
-        for objective in list(raw.get("objectives") or [])
+        _coerce_objective(objective) for objective in list(raw.get("objectives") or [])
+    ]
+    normalized["stakeholders"] = [
+        _normalize_stakeholder(item) for item in list(raw.get("stakeholders") or [])
     ]
     normalized["technology_stack"] = [
-        _normalize_technology_stack_item(item)
-        for item in list(raw.get("technology_stack") or [])
+        _normalize_technology_stack_item(item) for item in list(raw.get("technology_stack") or [])
     ]
     normalized["phases"] = [_normalize_phase(phase) for phase in list(raw.get("phases") or [])]
     normalized["global_risks"] = [
@@ -282,6 +307,7 @@ def serialize_plan_row(plan_row: dict[str, Any]) -> dict[str, Any]:
         "title": content["title"],
         "description": content["description"],
         "objectives": content["objectives"],
+        "stakeholders": content["stakeholders"],
         "technology_stack": content["technology_stack"],
         "phases": content["phases"],
         "global_risks": content["global_risks"],
@@ -291,7 +317,10 @@ def serialize_plan_row(plan_row: dict[str, Any]) -> dict[str, Any]:
 def _find_phase(content: dict[str, Any], phase_id: str) -> dict[str, Any]:
     normalized_target = _normalize_phase_reference(phase_id)
     for phase in content["phases"]:
-        if phase["id"] == phase_id or _normalize_phase_reference(phase.get("title", "")) == normalized_target:
+        if (
+            phase["id"] == phase_id
+            or _normalize_phase_reference(phase.get("title", "")) == normalized_target
+        ):
             return phase
     raise PlanPhaseNotFound()
 
@@ -374,6 +403,7 @@ def _has_structured_shape(content: dict[str, Any] | None) -> bool:
             "title",
             "description",
             "objectives",
+            "stakeholders",
             "technology_stack",
         )
     )
@@ -455,6 +485,24 @@ def _apply_structured_change(content: dict[str, Any], change: dict[str, Any]) ->
         )
         return current
 
+    if section == "stakeholders":
+        items = value if isinstance(value, list) else [value]
+        normalized_items = [_normalize_stakeholder(item) for item in items]
+        if action == "add":
+            current["stakeholders"].extend(normalized_items)
+            return current
+        if action == "update":
+            current["stakeholders"] = normalized_items
+            return current
+        if action == "remove":
+            stakeholder_ids = {item["user_id"] for item in normalized_items if item.get("user_id")}
+            current["stakeholders"] = [
+                existing
+                for existing in current["stakeholders"]
+                if existing.get("user_id") not in stakeholder_ids
+            ]
+            return current
+
     if section == "tasks":
         if action == "add":
             phase = _find_phase(current, target_id)
@@ -470,7 +518,9 @@ def _apply_structured_change(content: dict[str, Any], change: dict[str, Any]) ->
             ]
             return current
         if action == "remove":
-            phase["tasks"] = [existing for existing in phase["tasks"] if existing["id"] != task["id"]]
+            phase["tasks"] = [
+                existing for existing in phase["tasks"] if existing["id"] != task["id"]
+            ]
             return current
 
     if section == "phases":
@@ -487,7 +537,9 @@ def _apply_structured_change(content: dict[str, Any], change: dict[str, Any]) ->
             ]
             return current
         if action == "remove":
-            current["phases"] = [existing for existing in current["phases"] if existing["id"] != phase["id"]]
+            current["phases"] = [
+                existing for existing in current["phases"] if existing["id"] != phase["id"]
+            ]
             return current
 
     if section == "gaps":
@@ -601,7 +653,9 @@ async def list_plan_versions(supabase: AsyncClient, project_id: str) -> list[dic
             {
                 "id": current_plan["id"],
                 "version": current_plan["version"],
-                "created_at": current_plan.get("finalized_at") or current_plan.get("created_at") or _now_iso(),
+                "created_at": current_plan.get("finalized_at")
+                or current_plan.get("created_at")
+                or _now_iso(),
                 "status": "current",
             }
         )
@@ -637,13 +691,17 @@ async def _persist_plan_update(
     next_content: dict[str, Any],
 ) -> dict[str, Any]:
     if current_plan:
-        await supabase.table("plan_version").insert(
-            {
-                "project_id": project_id,
-                "content": normalize_plan_content(current_plan["content"]),
-                "version": current_plan["version"],
-            }
-        ).execute()
+        await (
+            supabase.table("plan_version")
+            .insert(
+                {
+                    "project_id": project_id,
+                    "content": normalize_plan_content(current_plan["content"]),
+                    "version": current_plan["version"],
+                }
+            )
+            .execute()
+        )
         updated = (
             await supabase.table("project_plan")
             .update(
@@ -783,7 +841,9 @@ async def approve_proposal(
         current_plan = await get_current_plan(supabase, project_id)
         raw_content = current_plan["content"] if current_plan else None
         is_structured = _has_structured_shape(raw_content)
-        next_content = normalize_plan_content(raw_content) if is_structured else deepcopy(raw_content or {})
+        next_content = (
+            normalize_plan_content(raw_content) if is_structured else deepcopy(raw_content or {})
+        )
         applied_or_stale: list[dict[str, Any]] = []
 
         for change in selected_changes:
@@ -811,12 +871,17 @@ async def approve_proposal(
         next_status = "pending" if remaining_changes else "applied"
         next_changes = remaining_changes if remaining_changes else applied_or_stale
 
-        await supabase.table("plan_proposal").update(
-            {
-                "status": next_status,
-                "changes": next_changes,
-            }
-        ).eq("id", proposal["id"]).execute()
+        await (
+            supabase.table("plan_proposal")
+            .update(
+                {
+                    "status": next_status,
+                    "changes": next_changes,
+                }
+            )
+            .eq("id", proposal["id"])
+            .execute()
+        )
 
         await set_agent_status(supabase, project_id=project_id, agent="updater", status="completed")
         return serialize_plan_row(updated)
@@ -871,7 +936,18 @@ async def reject_proposal_change(
         raise PlanChangeNotFound()
 
     status = "pending" if remaining else "rejected"
-    changes = remaining if remaining else [{**deepcopy(next(change for change in proposal["changes"] if change["id"] == change_id)), "state": "rejected"}]
+    changes = (
+        remaining
+        if remaining
+        else [
+            {
+                **deepcopy(
+                    next(change for change in proposal["changes"] if change["id"] == change_id)
+                ),
+                "state": "rejected",
+            }
+        ]
+    )
     updated = (
         await supabase.table("plan_proposal")
         .update({"status": status, "changes": changes})
@@ -1018,7 +1094,9 @@ async def delete_phase(
         if task_count and not force:
             raise PhaseDeleteRequiresForce(detail={"task_count": task_count})
         deleted_phase = deepcopy(phase)
-        content["phases"] = [existing for existing in content["phases"] if existing["id"] != phase_id]
+        content["phases"] = [
+            existing for existing in content["phases"] if existing["id"] != phase_id
+        ]
 
     await _mutate_plan(supabase, project_id=project_id, mutate=_mutate)
     return deleted_phase

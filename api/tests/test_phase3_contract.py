@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from test_phase2_api import FakeQueueProducer, FakeSupabase
+from test_phase2_api import FakeQueueProducer, FakeSupabase, FakeTranscriptQueueProducer
 
 from src.agents.queue import get_queue_producer
 from src.main import app
@@ -22,8 +22,17 @@ def fake_queue_producer() -> FakeQueueProducer:
     return FakeQueueProducer()
 
 
+@pytest.fixture
+def fake_transcript_queue_producer() -> FakeTranscriptQueueProducer:
+    return FakeTranscriptQueueProducer()
+
+
 @pytest.fixture(autouse=True)
-def override_dependencies(fake_supabase: FakeSupabase, fake_queue_producer: FakeQueueProducer):
+def override_dependencies(
+    fake_supabase: FakeSupabase,
+    fake_queue_producer: FakeQueueProducer,
+    fake_transcript_queue_producer: FakeTranscriptQueueProducer,
+):
     async def _get_supabase_admin() -> FakeSupabase:
         return fake_supabase
 
@@ -32,6 +41,14 @@ def override_dependencies(fake_supabase: FakeSupabase, fake_queue_producer: Fake
 
     app.dependency_overrides[get_supabase_admin] = _get_supabase_admin
     app.dependency_overrides[get_queue_producer] = _get_queue_producer
+    try:
+        from src.transcription.queue import get_transcript_queue_producer
+    except ImportError:
+        get_transcript_queue_producer = None
+    if get_transcript_queue_producer is not None:
+        app.dependency_overrides[get_transcript_queue_producer] = (
+            lambda: fake_transcript_queue_producer
+        )
     yield
     app.dependency_overrides.clear()
 
@@ -48,6 +65,7 @@ async def test_finalize_upload_and_list_files(
     client: AsyncClient,
     fake_supabase: FakeSupabase,
     fake_queue_producer: FakeQueueProducer,
+    fake_transcript_queue_producer: FakeTranscriptQueueProducer,
 ) -> None:
     project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
     fake_supabase.insert_row(
@@ -78,7 +96,10 @@ async def test_finalize_upload_and_list_files(
     assert uploaded["size_bytes"] == 2048
     assert uploaded["purpose"] == "source"
     assert uploaded["is_ai_context"] is True
-    assert fake_queue_producer.enqueued_run_ids == [fake_supabase.tables["agent_run"][0]["id"]]
+    assert fake_queue_producer.enqueued_run_ids == []
+    assert fake_transcript_queue_producer.enqueued_transcriptions == [
+        {"uploaded_file_id": uploaded["id"], "project_id": project["id"]}
+    ]
 
     files_response = await client.get(
         f"/api/v1/projects/{project['id']}/files",
@@ -125,6 +146,7 @@ async def test_chat_upload_requires_explicit_source_promotion_to_enqueue(
     client: AsyncClient,
     fake_supabase: FakeSupabase,
     fake_queue_producer: FakeQueueProducer,
+    fake_transcript_queue_producer: FakeTranscriptQueueProducer,
 ) -> None:
     project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
     fake_supabase.insert_row(
@@ -154,6 +176,7 @@ async def test_chat_upload_requires_explicit_source_promotion_to_enqueue(
     uploaded = chat_upload.json()["data"]
     assert uploaded["is_ai_context"] is False
     assert fake_queue_producer.enqueued_run_ids == []
+    assert fake_transcript_queue_producer.enqueued_transcriptions == []
 
     promote_response = await client.post(
         f"/api/v1/projects/{project['id']}/files/{uploaded['id']}/add-to-sources",
@@ -165,6 +188,9 @@ async def test_chat_upload_requires_explicit_source_promotion_to_enqueue(
     assert promoted["purpose"] == "source"
     assert promoted["is_ai_context"] is True
     assert fake_queue_producer.enqueued_run_ids == []
+    assert fake_transcript_queue_producer.enqueued_transcriptions == [
+        {"uploaded_file_id": uploaded["id"], "project_id": project["id"]}
+    ]
 
 
 @pytest.mark.asyncio

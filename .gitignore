@@ -229,3 +229,4 @@ contexts
 # Others
 issues.txt
 to-dos.txt
+node_modules/

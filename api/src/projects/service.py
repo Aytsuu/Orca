@@ -16,6 +16,7 @@ def _initial_project_plan_content(*, title: str, description: str) -> dict[str, 
         "title": title,
         "description": description,
         "objectives": [],
+        "stakeholders": [],
         "phases": [],
         "global_risks": [],
     }

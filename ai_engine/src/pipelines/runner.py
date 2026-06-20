@@ -349,10 +349,9 @@ async def run_project_pipeline(
             project_id=project_id,
             run_id=run_id,
             message_ids=run.get("new_message_ids", []),
-            file_ids=run.get("new_file_ids", []),
         )
         meaningful_messages, ambiguous_messages = split_messages_by_signal(context.new_messages)
-        if not meaningful_messages and not ambiguous_messages and not context.files:
+        if not meaningful_messages and not ambiguous_messages and not context.transcript_chunks:
             return await _skip_pipeline_as_non_meaningful(
                 supabase,
                 run_id=run_id,

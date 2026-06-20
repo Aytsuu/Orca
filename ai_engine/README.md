@@ -39,6 +39,12 @@ Primary queue worker:
 python -m src.tasks.worker
 ```
 
+Transcript queue worker:
+
+```powershell
+python -c "from src.tasks.worker import transcription_main; transcription_main()"
+```
+
 On Windows, the worker automatically falls back to RQ `SimpleWorker` and
 `TimerDeathPenalty` because the default fork-based worker and `SIGALRM` timeout
 handling are Unix-only.
@@ -49,6 +55,10 @@ Each job loads the `agent_run`, acquires `pipeline_lock:{project_id}` for up to
 5 minutes, assembles context, executes Monitor -> Analyzer -> Planner with
 short-circuiting, persists `agent_artifact` rows, and stages a `plan_proposal`
 for approval.
+
+Source uploads use a separate `orca-transcripts` queue. Only uploaded files
+with `is_ai_context = true` and `purpose = "source"` are enqueued for
+transcription. Source uploads do not trigger the agent pipeline directly.
 
 Chat messages use hybrid debounce from the API side:
 
@@ -63,6 +73,13 @@ Chat messages use hybrid debounce from the API side:
 Gemini configuration is owned by `ai_engine`. The worker reads
 `LLM_API_KEY` from `ai_engine/.env`; values in `api/.env` do not power the
 current LLM pipeline unless the API later adds its own model calls.
+
+## Transcript budget model
+
+Transcript processing uses the shared per-project LLM budget. Media extraction
+(`image/*`, `audio/*`, `video/*`) and transcript chunk embedding are counted as
+separate LLM calls by design, so a single source file can consume more than one
+budget unit.
 
 ## Gemini fallback profile
 

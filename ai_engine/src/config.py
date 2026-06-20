@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     agent_queue_name: str = Field(default="orca-agent-pipeline", alias="AGENT_QUEUE_NAME")
     agent_queue_timeout_seconds: int = Field(default=300, alias="AGENT_QUEUE_TIMEOUT_SECONDS")
+    transcript_queue_name: str = Field(default="orca-transcripts", alias="TRANSCRIPT_QUEUE_NAME")
+    transcript_queue_timeout_seconds: int = Field(
+        default=600,
+        alias="TRANSCRIPT_QUEUE_TIMEOUT_SECONDS",
+    )
     daily_llm_budget_per_project: int = Field(default=100, alias="DAILY_LLM_BUDGET")
     llm_budget_warning_threshold: float = Field(
         default=0.8,
@@ -43,6 +48,27 @@ class Settings(BaseSettings):
     summary_message_threshold: int = Field(default=15, alias="SUMMARY_MESSAGE_THRESHOLD")
     llm_rate_limit_rpm: int = Field(default=15, alias="LLM_RATE_LIMIT_RPM")
     context_warning_tokens: int = Field(default=100000, alias="CONTEXT_WARNING_TOKENS")
+    embedding_model: str = Field(
+        default="models/text-embedding-004",
+        alias="EMBEDDING_MODEL",
+    )
+    transcript_chunk_max_tokens: int = Field(
+        default=400,
+        alias="TRANSCRIPT_CHUNK_MAX_TOKENS",
+    )
+    transcript_chunk_overlap_tokens: int = Field(
+        default=50,
+        alias="TRANSCRIPT_CHUNK_OVERLAP_TOKENS",
+    )
+    transcript_similarity_threshold: float = Field(
+        default=0.3,
+        alias="TRANSCRIPT_SIMILARITY_THRESHOLD",
+    )
+    transcript_top_k: int = Field(default=5, alias="TRANSCRIPT_TOP_K")
+    video_max_duration_seconds: int = Field(
+        default=900,
+        alias="VIDEO_MAX_DURATION_SECONDS",
+    )
 
 
 @lru_cache

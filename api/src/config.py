@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     redis_url: str | None = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     agent_queue_name: str = Field(default="orca-agent-pipeline", alias="AGENT_QUEUE_NAME")
     agent_queue_timeout_seconds: int = Field(default=300, alias="AGENT_QUEUE_TIMEOUT_SECONDS")
+    transcript_queue_name: str = Field(default="orca-transcripts", alias="TRANSCRIPT_QUEUE_NAME")
+    transcript_queue_timeout_seconds: int = Field(
+        default=600,
+        alias="TRANSCRIPT_QUEUE_TIMEOUT_SECONDS",
+    )
+    transcript_queue_retry_max: int = Field(default=3, alias="TRANSCRIPT_QUEUE_RETRY_MAX")
+    transcript_queue_retry_backoff_seconds: int = Field(
+        default=10,
+        alias="TRANSCRIPT_QUEUE_RETRY_BACKOFF_SECONDS",
+    )
     debounce_message_count: int = Field(default=3, alias="DEBOUNCE_MESSAGE_COUNT")
     debounce_silence_seconds: int = Field(default=8, alias="DEBOUNCE_SILENCE_SECONDS")
 

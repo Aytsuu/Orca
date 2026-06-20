@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from src.agents.schemas import AnalyzerOutput, MonitorOutput, QuestionAnalyzerOutput, RelevanceOutput
+from src.context.builder import AssembledContext
 from src.exceptions import (
     ConfigurationError,
     InvalidOutputError,
@@ -1657,3 +1658,65 @@ async def test_pipeline_ignores_duplicate_jobs_for_completed_runs(fake_supabase)
 
     assert results == []
     assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_pipeline_uses_transcript_chunks_for_no_message_gate(
+    fake_supabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha"})
+    message = fake_supabase.insert_row(
+        "chat_message",
+        {"project_id": project["id"], "session_id": "alpha", "content": "ok"},
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [message["id"]],
+            "new_file_ids": ["audit-file-id"],
+        },
+    )
+
+    class FakeBuilder:
+        def __init__(self, _supabase) -> None:
+            pass
+
+        async def build(self, *, project_id: str, run_id: str, message_ids: list[str]):
+            assert project_id == project["id"]
+            assert run_id == run["id"]
+            assert message_ids == [message["id"]]
+            return AssembledContext(
+                project_id=project["id"],
+                run_id=run["id"],
+                current_plan=None,
+                new_messages=[message],
+                memory=[],
+                summaries=[],
+                transcript_chunks=[
+                    {
+                        "chunk_text": "The roadmap owner is Jan Doe.",
+                        "uploaded_file_id": "file-1",
+                        "chunk_index": 0,
+                        "similarity": 0.88,
+                    }
+                ],
+                token_estimate=12,
+                warnings=[],
+            )
+
+    llm = FakeJsonLlmClient(responses=[MonitorOutput(summary_candidate="brief summary")])
+    monkeypatch.setattr("src.pipelines.runner.ContextBuilder", FakeBuilder)
+
+    results = await run_project_pipeline(
+        fake_supabase,
+        run["id"],
+        llm_client=llm,
+        safety_client=llm,
+    )
+
+    assert [result.agent for result in results] == ["monitor"]
+    assert [call["schema"] for call in llm.calls] == ["MonitorOutput"]

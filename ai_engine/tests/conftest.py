@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sys
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -18,6 +19,49 @@ def _iso_now() -> str:
 class FakeExecuteResult:
     def __init__(self, data: list[dict]) -> None:
         self.data = data
+
+
+class FakeRpcQuery:
+    def __init__(self, client: "FakeSupabase", function_name: str, payload: dict) -> None:
+        self.client = client
+        self.function_name = function_name
+        self.payload = payload
+
+    async def execute(self) -> FakeExecuteResult:
+        if self.function_name != "match_source_transcripts":
+            return FakeExecuteResult([])
+
+        project_id = str(self.payload["p_project_id"])
+        query_embedding = list(self.payload.get("query_embedding") or [])
+        limit = max(int(self.payload.get("match_count", 5)), 1)
+        threshold = float(self.payload.get("similarity_threshold", 0.3))
+
+        ready_transcripts = {
+            row["id"]: row
+            for row in self.client.tables["source_transcript"]
+            if str(row.get("project_id")) == project_id and row.get("status") == "ready"
+        }
+        scored_rows: list[dict] = []
+        for chunk in self.client.tables["source_transcript_chunk"]:
+            transcript = ready_transcripts.get(chunk.get("transcript_id"))
+            embedding = chunk.get("embedding")
+            if transcript is None or embedding is None:
+                continue
+            similarity = _cosine_similarity(query_embedding, list(embedding))
+            if similarity < threshold:
+                continue
+            scored_rows.append(
+                {
+                    "chunk_id": chunk["id"],
+                    "transcript_id": chunk["transcript_id"],
+                    "uploaded_file_id": transcript["uploaded_file_id"],
+                    "chunk_text": chunk["chunk_text"],
+                    "chunk_index": chunk["chunk_index"],
+                    "similarity": similarity,
+                }
+            )
+        scored_rows.sort(key=lambda row: row["similarity"], reverse=True)
+        return FakeExecuteResult(scored_rows[:limit])
 
 
 class FakeTableQuery:
@@ -101,6 +145,8 @@ class FakeSupabase:
             "project_plan": [],
             "chat_message": [],
             "uploaded_file": [],
+            "source_transcript": [],
+            "source_transcript_chunk": [],
             "agent_status": [],
             "project_memory": [],
             "conversation_summary": [],
@@ -113,6 +159,9 @@ class FakeSupabase:
     def table(self, table_name: str) -> FakeTableQuery:
         return FakeTableQuery(self, table_name)
 
+    def rpc(self, function_name: str, payload: dict) -> FakeRpcQuery:
+        return FakeRpcQuery(self, function_name, payload)
+
     def insert_row(self, table_name: str, payload: dict) -> dict:
         row = deepcopy(payload)
         row.setdefault("id", str(uuid4()))
@@ -120,11 +169,16 @@ class FakeSupabase:
             "project",
             "chat_message",
             "uploaded_file",
+            "source_transcript",
+            "source_transcript_chunk",
             "conversation_summary",
             "agent_artifact",
             "plan_proposal",
         }:
             row.setdefault("created_at", _iso_now())
+        if table_name == "source_transcript":
+            row.setdefault("updated_at", _iso_now())
+            row.setdefault("status", "pending")
         if table_name == "project_memory":
             row.setdefault("created_at", _iso_now())
             row.setdefault("updated_at", _iso_now())
@@ -144,3 +198,14 @@ class FakeSupabase:
 @pytest.fixture
 def fake_supabase() -> FakeSupabase:
     return FakeSupabase()
+
+
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
+    if not left or not right or len(left) != len(right):
+        return 0.0
+    numerator = sum(a * b for a, b in zip(left, right, strict=False))
+    left_norm = math.sqrt(sum(a * a for a in left))
+    right_norm = math.sqrt(sum(b * b for b in right))
+    if left_norm == 0 or right_norm == 0:
+        return 0.0
+    return numerator / (left_norm * right_norm)

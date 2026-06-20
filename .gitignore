@@ -14,7 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+/lib/
 lib64/
 parts/
 sdist/
@@ -225,3 +225,7 @@ __marimo__/
 contexts
 .mcp.json
 /AGENTS.md
+
+# Others
+issues.txt
+to-dos.txt

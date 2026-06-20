@@ -1,23 +1,30 @@
 // src/components/islands/ui/Navbar.tsx
 import React, { useState, useEffect } from 'react';
-import { navigate } from 'astro:transitions/client';
 import { Plus } from 'lucide-react';
 import { useStore } from '@nanostores/react';
 import orcaLogo from '../../../assets/orca_logo.png';
-import { projects, activeProjectState, createProject, renameProject } from '../../../stores/projectStore';
+import { projects, createProject, loadProjects, renameProject } from '../../../stores/projectStore';
 
 interface NavbarProps {
   isHome?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ isHome: initialIsHome = false }) => {
+  const [hasMounted, setHasMounted] = useState(false);
   const [isHome, setIsHome] = useState(initialIsHome);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [tempName, setTempName] = useState('');
 
   const projectList = useStore(projects);
-  const projectDetail = useStore(activeProjectState);
+
+  useEffect(() => {
+    void loadProjects();
+  }, []);
+
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
 
   useEffect(() => {
     const updatePath = () => {
@@ -37,7 +44,8 @@ export const Navbar: React.FC<NavbarProps> = ({ isHome: initialIsHome = false })
   }, []);
 
   const activeProject = projectList.find(p => p.id === currentProjectId);
-  const projectName = activeProject?.name || (projectDetail?.projectId === currentProjectId ? projectDetail.currentPlan.title.replace('Project Plan — ', '') : null);
+  const projectName = activeProject?.name || null;
+  const shouldRenderProjectTitle = hasMounted && currentProjectId && projectName;
 
   useEffect(() => {
     if (projectName) {
@@ -54,7 +62,7 @@ export const Navbar: React.FC<NavbarProps> = ({ isHome: initialIsHome = false })
           <img src={logoSrc} alt="Orca Logo" className="h-6 w-6 object-contain" />
         </a>
         <div className="flex items-center">
-          {currentProjectId && projectName ? (
+          {shouldRenderProjectTitle ? (
             isEditing ? (
               <input
                 type="text"
@@ -63,14 +71,14 @@ export const Navbar: React.FC<NavbarProps> = ({ isHome: initialIsHome = false })
                 onBlur={() => {
                   setIsEditing(false);
                   if (tempName.trim() && tempName.trim() !== projectName) {
-                    renameProject(currentProjectId, tempName.trim());
+                    void renameProject(currentProjectId, tempName.trim());
                   }
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     setIsEditing(false);
                     if (tempName.trim() && tempName.trim() !== projectName) {
-                      renameProject(currentProjectId, tempName.trim());
+                      void renameProject(currentProjectId, tempName.trim());
                     }
                   } else if (e.key === 'Escape') {
                     setIsEditing(false);
@@ -100,9 +108,11 @@ export const Navbar: React.FC<NavbarProps> = ({ isHome: initialIsHome = false })
       <div className="flex items-center gap-6">
         {!isHome && (
           <button
-            onClick={() => {
-              const newId = createProject('Untitled', '', true);
-              window.location.href = `/project/${newId}/chat`;
+            onClick={async () => {
+              const newId = await createProject('Untitled', '');
+              if (newId) {
+                window.location.href = `/project/${newId}/chat`;
+              }
             }}
             className="btn-primary flex items-center gap-1.5 px-4 text-xs"
           >

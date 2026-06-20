@@ -1,12 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '@nanostores/react';
 import { navigate } from 'astro:transitions/client';
-import { Plus, FolderKanban, Users, MoreVertical, Trash2, Search, X } from 'lucide-react';
-import { projects, createProject, deleteProject, getProjectMembers, type Teammate } from '../../../stores/projectStore';
-import { Modal } from '../ui/Modal';
+import { Plus, MoreVertical, Trash2, Search, X, WifiOff, UsersRound } from 'lucide-react';
+import {
+  projects,
+  createProject,
+  deleteProject,
+  loadProjects,
+  connectionError,
+} from '../../../stores/projectStore';
+import { ShareProjectModal } from './ShareProjectModal';
 
 export const ProjectList: React.FC = () => {
   const projectList = useStore(projects);
+  const connError = useStore(connectionError);
   const [activeMenuProjectId, setActiveMenuProjectId] = useState<string | null>(null);
   const [membersModalProject, setMembersModalProject] = useState<{ id: string; name: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -19,9 +26,17 @@ export const ProjectList: React.FC = () => {
     return () => document.removeEventListener('click', handleClose);
   }, []);
 
-  const handleCreateProject = () => {
-    const newId = createProject('Untitled', '', true);
-    window.location.href = `/project/${newId}/chat`;
+  useEffect(() => {
+    void loadProjects();
+  }, []);
+
+  // Members modal loading is now internalized in ShareProjectModal
+
+  const handleCreateProject = async () => {
+    const newId = await createProject('Untitled', '');
+    if (newId) {
+      window.location.href = `/project/${newId}/chat`;
+    }
   };
 
   const filteredProjects = projectList.filter((project) =>
@@ -35,7 +50,7 @@ export const ProjectList: React.FC = () => {
         <div>
           <h2 className="text-text-primary text-lg font-medium">Your workspaces</h2>
         </div>
-        {projectList.length > 0 && (
+        {!connError && (
           <div className="flex items-center gap-3">
             <div
               className={`flex items-center bg-surface border border-border-subtle rounded-full transition-all duration-300 h-10 ${isSearchOpen ? 'w-64 px-4 border-border' : 'w-10 justify-center cursor-pointer hover:bg-surface-raised hover:border-border'
@@ -85,7 +100,7 @@ export const ProjectList: React.FC = () => {
 
             <button
               onClick={handleCreateProject}
-              className="btn-primary flex items-center gap-3 shrink-0 h-10"
+              className="btn-primary flex items-center gap-2 shrink-0 h-10"
             >
               <Plus className="w-4 h-4" />
               <span className='font-medium text-sm'>Create project</span>
@@ -96,24 +111,29 @@ export const ProjectList: React.FC = () => {
 
       <span className="section-label">Recent Projects</span>
       {/* Grid or Empty State */}
-      {projectList.length === 0 ? (
+      {connError ? (
         <div className="flex-grow flex items-center justify-center py-16">
-          <div className="border border-dashed border-border rounded-xl p-10 max-w-md w-full text-center flex flex-col items-center gap-5">
-            <FolderKanban className="w-10 h-10 text-text-muted" />
+          <div className="border border-border bg-surface rounded-xl p-10 max-w-md w-full text-center flex flex-col items-center gap-5">
+            <div className="h-12 w-12 rounded-full bg-error/10 flex items-center justify-center">
+              <WifiOff className="w-6 h-6 text-error animate-pulse" />
+            </div>
             <div>
-              <h3 className="text-text-primary text-lg font-medium">No projects yet</h3>
-              <p className="text-text-secondary text-sm mt-1">Start by creating one</p>
+              <h3 className="text-text-primary text-lg font-medium">Backend Connection Offline</h3>
+              <p className="text-text-secondary text-sm mt-1 select-text font-mono text-xs max-w-xs break-words mx-auto">
+                {connError}
+              </p>
             </div>
             <button
-              onClick={handleCreateProject}
+              onClick={() => {
+                void loadProjects(true);
+              }}
               className="btn-primary flex items-center gap-1.5"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Create your first project</span>
+              <span>Retry Connection</span>
             </button>
           </div>
         </div>
-      ) : filteredProjects.length === 0 ? (
+      ) : searchQuery && filteredProjects.length === 0 ? (
         <div className="flex-grow flex items-center justify-center py-16">
           <div className="border border-border bg-surface rounded-xl p-10 max-w-md w-full text-center flex flex-col items-center gap-5">
             <Search className="w-10 h-10 text-text-muted" />
@@ -143,7 +163,7 @@ export const ProjectList: React.FC = () => {
             </span>
           </div>
 
-          {filteredProjects.map((project, index) => {
+          {filteredProjects.map((project) => {
             return (
               <div
                 key={project.id}
@@ -173,7 +193,7 @@ export const ProjectList: React.FC = () => {
 
                       {activeMenuProjectId === project.id && (
                         <div
-                          className="absolute right-0 mt-1.5 w-36 bg-surface-raised border border-border rounded shadow-xl flex flex-col p-1 z-30 fade-up"
+                          className="absolute right-0 mt-1.5 w-44 bg-surface-raised border border-border rounded-lg shadow-xl flex flex-col p-1.5 z-30 fade-up"
                           style={{ boxShadow: '0 8px 24px -6px rgba(0,0,0,0.6)' }}
                         >
                           <button
@@ -181,21 +201,21 @@ export const ProjectList: React.FC = () => {
                               setMembersModalProject({ id: project.id, name: project.name });
                               setActiveMenuProjectId(null);
                             }}
-                            className="w-full text-left px-3 py-1.5 rounded-sm text-xs font-semibold text-text-secondary hover:bg-primary-muted hover:text-primary transition-colors flex items-center gap-2 cursor-pointer"
+                            className="w-full text-left px-3.5 py-2 rounded-md text-sm font-semibold text-text-secondary hover:bg-primary-muted hover:text-primary transition-colors flex items-center gap-2.5 cursor-pointer"
                           >
-                            <Users className="w-3.5 h-3.5" />
+                            <UsersRound className="w-4 h-4" />
                             <span>View Members</span>
                           </button>
                           <button
                             onClick={() => {
                               if (confirm(`Are you sure you want to delete "${project.name}"?`)) {
-                                deleteProject(project.id);
+                                void deleteProject(project.id);
                               }
                               setActiveMenuProjectId(null);
                             }}
-                            className="w-full text-left px-3 py-1.5 rounded-sm text-xs font-semibold text-error hover:bg-error/10 transition-colors flex items-center gap-2 cursor-pointer"
+                            className="w-full text-left px-3.5 py-2 rounded-md text-sm font-semibold text-error hover:bg-error/10 transition-colors flex items-center gap-2.5 cursor-pointer"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-4 h-4" />
                             <span>Delete Project</span>
                           </button>
                         </div>
@@ -206,7 +226,7 @@ export const ProjectList: React.FC = () => {
 
                 <div className="border-t border-border-subtle pt-3 mt-1 flex justify-between items-center text-xs text-text-muted w-full">
                   <span className="flex items-center gap-1.5">
-                    <Users className="w-3.5 h-3.5" />
+                    <UsersRound className="w-3.5 h-3.5" />
                     <span>{project.membersCount}</span>
                   </span>
                   <span>{project.updatedText}</span>
@@ -217,38 +237,13 @@ export const ProjectList: React.FC = () => {
         </div>
       )}
 
-      {/* Members View Modal */}
-      <Modal
+      {/* Share / Members Modal */}
+      <ShareProjectModal
         isOpen={!!membersModalProject}
         onClose={() => setMembersModalProject(null)}
-        title={`MEMBERS — ${membersModalProject?.name.toUpperCase()}`}
-      >
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col border border-border-subtle bg-surface rounded-xl divide-y divide-border-subtle overflow-hidden">
-            {membersModalProject && getProjectMembers(membersModalProject.id).map((member) => (
-              <div key={member.id} className="flex items-center justify-between p-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-full bg-surface-raised border border-border flex items-center justify-center text-xs font-semibold text-text-muted shrink-0">
-                    {member.initials}
-                  </div>
-                  <span className="text-sm font-bold text-text-primary">{member.name}</span>
-                </div>
-                <span className="category-badge text-[10px] py-0.5 px-2 font-semibold badge--viewer">
-                  {member.role}
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="flex justify-end pt-2">
-            <button
-              onClick={() => setMembersModalProject(null)}
-              className="btn-secondary py-1.5 px-5 text-xs font-semibold"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </Modal>
+        projectId={membersModalProject?.id || ''}
+        projectName={membersModalProject?.name || ''}
+      />
     </div>
   );
 };

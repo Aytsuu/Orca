@@ -23,6 +23,29 @@ class MemberPermissionsUpdate(ApiModel):
     can_edit: bool | None = None
 
 
+class MemberInvitationCreate(ApiModel):
+    invitee_name: str = Field(min_length=1, max_length=200)
+    invitee_email: str = Field(min_length=3, max_length=320)
+    role: MemberRole
+    can_approve: bool | None = None
+    can_edit: bool | None = None
+
+
+class MemberInvitationOut(ApiModel):
+    id: UUID
+    project_id: UUID
+    token: str
+    invitee_name: str
+    invitee_email: str
+    role: str
+    can_approve: bool
+    can_edit: bool
+    created_by_session_id: str
+    created_at: datetime
+    redeemed_at: datetime | None = None
+    redeemed_by_session_id: str | None = None
+
+
 class MemberOut(ApiModel):
     id: UUID
     project_id: UUID
@@ -31,3 +54,13 @@ class MemberOut(ApiModel):
     can_approve: bool
     can_edit: bool
     created_at: datetime
+
+
+class MemberInvitationAcceptanceOut(ApiModel):
+    project_id: UUID
+    member: MemberOut
+
+
+class DefaultMemberInvitationOut(ApiModel):
+    project_id: UUID
+    token: str

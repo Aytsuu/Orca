@@ -1,13 +1,14 @@
-// src/components/islands/features/ChatView.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '@nanostores/react';
+import { navigate } from 'astro:transitions/client';
 import {
   Plus,
   FileText,
+  Paperclip,
+  Download,
+  ExternalLink,
   Search,
   Users2,
-  Paperclip,
-  SendHorizontal,
   Check,
   Edit2,
   X,
@@ -18,54 +19,216 @@ import {
   AlertCircle,
   ArrowRight,
   Eye,
-  EyeOff
+  Loader2,
+  Compass,
+  Calendar,
+  RefreshCw,
+  Reply
 } from 'lucide-react';
 import {
-  activeProjectState,
-  selectProject,
-  sendMessage,
-  uploadFile,
-  acceptChange,
-  rejectChange,
-  addTeammate,
-  toastMessages,
-  addToast
+  addToast,
+  projects,
+  loadProjects
 } from '../../../stores/projectStore';
-import { Modal } from '../ui/Modal';
+import {
+  useProjectWorkspace
+} from '../../../lib/query/projectWorkspace';
+import {
+  useProjectAiActivity,
+  usePromoteAiActivityItem,
+  usePromoteAllAiActivity,
+} from '../../../lib/query/projectAiActivity';
+import {
+  useProjectMessages,
+  useSendProjectMessage,
+} from '../../../lib/query/projectMessages';
+import {
+  useProjectFiles,
+  useProjectFileAccessUrl,
+  useDeleteProjectFile,
+  usePromoteProjectFileToSource,
+  useUploadProjectFile,
+} from '../../../lib/query/projectFiles';
+import { QueryProvider } from '../providers/QueryProvider';
+import Modal from '../ui/Modal';
+import { ShareProjectModal } from './ShareProjectModal';
+import { sessionId } from '../../../stores/project/session';
+import { formatRelativeTime, toInitials } from '../../../stores/project/repository';
 
 interface ChatViewProps {
   projectId: string;
 }
 
-export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
-  const detail = useStore(activeProjectState);
+interface SuggestionCluster {
+  key: string;
+  type: 'GAP' | 'TASK' | 'SUGGESTION' | 'INSIGHT';
+  suggestions: Array<{
+    id: string;
+    type: 'GAP' | 'TASK' | 'SUGGESTION' | 'INSIGHT';
+    content: string;
+    actionable: boolean;
+  }>;
+  collapsible: boolean;
+}
+
+const agentDetails: Record<
+  string,
+  { name: string; icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }> }
+> = {
+  MONITOR: { name: 'Monitor Orca', icon: Eye },
+  ANALYZER: { name: 'Analyzer Orca', icon: Compass },
+  PLANNER: { name: 'Planner Orca', icon: Calendar },
+  UPDATER: { name: 'Updater Orca', icon: RefreshCw },
+};
+
+const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
+  const { data: detail, isLoading, error } = useProjectWorkspace(projectId);
+  const {
+    data: projectMessages,
+    isLoading: isMessagesLoading,
+    error: messagesError,
+  } = useProjectMessages(projectId);
+  const {
+    data: projectFiles,
+    isLoading: isFilesLoading,
+    error: filesError,
+  } = useProjectFiles(projectId);
+  const { data: aiActivity } = useProjectAiActivity(projectId);
+  const promoteAiActivityItemMutation = usePromoteAiActivityItem(projectId);
+  const promoteAllAiActivityMutation = usePromoteAllAiActivity(projectId);
+  const sendMessageMutation = useSendProjectMessage(projectId);
+  const uploadSourceFileMutation = useUploadProjectFile(projectId);
+  const uploadChatFileMutation = useUploadProjectFile(projectId);
+  const deleteProjectFileMutation = useDeleteProjectFile(projectId);
+  const promoteProjectFileMutation = usePromoteProjectFileToSource(projectId);
+  const currentSessionId = sessionId.get();
+
+  const projectList = useStore(projects);
+  const currentProject = projectList.find((p) => p.id === projectId);
+
   const [messageText, setMessageText] = useState('');
+  const [replyToMessage, setReplyToMessage] = useState<{
+    id: string;
+    senderName: string;
+    content: string;
+  } | null>(null);
   const [mobileTab, setMobileTab] = useState<'files' | 'chat' | 'ai'>('chat');
   const [isInviteOpen, setIsInviteOpen] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteName, setInviteName] = useState('');
-  const [inviteRole, setInviteRole] = useState<'APPROVER' | 'EDITOR' | 'VIEWER'>('VIEWER');
-  const [visibleSuggestionId, setVisibleSuggestionId] = useState<string | null>(null);
+  const [expandedSuggestionClusterKeys, setExpandedSuggestionClusterKeys] = useState<string[]>([]);
+  const [activeMediaAttachment, setActiveMediaAttachment] = useState<{
+    uploadedFileId: string;
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+    signedUrl: string;
+    isInSources: boolean;
+    canRemove: boolean;
+  } | null>(null);
 
   const [showTabletFiles, setShowTabletFiles] = useState(false);
-
-  // Edit suggestion state
-  const [editingSugId, setEditingSugId] = useState<string | null>(null);
-  const [editingText, setEditingText] = useState('');
+  const [monitorResponseExpanded, setMonitorResponseExpanded] = useState(false);
+  const [analyzerResponseExpanded, setAnalyzerResponseExpanded] = useState(false);
+  const [plannerResponseExpanded, setPlannerResponseExpanded] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
+  const [files, setFiles] = useState<Array<{
+    id: string;
+    name: string;
+    size: string;
+    type: string;
+    uploadedAt: string;
+    sessionId: string;
+  }>>([]);
+  const [pendingChatFiles, setPendingChatFiles] = useState<File[]>([]);
 
-  // Initialize active project detail
   useEffect(() => {
-    selectProject(projectId);
+    if (projectFiles) {
+      setFiles(
+        projectFiles.map((file) => ({
+          id: file.id,
+          name: file.filename,
+          size: formatFileSize(file.sizeBytes),
+          type: file.mimeType.split('/').pop()?.toUpperCase() || 'FILE',
+          uploadedAt: formatRelativeTime(file.createdAt),
+          sessionId: file.sessionId,
+        }))
+      );
+      return;
+    }
+
+    if (!isFilesLoading && !filesError) {
+      setFiles([]);
+    }
+  }, [projectFiles, isFilesLoading, filesError]);
+
+  const isInitialLoad = useRef(true);
+
+  // Scroll to bottom on new messages and load transitions
+  useEffect(() => {
+    if (isLoading || isMessagesLoading) return;
+    const container = chatEndRef.current?.parentElement;
+    if (!container) return;
+
+    const scrollToBottom = (behavior: 'auto' | 'smooth' = 'auto') => {
+      if (behavior === 'auto') {
+        container.scrollTop = container.scrollHeight;
+      } else {
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: 'smooth',
+        });
+      }
+    };
+
+    // Initial scroll
+    scrollToBottom('auto');
+
+    // Handle container resizing (e.g. flexbox layout settling, window resizes)
+    const resizeObserver = new ResizeObserver(() => {
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+      if (isNearBottom || isInitialLoad.current) {
+        scrollToBottom('auto');
+      }
+    });
+    resizeObserver.observe(container);
+
+    // Watch for new messages added to DOM
+    const mutationObserver = new MutationObserver(() => {
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+      if (isNearBottom || isInitialLoad.current) {
+        scrollToBottom(isInitialLoad.current ? 'auto' : 'smooth');
+        if (isInitialLoad.current) {
+          isInitialLoad.current = false;
+        }
+      }
+    });
+    mutationObserver.observe(container, { childList: true, subtree: true });
+
+    // Mark initial load finished after a short delay
+    const timer = setTimeout(() => {
+      isInitialLoad.current = false;
+    }, 500);
+
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      clearTimeout(timer);
+    };
+  }, [isLoading, isMessagesLoading]);
+
+  // Load projects list on mount to get the project name
+  useEffect(() => {
+    void loadProjects();
+  }, []);
+
+  useEffect(() => {
+    setExpandedSuggestionClusterKeys([]);
   }, [projectId]);
 
-  // Scroll to bottom on new messages
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [detail?.messages]);
-
-  if (!detail || detail.projectId !== projectId) {
+  if (isLoading) {
     return (
       <div className="flex-grow flex items-center justify-center text-text-muted select-none">
         Loading workspace data...
@@ -73,46 +236,340 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
     );
   }
 
-  const handleSend = (e: React.FormEvent) => {
+  if (error || !detail) {
+    return (
+      <div className="flex-grow flex items-center justify-center text-error select-none">
+        Error: {error instanceof Error ? error.message : 'Unable to load workspace.'}
+      </div>
+    );
+  }
+
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!messageText.trim()) return;
-    sendMessage(messageText.trim());
+    const content = messageText.trim();
+    if (!content && pendingChatFiles.length === 0) return;
     setMessageText('');
+
+    let finalContent = content;
+    if (replyToMessage) {
+      const excerpt = replyToMessage.content.replace(/\*/g, '').split('\n')[0] || 'Shared attachment(s)';
+      const truncatedExcerpt = excerpt.length > 60 ? excerpt.slice(0, 57) + '...' : excerpt;
+      finalContent = content
+        ? `> **Replying to @${replyToMessage.senderName}**: *${truncatedExcerpt}*\n\n${content}`
+        : `> **Replying to @${replyToMessage.senderName}**: *${truncatedExcerpt}*`;
+      setReplyToMessage(null);
+    }
+
+    try {
+      const uploadedAttachments = await Promise.all(
+        pendingChatFiles.map((file) =>
+          uploadChatFileMutation.mutateAsync({
+            file,
+            purpose: 'chat',
+          })
+        )
+      );
+      await sendMessageMutation.mutateAsync({
+        content: finalContent,
+        attachments: uploadedAttachments.map((file) => ({
+          uploadedFileId: file.id,
+          filename: file.filename,
+          mimeType: file.mimeType,
+          storagePath: file.storagePath,
+          sizeBytes: file.sizeBytes,
+        })),
+      });
+      setPendingChatFiles([]);
+    } catch (sendError) {
+      setMessageText(content);
+      if (replyToMessage) {
+        // Restore reply state if mutation failed
+        setReplyToMessage(replyToMessage);
+      }
+      if (pendingChatFiles.length > 0) {
+        setPendingChatFiles([...pendingChatFiles]);
+      }
+      addToast(
+        'error',
+        sendError instanceof Error ? sendError.message : 'Unable to send message.'
+      );
+    }
   };
 
-  const handleFakeUpload = () => {
-    const filenames = ['pr-specs.pdf', 'db-migration.sql', 'api-endpoints.json', 'assets-pack.zip'];
-    const randomName = filenames[Math.floor(Math.random() * filenames.length)];
-    const randomSize = `${(Math.random() * 5 + 1).toFixed(1)} MB`;
-    uploadFile(randomName, randomSize);
+  const handleUploadSelection = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      await uploadSourceFileMutation.mutateAsync({ file, purpose: 'source' });
+      addToast('success', `${file.name} uploaded successfully.`);
+    } catch (uploadError) {
+      addToast(
+        'error',
+        uploadError instanceof Error ? uploadError.message : 'Unable to upload file.'
+      );
+    }
   };
 
-  const handleInviteSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteName.trim() || !inviteEmail.trim()) return;
+  const handleChatAttachmentSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (selectedFiles.length === 0) return;
 
-    addTeammate(inviteName.trim(), inviteEmail.trim(), inviteRole);
-    setIsInviteOpen(false);
-    setInviteName('');
-    setInviteEmail('');
-    setInviteRole('VIEWER');
+    setPendingChatFiles((currentFiles) => [...currentFiles, ...selectedFiles]);
   };
 
-  const roleDescriptions = {
-    APPROVER: 'Can accept, edit, and reject AI-generated plan changes.',
-    EDITOR: 'Can edit and reject AI changes, but cannot accept them.',
-    VIEWER: 'Can read the finalized plan and comment via chat.'
+  const handleRemovePendingChatFile = (fileName: string, lastModified: number) => {
+    setPendingChatFiles((currentFiles) =>
+      currentFiles.filter(
+        (file) => !(file.name === fileName && file.lastModified === lastModified)
+      )
+    );
   };
+
+  const handlePromoteChatAttachment = async (fileId: string, filename: string) => {
+    try {
+      await promoteProjectFileMutation.mutateAsync(fileId);
+      addToast('success', `${filename} added to Sources.`);
+    } catch (promotionError) {
+      addToast(
+        'error',
+        promotionError instanceof Error ? promotionError.message : 'Unable to add file to Sources.'
+      );
+    }
+  };
+
+  const handleDeleteFile = async (fileId: string, filename: string) => {
+    try {
+      await deleteProjectFileMutation.mutateAsync(fileId);
+      addToast('success', `${filename} removed.`);
+    } catch (deleteError) {
+      addToast(
+        'error',
+        deleteError instanceof Error ? deleteError.message : 'Unable to remove file.'
+      );
+    }
+  };
+
+  const handlePromoteSuggestion = async (suggestionId: string) => {
+    try {
+      await promoteAiActivityItemMutation.mutateAsync(suggestionId);
+      addToast('success', 'Suggestion moved to pending changes.');
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Unable to send suggestion to review.');
+    }
+  };
+
+  const handlePromoteAllSuggestions = async () => {
+    try {
+      const result = await promoteAllAiActivityMutation.mutateAsync();
+      addToast('success', `${result.change_ids.length} suggestion${result.change_ids.length === 1 ? '' : 's'} moved to pending changes.`);
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Unable to send suggestions to review.');
+    }
+  };
+
+  const agentStatus = aiActivity?.agentStatus || {
+    MONITOR: 'idle',
+    ANALYZER: 'idle',
+    PLANNER: 'idle',
+    UPDATER: 'idle',
+  };
+  const recentOrcaActivity = aiActivity?.recentActivity || null;
+  const rawSuggestions = aiActivity?.suggestions || [];
+  const panelSuggestions = rawSuggestions.filter(
+    (s) => !s.id.startsWith('monitor-summary') && !s.id.startsWith('planner-summary') && !s.id.startsWith('panel')
+  );
+  const monitorStatus = agentStatus.MONITOR || 'idle';
+  const analyzerStatus = agentStatus.ANALYZER || 'idle';
+  const plannerStatus = agentStatus.PLANNER || 'idle';
+  const monitorResponse = [...(aiActivity?.items || [])].reverse().find((item) => item.agent === 'monitor' && item.kind === 'insight')?.detail;
+  const analyzerResponse = [...(aiActivity?.items || [])].reverse().find((item) => item.agent === 'analyzer' && item.kind === 'insight')?.detail;
+  const plannerResponse = [...(aiActivity?.items || [])].reverse().find((item) => item.agent === 'planner' && item.kind === 'insight')?.detail;
+  const showMonitor = monitorStatus === 'active' || monitorStatus === 'error' || (monitorStatus === 'idle' && Boolean(monitorResponse) && panelSuggestions.length > 0);
+  const showAnalyzer = analyzerStatus === 'active' || analyzerStatus === 'error' || (analyzerStatus === 'idle' && (Boolean(analyzerResponse) || panelSuggestions.some((s) => s.agent === 'analyzer')) && panelSuggestions.length > 0);
+  const showPlanner = plannerStatus === 'active' || plannerStatus === 'error' || (plannerStatus === 'idle' && (Boolean(plannerResponse) || panelSuggestions.some((s) => s.agent === 'planner')) && panelSuggestions.length > 0);
+  const showAiActivity = showMonitor || showAnalyzer || showPlanner || panelSuggestions.length > 0;
+  const actionableSuggestionCount = panelSuggestions.filter((suggestion) => suggestion.actionable).length;
+
+  const CollapsibleText: React.FC<{ text: string; expanded: boolean; onToggle: () => void }> = ({ text, expanded, onToggle }) => {
+    const lines = text.split('\n');
+    const needsTruncation = lines.length >= 5 || text.length > 250;
+
+    if (!needsTruncation) {
+      return (
+        <div className="mt-1 bg-background/40 border border-border-subtle p-3 rounded-lg text-[11px] text-text-secondary select-text whitespace-pre-wrap leading-relaxed animate-fade-in">
+          {text}
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-1 bg-background/40 border border-border-subtle p-3 rounded-lg text-[11px] text-text-secondary select-text leading-relaxed animate-fade-in flex flex-col gap-1.5">
+        <div
+          className="whitespace-pre-wrap"
+          style={
+            expanded
+              ? undefined
+              : {
+                display: '-webkit-box',
+                WebkitLineClamp: 5,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+                maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
+                WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
+              }
+          }
+        >
+          {text}
+        </div>
+        <button
+          type="button"
+          onClick={onToggle}
+          className="self-end text-[10px] font-bold text-text-muted hover:text-text-primary transition-colors mt-1 cursor-pointer"
+        >
+          {expanded ? 'View Less' : 'View More'}
+        </button>
+      </div>
+    );
+  };
+
+  const renderAgentSuggestions = (agentName: 'monitor' | 'analyzer' | 'planner') => {
+    const agentSuggestions = panelSuggestions.filter((s) => s.agent === agentName);
+    if (agentSuggestions.length === 0) return null;
+    const clusters = buildSuggestionClusters(agentSuggestions);
+
+    return (
+      <div className="flex flex-col gap-3 mt-2.5 shrink-0">
+        {clusters.map((cluster) => {
+          const isExpanded = !cluster.collapsible || expandedSuggestionClusterKeys.includes(cluster.key);
+          let iconNode = <Zap className="w-3.5 h-3.5 text-primary shrink-0" />;
+          let color = 'text-primary';
+
+          if (cluster.type === 'GAP') {
+            iconNode = <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />;
+            color = 'text-warning';
+          } else if (cluster.type === 'TASK') {
+            iconNode = <Zap className="w-3.5 h-3.5 text-success shrink-0" />;
+            color = 'text-success';
+          } else if (cluster.type === 'INSIGHT') {
+            iconNode = <Info className="w-3.5 h-3.5 text-text-muted shrink-0" />;
+            color = 'text-text-muted';
+          }
+
+          return (
+            <div
+              key={cluster.key}
+              className="bg-background/50 border border-border-subtle rounded-xl p-4 flex flex-col gap-3 transition-all min-w-0 shrink-0"
+            >
+              <div className="flex items-center justify-between gap-3 text-xs font-bold">
+                <div className="flex items-center gap-1.5">
+                  {iconNode}
+                  <span className={`tracking-wider uppercase ${color}`}>
+                    {cluster.type}
+                    {cluster.collapsible ? ` (${cluster.suggestions.length})` : ''}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {cluster.type === 'TASK' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigate(`/project/${projectId}/plan`);
+                      }}
+                      className="px-2.5 py-1 rounded-md border border-border bg-surface-raised text-[10px] font-bold text-text-primary hover:border-primary/40 hover:text-primary transition-colors"
+                    >
+                      Preview
+                    </button>
+                  )}
+                  {cluster.collapsible && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExpandedSuggestionClusterKeys((currentKeys) =>
+                          currentKeys.includes(cluster.key)
+                            ? currentKeys.filter((key) => key !== cluster.key)
+                            : [...currentKeys, cluster.key]
+                        );
+                      }}
+                      className="text-[10px] font-bold text-text-muted hover:text-text-primary"
+                    >
+                      {isExpanded ? 'Collapse' : 'Expand'}
+                    </button>
+                  )}
+                </div>
+              </div>
+              {isExpanded && (
+                <div className="flex flex-col gap-3">
+                  {cluster.suggestions.map((suggestion, index) => (
+                    <div
+                      key={suggestion.id}
+                      className={index > 0 ? 'border-t border-border-subtle pt-3' : ''}
+                    >
+                      <p className="text-xs text-text-secondary leading-relaxed select-text">
+                        {suggestion.content}
+                      </p>
+                      {suggestion.actionable && (
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handlePromoteSuggestion(suggestion.id);
+                            }}
+                            disabled={promoteAiActivityItemMutation.isPending}
+                            className="text-[10px] font-bold text-primary hover:text-primary-hover disabled:opacity-50"
+                          >
+                            {promoteAiActivityItemMutation.isPending ? 'Sending...' : 'Send to review'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderedMessages = (projectMessages ?? []).map((message) => {
+    const teammate = detail.teammates.find((member) => member.sessionId === message.sessionId);
+    const isCurrentUser = message.sessionId === currentSessionId;
+
+    return {
+      id: message.id,
+      senderName: isCurrentUser ? 'You' : teammate?.name ?? message.sessionId,
+      senderInitials: isCurrentUser ? 'YO' : teammate?.initials ?? toInitials(message.sessionId),
+      timestamp: new Date(message.createdAt).toLocaleTimeString([], {
+        hour: 'numeric',
+        minute: '2-digit',
+      }),
+      content: message.content,
+      attachments: message.attachments,
+      isCurrentUser,
+      isOptimistic: message.isOptimistic,
+    };
+  });
+
+  const lastUserMessageId = [...renderedMessages]
+    .reverse()
+    .find((msg) => msg.isCurrentUser)?.id;
+  const sourceFileIds = new Set((projectFiles || []).map((file) => file.id));
+  const currentMember = detail.teammates.find((member) => member.sessionId === currentSessionId);
+  const canManageAnyFile = Boolean(currentMember?.isCreator || currentMember?.role === 'APPROVER');
 
   return (
     <div className="flex-grow flex flex-col lg:flex-row lg:h-[calc(100vh-112px)] lg:overflow-hidden bg-background relative lg:p-4 lg:gap-4">
-      {/* 1. Files Panel (Left Column) - Hidden on tablet/mobile unless selected */}
+      {/* 1. Sources Panel (Left Column) */}
       <aside
         className={`w-full lg:w-[22%] lg:min-w-[240px] lg:max-w-[300px] border-r border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface p-6 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'files' ? 'flex absolute inset-0 z-10' : 'hidden'
           } ${showTabletFiles ? 'flex absolute inset-y-0 left-0 w-[260px] z-30 shadow-2xl' : ''}`}
       >
         <div className="flex justify-between items-center">
-          <span className="section-label">Files</span>
+          <span className="section-label">Sources</span>
           {showTabletFiles && (
             <button
               onClick={() => setShowTabletFiles(false)}
@@ -125,30 +582,58 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
         </div>
 
         <div className="flex-grow overflow-y-auto flex flex-col gap-3 pr-1">
-          {detail.files.map((file) => (
+          {files.map((file) => (
             <div
               key={file.id}
-              className="flex items-center gap-3 p-2 hover:bg-primary-muted rounded-sm transition-colors cursor-pointer group"
+              className="flex items-center justify-between gap-3 p-2 hover:bg-primary-muted rounded-sm transition-colors group"
             >
-              <FileText className="w-4 h-4 text-text-muted group-hover:text-primary transition-colors shrink-0" />
-              <div className="overflow-hidden">
-                <p className="text-sm font-semibold text-text-primary truncate">{file.name}</p>
-                <p className="text-xs text-text-muted mt-0.5">{file.type} · {file.size}</p>
+              <div className="min-w-0 flex items-center gap-3">
+                <FileText className="w-4 h-4 text-text-muted group-hover:text-primary transition-colors shrink-0" />
+                <div className="overflow-hidden">
+                  <p className="text-sm font-semibold text-text-primary truncate">{file.name}</p>
+                  <p className="text-xs text-text-muted mt-0.5">{file.type} / {file.size}</p>
+                </div>
               </div>
+              {(canManageAnyFile || file.sessionId === currentSessionId) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleDeleteFile(file.id, file.name);
+                  }}
+                  disabled={deleteProjectFileMutation.isPending}
+                  className="text-[10px] font-semibold uppercase tracking-wide text-error hover:opacity-80 disabled:opacity-50 shrink-0"
+                >
+                  Remove
+                </button>
+              )}
             </div>
           ))}
 
-          {detail.files.length === 0 && (
-            <div className="text-xs text-text-muted italic py-4">No files uploaded.</div>
+          {files.length === 0 && (
+            <div className="text-xs text-text-muted py-4">No sources added.</div>
           )}
         </div>
 
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          onChange={(event) => {
+            void handleUploadSelection(event);
+          }}
+        />
+
         <button
-          onClick={handleFakeUpload}
-          className="btn-ghost border border-solid border-border rounded-full flex items-center justify-center gap-1.5 py-2 hover:border-primary hover:text-primary"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploadSourceFileMutation.isPending}
+          className="btn-ghost border border-solid border-border rounded-full flex items-center justify-center gap-1.5 py-2 hover:border-primary hover:text-primary disabled:opacity-60"
         >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Add File</span>
+          {uploadSourceFileMutation.isPending ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Plus className="w-3.5 h-3.5" />
+          )}
+          <span>{uploadSourceFileMutation.isPending ? 'Uploading...' : 'Add Sources'}</span>
         </button>
       </aside>
 
@@ -195,140 +680,141 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
         <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-6">
           <div className="divider-labeled uppercase">TODAY</div>
 
-          {detail.messages.map((msg) => {
-            const isUser = msg.senderName === 'You';
-            const isAI = msg.isAI;
+          {isMessagesLoading && (
+            <div className="text-sm text-text-muted">Loading messages...</div>
+          )}
 
-            if (isAI && msg.aiSuggestion) {
-              const sug = msg.aiSuggestion;
-              const isPending = sug.status === 'pending';
-              const isVisibleInChat = visibleSuggestionId === sug.id;
+          {messagesError && (
+            <div className="text-sm text-error">
+              {messagesError instanceof Error ? messagesError.message : 'Unable to load messages.'}
+            </div>
+          )}
 
-              if (!isVisibleInChat) {
-                return null;
-              }
+          {!isMessagesLoading && !messagesError && renderedMessages.length === 0 && (
+            <div className="text-sm text-text-muted">
+              No messages yet. Start the conversation with your project members.
+            </div>
+          )}
 
-              return (
-                <div
-                  key={msg.id}
-                  id={`msg-sug-${sug.id}`}
-                  className="bg-primary-muted border border-primary/20 rounded-sm p-6 flex flex-col gap-4 max-w-[680px] w-full self-end fade-up scroll-mt-6"
-                >
-                  <div className="flex justify-between items-center text-xs font-semibold">
-                    <div className="flex items-center gap-2 text-primary">
-                      <Zap className="w-3.5 h-3.5 text-primary shrink-0" />
-                      <span className="tracking-wide uppercase">AI SUGGESTION</span>
-                    </div>
-                    <span className="text-text-muted">{msg.timestamp}</span>
-                  </div>
-
-                  <p className="text-md text-text-secondary leading-relaxed select-text">
-                    {msg.content}
-                  </p>
-
-                  <div className="border border-border-subtle bg-background p-4 rounded-sm">
-                    <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">Proposed plan change</p>
-
-                    {editingSugId === sug.id ? (
-                      <div className="mt-2 flex flex-col gap-2">
-                        <textarea
-                          value={editingText}
-                          onChange={(e) => setEditingText(e.target.value)}
-                          rows={2}
-                          className="bg-surface border border-border p-2 text-sm text-text-primary focus:outline-none focus:border-primary rounded-sm"
-                        />
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => setEditingSugId(null)}
-                            className="px-2.5 py-1 text-xs btn-secondary"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={() => {
-                              sug.content = editingText; // direct mutation for local state
-                              setEditingSugId(null);
-                              addToast('success', 'Plan change draft updated.');
-                            }}
-                            className="px-2.5 py-1 text-xs btn-primary"
-                          >
-                            Save
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-sm font-semibold text-text-primary mt-1 select-text">
-                        {sug.content}
-                      </p>
-                    )}
-                  </div>
-
-                  {isPending && (
-                    <div className="flex gap-3 mt-1">
-                      <button
-                        onClick={() => acceptChange(sug.id)}
-                        className="btn-primary py-1.5 px-4 text-xs font-semibold flex items-center gap-1"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Accept</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingSugId(sug.id);
-                          setEditingText(sug.content);
-                        }}
-                        className="btn-secondary py-1.5 px-4 text-xs font-semibold flex items-center gap-1"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                        <span>Edit</span>
-                      </button>
-                      <button
-                        onClick={() => rejectChange(sug.id)}
-                        className="btn-secondary text-error hover:bg-error/10 hover:border-error/30 py-1.5 px-4 text-xs font-semibold flex items-center gap-1"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                        <span>Reject</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {!isPending && (
-                    <div className="text-xs font-semibold flex items-center gap-1.5 mt-1 select-none">
-                      {sug.status === 'accepted' && (
-                        <>
-                          <span className="text-success flex items-center gap-1"><Check className="w-3.5 h-3.5" /> Approved & Synced</span>
-                          <span className="text-text-muted">plan updated</span>
-                        </>
-                      )}
-                      {sug.status === 'rejected' && (
-                        <span className="text-error flex items-center gap-1"><X className="w-3.5 h-3.5" /> Plan change rejected</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            }
-
+          {renderedMessages.map((msg) => {
+            const isUser = msg.isCurrentUser;
             return (
               <div
                 key={msg.id}
-                className={`flex gap-4 max-w-[680px] w-full fade-up ${isUser ? 'self-end flex-row-reverse' : 'self-start'
-                  }`}
+                className={`flex gap-4 max-w-[680px] w-full fade-up transition-opacity duration-300 ${isUser ? 'self-end flex-row-reverse' : 'self-start'
+                  } ${msg.isOptimistic ? 'opacity-70' : 'opacity-100'}`}
               >
                 {/* Avatar */}
                 <div className="h-8 w-8 rounded-full bg-surface border border-border flex items-center justify-center text-xs font-semibold text-text-muted select-none shrink-0">
                   {msg.senderInitials}
                 </div>
 
-                <div className={`flex flex-col gap-1 w-full ${isUser ? 'items-end' : 'items-start'}`}>
+                <div className={`flex flex-col gap-1.5 w-full ${isUser ? 'items-end' : 'items-start'}`}>
                   <div className={`flex items-baseline gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
                     <span className="text-xs font-semibold text-text-muted">{msg.senderName}</span>
                     <span className="text-[10px] text-text-muted font-medium">{msg.timestamp}</span>
                   </div>
-                  <p className={`text-md text-text-secondary leading-relaxed select-text whitespace-pre-wrap ${isUser ? 'text-right' : 'text-left'
-                    }`}>
-                    {msg.content}
-                  </p>
+
+                  <div className="relative group/msg-content max-w-[85%] w-fit flex flex-col gap-1.5">
+                    {/* Message Bubble Container - Only for Text */}
+                    {renderMessageText(msg.content, msg.attachments) && (
+                      <div
+                        className={`rounded-2xl py-2 px-4 text-sm select-text leading-relaxed ${isUser
+                          ? 'bg-primary-muted border border-primary/10 text-text-primary rounded-tr-none'
+                          : 'bg-surface-raised border border-border-subtle text-text-secondary rounded-tl-none'
+                          }`}
+                      >
+                        {renderBubbleText(msg.content, msg.attachments)}
+                      </div>
+                    )}
+
+                    {/* Attachments rendered outside of the text bubble container */}
+                    {msg.attachments.length > 0 && (
+                      <div className="flex flex-col gap-2 w-full sm:max-w-[360px]">
+                        {msg.attachments.map((attachment) => {
+                          const isInSources = sourceFileIds.has(attachment.uploadedFileId);
+                          return (
+                            <div
+                              key={attachment.uploadedFileId}
+                              className="rounded-xl border border-border-subtle bg-background/60 px-3 py-3 flex flex-col gap-3"
+                            >
+                              <ChatAttachmentPreview
+                                projectId={projectId}
+                                attachment={attachment}
+                                onOpenMedia={(media) =>
+                                  setActiveMediaAttachment({
+                                    ...media,
+                                    uploadedFileId: attachment.uploadedFileId,
+                                    sizeBytes: attachment.sizeBytes,
+                                    isInSources,
+                                    canRemove: canManageAnyFile || msg.isCurrentUser,
+                                  })
+                                }
+                              />
+                              <div className="min-w-0 flex items-center gap-2">
+                                <FileText className="w-4 h-4 text-text-muted shrink-0" />
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-text-primary truncate">
+                                    {attachment.filename}
+                                  </div>
+                                  <div className="text-[11px] text-text-muted">
+                                    {attachment.mimeType.split('/').pop()?.toUpperCase() || 'FILE'} / {formatFileSize(attachment.sizeBytes)}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Reply Action Button */}
+                    <div
+                      className={`absolute -top-3 opacity-0 group-hover/msg-content:opacity-100 transition-opacity duration-150 z-20 ${isUser ? 'left-3' : 'right-3'
+                        }`}
+                    >
+                      <div className="relative group/reply-btn">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReplyToMessage({
+                              id: msg.id,
+                              senderName: msg.senderName,
+                              content: renderMessageText(msg.content, msg.attachments),
+                            });
+                            chatInputRef.current?.focus();
+                          }}
+                          className="flex h-7 w-7 items-center justify-center rounded-full border border-border-subtle bg-surface shadow-sm hover:bg-surface-raised hover:text-primary hover:border-primary/30 hover:scale-110 active:scale-95 transition-all duration-150 cursor-pointer"
+                          aria-label="Reply to this message"
+                        >
+                          <Reply className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Tooltip */}
+                        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 opacity-0 group-hover/reply-btn:opacity-100 transition-opacity duration-200 pointer-events-none z-30 flex flex-col items-center">
+                          <div className="bg-surface-raised border border-border-subtle text-text-primary text-[10px] px-2.5 py-1 rounded-md shadow-lg font-medium tracking-wide whitespace-nowrap">
+                            Reply to this message
+                          </div>
+                          <div className="w-1.5 h-1.5 bg-surface-raised border-r border-b border-border-subtle transform rotate-45 -mt-1" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {isUser && (msg.isOptimistic || msg.id === lastUserMessageId) && (
+                    <div className="mt-0.5 flex justify-end items-center text-text-muted select-none">
+                      {msg.isOptimistic ? (
+                        <span className="flex items-center gap-1" title="Sending...">
+                          <span className='text-[11px]'>Sending</span>
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 font-medium animate-fade-in" title="Delivered">
+                          <span className='text-[11px]'>Delivered</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -342,12 +828,64 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
           onSubmit={handleSend}
           className="p-6 border-t border-border-subtle bg-surface flex flex-col shrink-0"
         >
+          {replyToMessage && (
+            <div className="mb-3 flex items-center justify-between rounded-lg bg-surface-raised border border-border-subtle px-4 py-2 text-xs text-text-secondary animate-fade-in select-none">
+              <div className="flex flex-col gap-0.5 min-w-0">
+                <div className="flex items-center gap-1.5 font-semibold text-text-primary">
+                  <Reply className="w-3 h-3 text-primary shrink-0" />
+                  <span>Replying to {replyToMessage.senderName}</span>
+                </div>
+                <div className="truncate text-text-muted select-text">
+                  {replyToMessage.content || 'Shared attachment(s)'}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReplyToMessage(null)}
+                className="text-text-muted hover:text-text-primary p-1 rounded-full hover:bg-border transition-colors shrink-0 ml-4 cursor-pointer"
+                aria-label="Cancel reply"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {pendingChatFiles.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {pendingChatFiles.map((file) => (
+                <div
+                  key={`${file.name}-${file.lastModified}`}
+                  className="inline-flex items-center gap-2 rounded-full border border-border bg-surface-raised px-3 py-1 text-xs text-text-secondary"
+                >
+                  <FileText className="w-3.5 h-3.5 text-text-muted" />
+                  <span className="max-w-[180px] truncate">{file.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemovePendingChatFile(file.name, file.lastModified)}
+                    className="text-text-muted hover:text-text-primary"
+                    aria-label={`Remove ${file.name}`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <input
+            ref={chatFileInputRef}
+            type="file"
+            className="hidden"
+            multiple
+            onChange={handleChatAttachmentSelection}
+          />
+
           <div
             style={{ backgroundColor: 'transparent' }}
             className="flex items-center gap-3 bg-transparent border border-border rounded-xl pr-3 pl-5 py-2 w-full focus-within:border-text-muted transition-colors"
           >
             <textarea
-              required
+              ref={chatInputRef}
               placeholder="Type your message here..."
               value={messageText}
               onChange={(e) => setMessageText(e.target.value)}
@@ -355,7 +893,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  handleSend(e);
+                  void handleSend(e);
                 }
               }}
               style={{ backgroundColor: 'transparent', border: 'none', outline: 'none' }}
@@ -363,8 +901,23 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
             />
 
             <button
+              type="button"
+              onClick={() => chatFileInputRef.current?.click()}
+              disabled={sendMessageMutation.isPending || uploadChatFileMutation.isPending}
+              className="h-8 w-8 rounded-full flex items-center justify-center transition-colors bg-surface-raised hover:bg-border text-text-secondary hover:text-text-primary disabled:opacity-40 disabled:hover:bg-surface-raised disabled:hover:text-text-secondary shrink-0"
+              title="Attach file to team chat"
+              aria-label="Attach file to team chat"
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
+
+            <button
               type="submit"
-              disabled={!messageText.trim()}
+              disabled={
+                (!messageText.trim() && pendingChatFiles.length === 0) ||
+                sendMessageMutation.isPending ||
+                uploadChatFileMutation.isPending
+              }
               className="h-8 w-8 rounded-full flex items-center justify-center transition-colors bg-surface-raised hover:bg-border text-text-secondary hover:text-text-primary disabled:opacity-40 disabled:hover:bg-surface-raised disabled:hover:text-text-secondary shrink-0 cursor-pointer disabled:cursor-not-allowed"
               title="Send message"
             >
@@ -376,123 +929,137 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
 
       {/* 3. AI Activity Panel (Right Column) */}
       <aside
-        className={`w-full lg:w-[28%] lg:min-w-[300px] lg:max-w-[380px] border-l border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface p-6 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'ai' ? 'flex absolute inset-0 z-10' : 'hidden'
+        className={`w-full lg:w-[28%] lg:min-w-[300px] lg:max-w-[380px] border-l border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface py-6 pl-6 pr-0 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'ai' ? 'flex absolute inset-0 z-10' : 'hidden'
           }`}
       >
-        <span className="section-label">AI Activity</span>
-
-        {/* Agents statuses */}
-        <div className="flex flex-col gap-2">
-          <span className="text-xs font-bold text-text-primary tracking-wider uppercase">AGENTS</span>
-
-          <div className="flex flex-col border border-border-subtle bg-background/50 rounded-sm divide-y divide-border-subtle/50">
-            {Object.entries(detail.agentStatus).map(([agent, status]) => {
-              const isActive = status === 'active';
-              const isComplete = status === 'complete';
-              const isError = status === 'error';
-
-              let labelColor = 'text-text-muted';
-              let iconNode: React.ReactNode = <span className="h-2 w-2 rounded-full bg-text-muted shrink-0" />;
-
-              if (isActive) {
-                labelColor = 'text-primary font-bold';
-                iconNode = <span className="h-2 w-2 rounded-full agent-pulse-dot shrink-0" />;
-              } else if (isComplete) {
-                labelColor = 'text-success';
-                iconNode = <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />;
-              } else if (isError) {
-                labelColor = 'text-error';
-                iconNode = <AlertCircle className="w-3.5 h-3.5 text-error shrink-0" />;
-              }
-
-              return (
-                <div key={agent} className="flex justify-between items-center px-4 py-2.5 text-xs">
-                  <span className="font-mono text-text-primary tracking-wider font-semibold">{agent}</span>
-                  <div className="flex items-center gap-2">
-                    {iconNode}
-                    <span className={`uppercase tracking-widest text-[10px] ${labelColor}`}>
-                      {status === 'active' ? 'Active' : status}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+        <div className="flex items-center justify-between gap-3 shrink-0 pr-6">
+          <span className="section-label">AI Activity</span>
+          {actionableSuggestionCount > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                void handlePromoteAllSuggestions();
+              }}
+              disabled={promoteAllAiActivityMutation.isPending}
+              className="text-[10px] font-bold text-primary hover:text-primary-hover disabled:opacity-50"
+            >
+              {promoteAllAiActivityMutation.isPending ? 'Sending...' : `Send All (${actionableSuggestionCount})`}
+            </button>
+          )}
         </div>
 
-        <div className="border-t border-border-subtle pt-4 flex flex-col gap-3">
-          <span className="text-xs font-bold text-text-primary tracking-wider uppercase">SUGGESTIONS</span>
-
-          <div className="flex-grow overflow-y-auto flex flex-col gap-3 max-h-[350px]">
-            {detail.panelSuggestions.map((sug) => {
-              const chatSugId = sug.id === 'ps_2' ? 'sug_1' : (sug.id.startsWith('ps_ch_') ? sug.id.replace('ps_', '') : sug.id);
-              const isVisible = visibleSuggestionId === chatSugId;
-              let iconNode = <Zap className="w-3.5 h-3.5 text-primary shrink-0" />;
-              let color = 'text-primary';
-
-              if (sug.type === 'GAP') {
-                iconNode = <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />;
-                color = 'text-warning';
-              } else if (sug.type === 'TASK') {
-                iconNode = <Zap className="w-3.5 h-3.5 text-success shrink-0" />;
-                color = 'text-success';
-              } else if (sug.type === 'INSIGHT') {
-                iconNode = <Info className="w-3.5 h-3.5 text-text-muted shrink-0" />;
-                color = 'text-text-muted';
-              }
-
-              return (
-                <div
-                  key={sug.id}
-                  className="bg-background border border-border-subtle rounded-sm p-4 flex flex-col gap-2 transition-all"
-                >
-                  <div className="flex justify-between items-center text-xs font-bold">
-                    <div className="flex items-center gap-1.5">
-                      {iconNode}
-                      <span className={`tracking-wider uppercase ${color}`}>{sug.type}</span>
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-6 pr-6 pb-6">
+          {showAiActivity ? (
+            <>
+              {/* ORCAS status log */}
+              {(showMonitor || showAnalyzer || showPlanner) && (
+                <div className="flex flex-col gap-5 shrink-0 py-2">
+                  {/* 1. Monitor Orca */}
+                  {showMonitor && (
+                    <div className="flex flex-col gap-1.5">
+                      {monitorStatus === 'active' ? (
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-primary animate-pulse">
+                          <span>Monitor orca executing conversation checks</span>
+                          <Eye className="w-3.5 h-3.5 animate-bounce text-text-muted" />
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium mt-0.5">
+                          {monitorStatus === 'error' ? (
+                            <>
+                              <AlertCircle className="w-3 h-3 text-error shrink-0" />
+                              <span className="text-error">Checking failed</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-3 h-3 text-success shrink-0" />
+                              <span className="text-text-muted">Checking completed</span>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      {monitorStatus === 'idle' && monitorResponse && (
+                        <CollapsibleText
+                          text={monitorResponse}
+                          expanded={monitorResponseExpanded}
+                          onToggle={() => setMonitorResponseExpanded(!monitorResponseExpanded)}
+                        />
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const nextId = isVisible ? null : chatSugId;
-                        setVisibleSuggestionId(nextId);
-                        if (nextId) {
-                          setTimeout(() => {
-                            const el = document.getElementById(`msg-sug-${nextId}`);
-                            if (el) {
-                              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            }
-                          }, 120);
-                        }
-                      }}
-                      className="text-text-muted hover:text-text-primary p-0.5 hover:bg-surface-raised rounded transition-colors cursor-pointer"
-                      title={isVisible ? "Hide suggestion details" : "View suggestion details"}
-                    >
-                      {isVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    </button>
-                  </div>
-                  {isVisible && (
-                    <p className="text-xs text-text-secondary leading-relaxed select-text mt-1 fade-up">
-                      {sug.content}
-                    </p>
                   )}
-                  <div className="flex justify-end mt-1">
-                    <a
-                      href={`/project/${projectId}/plan`}
-                      className="btn-ghost p-0 text-[10px] font-bold text-primary hover:bg-transparent flex items-center gap-1"
-                    >
-                      <span>Go to Plan</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </a>
-                  </div>
-                </div>
-              );
-            })}
 
-            {detail.panelSuggestions.length === 0 && (
-              <div className="text-xs text-text-muted italic py-4">No active warnings or suggestions.</div>
-            )}
-          </div>
+                  {/* 2. Analyzer Orca */}
+                  {showAnalyzer && (
+                    <div className="flex flex-col gap-1.5">
+                      {analyzerStatus === 'active' ? (
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-primary animate-pulse">
+                          <span>Analyzer orca executing message analysis</span>
+                          <Compass className="w-3.5 h-3.5 animate-spin text-text-muted" style={{ animationDuration: '3s' }} />
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium mt-0.5">
+                          {analyzerStatus === 'error' ? (
+                            <>
+                              <AlertCircle className="w-3 h-3 text-error shrink-0" />
+                              <span className="text-error">Analysis failed</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-3 h-3 text-success shrink-0" />
+                              <span className="text-text-muted">Analysis completed</span>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      {analyzerStatus === 'idle' && analyzerResponse && (
+                        <CollapsibleText
+                          text={analyzerResponse}
+                          expanded={analyzerResponseExpanded}
+                          onToggle={() => setAnalyzerResponseExpanded(!analyzerResponseExpanded)}
+                        />
+                      )}
+                      {analyzerStatus === 'idle' && renderAgentSuggestions('analyzer')}
+                    </div>
+                  )}
+
+                  {/* 3. Planner Orca */}
+                  {showPlanner && (
+                    <div className="flex flex-col gap-1.5">
+                      {plannerStatus === 'active' ? (
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-primary animate-pulse">
+                          <span>Planner orca executing planning</span>
+                          <Calendar className="w-3.5 h-3.5 animate-bounce text-text-muted" />
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium mt-0.5">
+                          {plannerStatus === 'error' ? (
+                            <>
+                              <AlertCircle className="w-3 h-3 text-error shrink-0" />
+                              <span className="text-error">Planning failed</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-3 h-3 text-success shrink-0" />
+                              <span className="text-text-muted">Planning completed</span>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      {plannerStatus === 'idle' && plannerResponse && (
+                        <CollapsibleText
+                          text={plannerResponse}
+                          expanded={plannerResponseExpanded}
+                          onToggle={() => setPlannerResponseExpanded(!plannerResponseExpanded)}
+                        />
+                      )}
+                      {plannerStatus === 'idle' && renderAgentSuggestions('planner')}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-xs text-text-muted italic py-4">No active warnings or suggestions.</div>
+          )}
         </div>
       </aside>
 
@@ -524,84 +1091,344 @@ export const ChatView: React.FC<ChatViewProps> = ({ projectId }) => {
         </button>
       </nav>
 
-      {/* Invite Teammates Modal */}
-      <Modal
+      {/* Share / Members Modal */}
+      <ShareProjectModal
         isOpen={isInviteOpen}
         onClose={() => setIsInviteOpen(false)}
-        title="INVITE TEAMMATES"
+        projectId={projectId}
+        projectName={currentProject?.name || 'Project Workspace'}
+      />
+      <Modal
+        isOpen={Boolean(activeMediaAttachment)}
+        onClose={() => setActiveMediaAttachment(null)}
+        title={
+          activeMediaAttachment?.mimeType.startsWith('image/')
+            ? 'Image Preview'
+            : activeMediaAttachment?.mimeType.startsWith('video/')
+              ? 'Video Preview'
+              : 'File Preview'
+        }
+        maxWidthClass="max-w-[1100px]"
+        className="p-5"
       >
-        <form onSubmit={handleInviteSubmit} className="flex flex-col gap-5">
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold text-text-muted uppercase tracking-wider">
-              Teammate Name
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. Sarah Connor"
-              value={inviteName}
-              onChange={(e) => setInviteName(e.target.value)}
-              className="bg-background border border-border rounded-sm px-4 py-2.5 text-text-primary text-md focus:outline-none focus:border-primary placeholder-text-muted"
+        {activeMediaAttachment && (
+          <div className="flex flex-col gap-4">
+            <div className="text-xs text-text-muted">{activeMediaAttachment.filename}</div>
+            {activeMediaAttachment.mimeType.startsWith('image/') ? (
+              <img
+                src={activeMediaAttachment.signedUrl}
+                alt={activeMediaAttachment.filename}
+                className="block max-h-[75vh] w-full object-contain rounded-lg bg-black/10"
+              />
+            ) : activeMediaAttachment.mimeType.startsWith('video/') ? (
+              <video
+                controls
+                preload="metadata"
+                className="block max-h-[75vh] w-full rounded-lg bg-black"
+                src={activeMediaAttachment.signedUrl}
+              />
+            ) : (
+              <div className="rounded-lg border border-border-subtle bg-surface-raised p-4 text-sm text-text-secondary">
+                <div className="font-semibold text-text-primary">{activeMediaAttachment.filename}</div>
+                <div className="mt-1 text-xs text-text-muted">
+                  {activeMediaAttachment.mimeType} / {formatFileSize(activeMediaAttachment.sizeBytes)}
+                </div>
+              </div>
+            )}
+            <ChatAttachmentActions
+              attachment={activeMediaAttachment}
+              onAddToSources={() => {
+                void handlePromoteChatAttachment(
+                  activeMediaAttachment.uploadedFileId,
+                  activeMediaAttachment.filename
+                );
+              }}
+              onRemove={() => {
+                void handleDeleteFile(
+                  activeMediaAttachment.uploadedFileId,
+                  activeMediaAttachment.filename
+                );
+                setActiveMediaAttachment(null);
+              }}
+              canRemove={activeMediaAttachment.canRemove}
+              isInSources={activeMediaAttachment.isInSources}
+              isPromoting={promoteProjectFileMutation.isPending}
+              isDeleting={deleteProjectFileMutation.isPending}
             />
           </div>
-
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold text-text-muted uppercase tracking-wider">
-              Email Address
-            </label>
-            <input
-              type="email"
-              required
-              placeholder="teammate@company.com"
-              value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
-              className="bg-background border border-border rounded-sm px-4 py-2.5 text-text-primary text-md focus:outline-none focus:border-primary placeholder-text-muted"
-            />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold text-text-muted uppercase tracking-wider">
-              Permission Level
-            </label>
-            <select
-              value={inviteRole}
-              onChange={(e) => setInviteRole(e.target.value as any)}
-              className="bg-background border border-border rounded-sm px-4 py-2.5 text-text-primary text-md focus:outline-none focus:border-primary cursor-pointer"
-            >
-              <option value="VIEWER">VIEWER</option>
-              <option value="EDITOR">EDITOR</option>
-              <option value="APPROVER">APPROVER</option>
-            </select>
-          </div>
-
-          <div className="border border-border-subtle bg-background p-4 rounded-sm">
-            <p className="text-xs font-semibold text-text-primary uppercase tracking-wider">
-              {inviteRole} privileges
-            </p>
-            <p className="text-xs text-text-secondary mt-1">
-              {roleDescriptions[inviteRole]}
-            </p>
-          </div>
-
-          <div className="flex justify-end gap-3 border-t border-border-subtle pt-4 mt-2">
-            <button
-              type="button"
-              onClick={() => setIsInviteOpen(false)}
-              className="btn-secondary py-1.5 px-5 text-xs font-semibold"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn-primary py-1.5 px-5 text-xs font-semibold flex items-center gap-1.5"
-            >
-              <span>Send Invite</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </form>
+        )}
       </Modal>
     </div>
   );
 };
+
+export const ChatView: React.FC<ChatViewProps> = (props) => {
+  return (
+    <QueryProvider>
+      <ChatViewInner {...props} />
+    </QueryProvider>
+  );
+};
+
 export default ChatView;
+
+function formatFileSize(sizeBytes: number): string {
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  if (sizeBytes < 1024 * 1024 * 1024) return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(sizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function renderMessageText(
+  content: string,
+  attachments: Array<{ uploadedFileId: string }>
+): string {
+  const normalized = content.trim();
+  if (
+    attachments.length > 0 &&
+    (normalized === 'Shared an attachment.' || normalized === `Shared ${attachments.length} attachments.`)
+  ) {
+    return '';
+  }
+
+  return content;
+}
+
+function renderBubbleText(content: string, attachments: any[]) {
+  const rawText = renderMessageText(content, attachments);
+  if (!rawText) return null;
+
+  const replyRegex = /^>\s*\*\*Replying to @([^\*\*]+)\*\*:\s*\*([^*]+)\*(?:\n\n([\s\S]*))?$/;
+  const match = rawText.match(replyRegex);
+
+  if (match) {
+    const replyToUser = match[1];
+    const replyExcerpt = match[2];
+    const body = match[3] || '';
+
+    return (
+      <div className="flex flex-col gap-1.5">
+        <div className="border-l-2 border-primary/40 pl-2.5 py-0.5 text-xs text-text-muted italic bg-black/10 dark:bg-white/5 rounded-r max-w-full truncate select-none">
+          <span className="font-semibold text-text-secondary">Replying to @{replyToUser}</span>: {replyExcerpt}
+        </div>
+        {body && <div className="whitespace-pre-wrap">{body}</div>}
+      </div>
+    );
+  }
+
+  return <div className="whitespace-pre-wrap">{rawText}</div>;
+}
+
+type ChatAttachmentDisplay = {
+  uploadedFileId: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
+function ChatAttachmentPreview({
+  projectId,
+  attachment,
+  onOpenMedia,
+}: {
+  projectId: string;
+  attachment: ChatAttachmentDisplay;
+  onOpenMedia: (media: { filename: string; mimeType: string; signedUrl: string }) => void;
+}) {
+  const { data, isLoading } = useProjectFileAccessUrl(projectId, attachment.uploadedFileId);
+  const signedUrl = data?.signedUrl;
+  const isImage = attachment.mimeType.startsWith('image/');
+  const isVideo = attachment.mimeType.startsWith('video/');
+  const canPreviewVideo = isVideo && attachment.sizeBytes <= 50 * 1024 * 1024;
+
+  if (!signedUrl || (!isImage && !canPreviewVideo)) {
+    if (isLoading) {
+      return <div className="text-[11px] text-text-muted">Loading preview...</div>;
+    }
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          onOpenMedia({
+            filename: attachment.filename,
+            mimeType: attachment.mimeType,
+            signedUrl: signedUrl || '',
+          })
+        }
+        className="flex items-center justify-between rounded-lg border border-border-subtle bg-surface-raised px-3 py-2 text-left transition-colors hover:border-primary/40"
+      >
+        <span className="text-[11px] font-medium text-text-primary">Open file details</span>
+        <ExternalLink className="w-3.5 h-3.5 text-text-muted" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface-raised">
+      {isImage ? (
+        <button
+          type="button"
+          onClick={() =>
+            onOpenMedia({
+              filename: attachment.filename,
+              mimeType: attachment.mimeType,
+              signedUrl,
+            })
+          }
+          className="block w-full"
+        >
+          <img
+            src={signedUrl}
+            alt={attachment.filename}
+            className="block max-h-72 w-full object-contain bg-black/5"
+          />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() =>
+            onOpenMedia({
+              filename: attachment.filename,
+              mimeType: attachment.mimeType,
+              signedUrl,
+            })
+          }
+          className="block w-full"
+        >
+          <video
+            muted
+            preload="metadata"
+            className="block max-h-72 w-full bg-black"
+            src={signedUrl}
+          />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ChatAttachmentActions({
+  attachment,
+  onAddToSources,
+  onRemove,
+  canRemove,
+  isInSources,
+  isPromoting,
+  isDeleting,
+}: {
+  attachment: {
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+    signedUrl: string;
+  };
+  onAddToSources: () => void;
+  onRemove: () => void;
+  canRemove: boolean;
+  isInSources: boolean;
+  isPromoting: boolean;
+  isDeleting: boolean;
+}) {
+  const signedUrl = attachment.signedUrl;
+  const isMedia =
+    attachment.mimeType.startsWith('image/') || attachment.mimeType.startsWith('video/');
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {isInSources ? (
+        <span className="inline-flex items-center rounded-md border border-success/30 bg-success/10 px-2.5 py-1.5 text-[11px] font-medium text-success">
+          In Sources
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={onAddToSources}
+          disabled={isPromoting}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-[11px] font-medium text-text-primary hover:border-primary/40 hover:text-primary transition-colors disabled:opacity-50"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span>{isPromoting ? 'Adding...' : 'Add to Sources'}</span>
+        </button>
+      )}
+      {!isMedia && (
+        <a
+          href={signedUrl || '#'}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-[11px] font-medium text-text-primary hover:border-primary/40 hover:text-primary transition-colors"
+          aria-disabled={!signedUrl}
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
+          <span>Open file</span>
+        </a>
+      )}
+      <a
+        href={signedUrl || '#'}
+        download={attachment.filename}
+        className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-[11px] font-medium text-text-primary hover:border-primary/40 hover:text-primary transition-colors"
+        aria-disabled={!signedUrl}
+      >
+        <Download className="w-3.5 h-3.5" />
+        <span>Download</span>
+      </a>
+      {canRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={isDeleting}
+          className="inline-flex items-center gap-1 rounded-md border border-error/30 bg-error/10 px-2.5 py-1.5 text-[11px] font-medium text-error hover:opacity-80 disabled:opacity-50"
+        >
+          <X className="w-3.5 h-3.5" />
+          <span>{isDeleting ? 'Removing...' : 'Remove'}</span>
+        </button>
+      )}
+      {attachment.mimeType.startsWith('video/') && attachment.sizeBytes > 50 * 1024 * 1024 && (
+        <span className="text-[11px] text-text-muted">Preview limited to 50 MB.</span>
+      )}
+    </div>
+  );
+}
+
+function buildSuggestionClusters(
+  suggestions: SuggestionCluster['suggestions']
+): SuggestionCluster[] {
+  const clusters: SuggestionCluster[] = [];
+  let index = 0;
+
+  while (index < suggestions.length) {
+    const current = suggestions[index];
+    if (!current) {
+      index += 1;
+      continue;
+    }
+
+    if (current.type === 'GAP' || current.type === 'TASK') {
+      const groupedSuggestions = [current];
+      let nextIndex = index + 1;
+
+      while (nextIndex < suggestions.length && suggestions[nextIndex]?.type === current.type) {
+        groupedSuggestions.push(suggestions[nextIndex]);
+        nextIndex += 1;
+      }
+
+      clusters.push({
+        key: `${current.type.toLowerCase()}-cluster-${current.id}`,
+        type: current.type,
+        suggestions: groupedSuggestions,
+        collapsible: groupedSuggestions.length >= 2,
+      });
+      index = nextIndex;
+      continue;
+    }
+
+    clusters.push({
+      key: `${current.type.toLowerCase()}-${current.id}`,
+      type: current.type,
+      suggestions: [current],
+      collapsible: false,
+    });
+    index += 1;
+  }
+
+  return clusters;
+}

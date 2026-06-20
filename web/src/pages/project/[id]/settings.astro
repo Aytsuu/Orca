@@ -4,13 +4,7 @@ import Page from '../../../layouts/Page.astro';
 import { TabBar } from '../../../components/islands/ui/TabBar';
 import SettingsView from '../../../components/islands/features/SettingsView';
 
-export function getStaticPaths() {
-  const ids = ['runway-q3', 'billing-v2', 'untitled'];
-  for (let i = 1; i <= 20; i++) {
-    ids.push(`untitled-${i}`);
-  }
-  return ids.map(id => ({ params: { id } }));
-}
+export const prerender = false;
 
 const { id } = Astro.params;
 
@@ -20,7 +14,7 @@ if (!id) {
 ---
 
 <Page title="Settings — Orca">
-  <TabBar currentTab="settings" projectId={id} client:load />
+  <TabBar currentTab="settings" projectId={id} />
   <SettingsView projectId={id} client:only="react">
     <div class="flex-grow flex bg-background w-full"></div>
   </SettingsView>

@@ -5,10 +5,11 @@ import { AlertTriangle, X } from 'lucide-react';
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
-  title: string;
+  title?: string;
   children: React.ReactNode;
   maxWidthClass?: string;
   isWarning?: boolean;
+  className?: string;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -17,7 +18,8 @@ export const Modal: React.FC<ModalProps> = ({
   title,
   children,
   maxWidthClass = 'max-w-[520px]',
-  isWarning = false
+  isWarning = false,
+  className = ''
 }) => {
   useEffect(() => {
     if (isOpen) {
@@ -42,27 +44,29 @@ export const Modal: React.FC<ModalProps> = ({
 
       {/* Modal Container */}
       <div
-        className={`relative w-full ${maxWidthClass} bg-surface-raised border border-border rounded-sm shadow-2xl p-8 flex flex-col gap-6 fade-up z-10`}
+        className={`relative w-full ${maxWidthClass} bg-surface-raised border border-border rounded-2xl shadow-2xl p-8 flex flex-col gap-6 pop-in z-10 ${className}`}
         style={{
           boxShadow: '0 20px 40px -15px rgba(0,0,0,0.8)'
         }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border-subtle pb-3">
-          <div className="flex items-center gap-2">
-            {isWarning && <AlertTriangle className="w-4 h-4 text-warning shrink-0" />}
-            <h3 className="section-label font-bold text-text-primary text-sm tracking-widest uppercase">
-              {title}
-            </h3>
+        {title && (
+          <div className="flex items-center justify-between border-b border-border-subtle pb-3">
+            <div className="flex items-center gap-2">
+              {isWarning && <AlertTriangle className="w-4 h-4 text-warning shrink-0" />}
+              <h3 className="section-label font-bold text-text-primary text-sm tracking-widest uppercase">
+                {title}
+              </h3>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-text-muted hover:text-text-primary transition-colors flex items-center justify-center"
+              aria-label="Close modal"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="text-text-muted hover:text-text-primary transition-colors flex items-center justify-center"
-            aria-label="Close modal"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        )}
 
         {/* Content */}
         <div className="text-text-secondary text-md leading-relaxed">{children}</div>

@@ -932,7 +932,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
         className={`w-full lg:w-[28%] lg:min-w-[300px] lg:max-w-[380px] border-l border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface py-6 pl-6 pr-0 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'ai' ? 'flex absolute inset-0 z-10' : 'hidden'
           }`}
       >
-        <div className="flex items-center justify-between gap-3 shrink-0 pr-6 pt-.5">
+        <div className="flex items-center justify-between gap-3 shrink-0 pr-6">
           <span className="section-label">AI Activity</span>
           {actionableSuggestionCount > 1 && (
             <button

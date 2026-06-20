@@ -31,6 +31,7 @@ export const POST: APIRoute = async (context) => {
   if (!(file instanceof File)) {
     return jsonResponse({ error: 'A file is required.' }, 400);
   }
+  const purpose = formData?.get('purpose') === 'chat' ? 'chat' : 'source';
 
   const filename = file.name.trim();
   const mimeType = file.type.trim() || 'application/octet-stream';
@@ -41,7 +42,7 @@ export const POST: APIRoute = async (context) => {
   const uploadUrlResponse = await fetch(
     `${getApiBaseUrl()}/api/v1/projects/${projectId}/files/upload-url?filename=${encodeURIComponent(
       filename
-    )}&mime_type=${encodeURIComponent(mimeType)}`,
+    )}&mime_type=${encodeURIComponent(mimeType)}&purpose=${encodeURIComponent(purpose)}`,
     {
       headers: {
         'X-Session-Id': currentSessionId,
@@ -104,6 +105,7 @@ export const POST: APIRoute = async (context) => {
       mime_type: mimeType,
       storage_path: uploadUrlPayload.data.storage_path,
       size_bytes: file.size,
+      purpose,
     }),
   });
 

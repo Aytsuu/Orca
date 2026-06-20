@@ -1,8 +1,10 @@
 import { apiFetch } from '../../lib/api/client';
 import type {
+  FileAccessUrl,
   Project,
   Teammate,
   ProjectMessage,
+  ProjectMessageAttachment,
   ProjectFile,
   ApiEnvelope,
   ApiProject,
@@ -22,9 +24,21 @@ import type {
 export interface ProjectRepository {
   fetchProjects(sessionId: string): Promise<Project[]>;
   fetchProjectMessages(projectId: string, sessionId: string): Promise<ProjectMessage[]>;
-  createProjectMessage(projectId: string, content: string, sessionId: string): Promise<ProjectMessage>;
+  createProjectMessage(
+    projectId: string,
+    payload: { content: string; attachments?: ProjectMessageAttachment[] },
+    sessionId: string
+  ): Promise<ProjectMessage>;
   fetchProjectFiles(projectId: string, sessionId: string): Promise<ProjectFile[]>;
-  uploadProjectFile(projectId: string, file: File, sessionId: string): Promise<ProjectFile>;
+  uploadProjectFile(
+    projectId: string,
+    file: File,
+    sessionId: string,
+    purpose?: 'chat' | 'source'
+  ): Promise<ProjectFile>;
+  promoteProjectFileToSource(projectId: string, fileId: string, sessionId: string): Promise<ProjectFile>;
+  fetchProjectFileAccessUrl(projectId: string, fileId: string, sessionId: string): Promise<FileAccessUrl>;
+  deleteProjectFile(projectId: string, fileId: string, sessionId: string): Promise<void>;
   fetchProjectMembers(projectId: string, sessionId: string): Promise<Teammate[]>;
   fetchProjectInvitationLink(projectId: string, sessionId: string): Promise<string>;
   createProjectInvitation(
@@ -107,7 +121,7 @@ export class ApiProjectRepository implements ProjectRepository {
 
   async createProjectMessage(
     projectId: string,
-    content: string,
+    payload: { content: string; attachments?: ProjectMessageAttachment[] },
     sessionId: string
   ): Promise<ProjectMessage> {
     const response = await apiFetch<ApiEnvelope<ApiProjectMessage>>(
@@ -115,7 +129,16 @@ export class ApiProjectRepository implements ProjectRepository {
       sessionId,
       {
         method: 'POST',
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({
+          content: payload.content,
+          attachments: (payload.attachments || []).map((attachment) => ({
+            uploaded_file_id: attachment.uploadedFileId,
+            filename: attachment.filename,
+            mime_type: attachment.mimeType,
+            storage_path: attachment.storagePath,
+            size_bytes: attachment.sizeBytes,
+          })),
+        }),
       }
     );
     return mapApiProjectMessage(response.data);
@@ -129,9 +152,15 @@ export class ApiProjectRepository implements ProjectRepository {
     return response.data.map(mapApiProjectFile);
   }
 
-  async uploadProjectFile(projectId: string, file: File, sessionId: string): Promise<ProjectFile> {
+  async uploadProjectFile(
+    projectId: string,
+    file: File,
+    sessionId: string,
+    purpose: 'chat' | 'source' = 'source'
+  ): Promise<ProjectFile> {
     const body = new FormData();
     body.set('file', file);
+    body.set('purpose', purpose);
 
     const response = await fetch(`/api/projects/${projectId}/files/upload`, {
       method: 'POST',
@@ -151,6 +180,33 @@ export class ApiProjectRepository implements ProjectRepository {
 
     const payload = (await response.json()) as ApiEnvelope<ApiProjectFile>;
     return mapApiProjectFile(payload.data);
+  }
+
+  async promoteProjectFileToSource(projectId: string, fileId: string, sessionId: string): Promise<ProjectFile> {
+    const response = await apiFetch<ApiEnvelope<ApiProjectFile>>(
+      `/api/projects/${projectId}/files/${fileId}/add-to-sources`,
+      sessionId,
+      {
+        method: 'POST',
+      }
+    );
+    return mapApiProjectFile(response.data);
+  }
+
+  async fetchProjectFileAccessUrl(projectId: string, fileId: string, sessionId: string): Promise<FileAccessUrl> {
+    const response = await apiFetch<ApiEnvelope<{ signed_url: string }>>(
+      `/api/projects/${projectId}/files/${fileId}/access-url`,
+      sessionId
+    );
+    return {
+      signedUrl: response.data.signed_url,
+    };
+  }
+
+  async deleteProjectFile(projectId: string, fileId: string, sessionId: string): Promise<void> {
+    await apiFetch<null>(`/api/projects/${projectId}/files/${fileId}`, sessionId, {
+      method: 'DELETE',
+    });
   }
 
   async fetchProjectMembers(projectId: string, sessionId: string): Promise<Teammate[]> {
@@ -501,6 +557,13 @@ export function mapApiProjectMessage(message: ApiProjectMessage): ProjectMessage
     projectId: message.project_id,
     sessionId: message.session_id,
     content: message.content,
+    attachments: (message.attachments || []).map((attachment) => ({
+      uploadedFileId: attachment.uploaded_file_id,
+      filename: attachment.filename,
+      mimeType: attachment.mime_type,
+      storagePath: attachment.storage_path,
+      sizeBytes: attachment.size_bytes,
+    })),
     createdAt: message.created_at,
   };
 }

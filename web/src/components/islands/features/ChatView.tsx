@@ -4,6 +4,9 @@ import { navigate } from 'astro:transitions/client';
 import {
   Plus,
   FileText,
+  Paperclip,
+  Download,
+  ExternalLink,
   Search,
   Users2,
   Check,
@@ -40,9 +43,13 @@ import {
 } from '../../../lib/query/projectMessages';
 import {
   useProjectFiles,
+  useProjectFileAccessUrl,
+  useDeleteProjectFile,
+  usePromoteProjectFileToSource,
   useUploadProjectFile,
 } from '../../../lib/query/projectFiles';
 import { QueryProvider } from '../providers/QueryProvider';
+import Modal from '../ui/Modal';
 import { ShareProjectModal } from './ShareProjectModal';
 import { sessionId } from '../../../stores/project/session';
 import { formatRelativeTime, toInitials } from '../../../stores/project/repository';
@@ -89,7 +96,10 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const promoteAiActivityItemMutation = usePromoteAiActivityItem(projectId);
   const promoteAllAiActivityMutation = usePromoteAllAiActivity(projectId);
   const sendMessageMutation = useSendProjectMessage(projectId);
-  const uploadFileMutation = useUploadProjectFile(projectId);
+  const uploadSourceFileMutation = useUploadProjectFile(projectId);
+  const uploadChatFileMutation = useUploadProjectFile(projectId);
+  const deleteProjectFileMutation = useDeleteProjectFile(projectId);
+  const promoteProjectFileMutation = usePromoteProjectFileToSource(projectId);
   const currentSessionId = sessionId.get();
 
   const projectList = useStore(projects);
@@ -99,18 +109,30 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const [mobileTab, setMobileTab] = useState<'files' | 'chat' | 'ai'>('chat');
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [expandedSuggestionClusterKeys, setExpandedSuggestionClusterKeys] = useState<string[]>([]);
+  const [activeMediaAttachment, setActiveMediaAttachment] = useState<{
+    uploadedFileId: string;
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+    signedUrl: string;
+    isInSources: boolean;
+    canRemove: boolean;
+  } | null>(null);
 
   const [showTabletFiles, setShowTabletFiles] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<Array<{
     id: string;
     name: string;
     size: string;
     type: string;
     uploadedAt: string;
+    sessionId: string;
   }>>([]);
+  const [pendingChatFiles, setPendingChatFiles] = useState<File[]>([]);
 
   useEffect(() => {
     if (projectFiles) {
@@ -121,6 +143,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
           size: formatFileSize(file.sizeBytes),
           type: file.mimeType.split('/').pop()?.toUpperCase() || 'FILE',
           uploadedAt: formatRelativeTime(file.createdAt),
+          sessionId: file.sessionId,
         }))
       );
       return;
@@ -214,13 +237,34 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const content = messageText.trim();
-    if (!content) return;
+    if (!content && pendingChatFiles.length === 0) return;
     setMessageText('');
 
     try {
-      await sendMessageMutation.mutateAsync(content);
+      const uploadedAttachments = await Promise.all(
+        pendingChatFiles.map((file) =>
+          uploadChatFileMutation.mutateAsync({
+            file,
+            purpose: 'chat',
+          })
+        )
+      );
+      await sendMessageMutation.mutateAsync({
+        content,
+        attachments: uploadedAttachments.map((file) => ({
+          uploadedFileId: file.id,
+          filename: file.filename,
+          mimeType: file.mimeType,
+          storagePath: file.storagePath,
+          sizeBytes: file.sizeBytes,
+        })),
+      });
+      setPendingChatFiles([]);
     } catch (sendError) {
       setMessageText(content);
+      if (pendingChatFiles.length > 0) {
+        setPendingChatFiles([...pendingChatFiles]);
+      }
       addToast(
         'error',
         sendError instanceof Error ? sendError.message : 'Unable to send message.'
@@ -234,12 +278,52 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     if (!file) return;
 
     try {
-      await uploadFileMutation.mutateAsync(file);
+      await uploadSourceFileMutation.mutateAsync({ file, purpose: 'source' });
       addToast('success', `${file.name} uploaded successfully.`);
     } catch (uploadError) {
       addToast(
         'error',
         uploadError instanceof Error ? uploadError.message : 'Unable to upload file.'
+      );
+    }
+  };
+
+  const handleChatAttachmentSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (selectedFiles.length === 0) return;
+
+    setPendingChatFiles((currentFiles) => [...currentFiles, ...selectedFiles]);
+  };
+
+  const handleRemovePendingChatFile = (fileName: string, lastModified: number) => {
+    setPendingChatFiles((currentFiles) =>
+      currentFiles.filter(
+        (file) => !(file.name === fileName && file.lastModified === lastModified)
+      )
+    );
+  };
+
+  const handlePromoteChatAttachment = async (fileId: string, filename: string) => {
+    try {
+      await promoteProjectFileMutation.mutateAsync(fileId);
+      addToast('success', `${filename} added to Sources.`);
+    } catch (promotionError) {
+      addToast(
+        'error',
+        promotionError instanceof Error ? promotionError.message : 'Unable to add file to Sources.'
+      );
+    }
+  };
+
+  const handleDeleteFile = async (fileId: string, filename: string) => {
+    try {
+      await deleteProjectFileMutation.mutateAsync(fileId);
+      addToast('success', `${filename} removed.`);
+    } catch (deleteError) {
+      addToast(
+        'error',
+        deleteError instanceof Error ? deleteError.message : 'Unable to remove file.'
       );
     }
   };
@@ -286,6 +370,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
         minute: '2-digit',
       }),
       content: message.content,
+      attachments: message.attachments,
       isCurrentUser,
       isOptimistic: message.isOptimistic,
     };
@@ -294,16 +379,19 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const lastUserMessageId = [...renderedMessages]
     .reverse()
     .find((msg) => msg.isCurrentUser)?.id;
+  const sourceFileIds = new Set((projectFiles || []).map((file) => file.id));
+  const currentMember = detail.teammates.find((member) => member.sessionId === currentSessionId);
+  const canManageAnyFile = Boolean(currentMember?.isCreator || currentMember?.role === 'APPROVER');
 
   return (
     <div className="flex-grow flex flex-col lg:flex-row lg:h-[calc(100vh-112px)] lg:overflow-hidden bg-background relative lg:p-4 lg:gap-4">
-      {/* 1. Files Panel (Left Column) */}
+      {/* 1. Sources Panel (Left Column) */}
       <aside
         className={`w-full lg:w-[22%] lg:min-w-[240px] lg:max-w-[300px] border-r border-border lg:border-0 lg:rounded-xl lg:overflow-hidden bg-surface p-6 flex flex-col gap-6 shrink-0 lg:flex ${mobileTab === 'files' ? 'flex absolute inset-0 z-10' : 'hidden'
           } ${showTabletFiles ? 'flex absolute inset-y-0 left-0 w-[260px] z-30 shadow-2xl' : ''}`}
       >
         <div className="flex justify-between items-center">
-          <span className="section-label">Files</span>
+          <span className="section-label">Sources</span>
           {showTabletFiles && (
             <button
               onClick={() => setShowTabletFiles(false)}
@@ -319,18 +407,32 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
           {files.map((file) => (
             <div
               key={file.id}
-              className="flex items-center gap-3 p-2 hover:bg-primary-muted rounded-sm transition-colors cursor-pointer group"
+              className="flex items-center justify-between gap-3 p-2 hover:bg-primary-muted rounded-sm transition-colors group"
             >
-              <FileText className="w-4 h-4 text-text-muted group-hover:text-primary transition-colors shrink-0" />
-              <div className="overflow-hidden">
-                <p className="text-sm font-semibold text-text-primary truncate">{file.name}</p>
-                <p className="text-xs text-text-muted mt-0.5">{file.type} · {file.size}</p>
+              <div className="min-w-0 flex items-center gap-3">
+                <FileText className="w-4 h-4 text-text-muted group-hover:text-primary transition-colors shrink-0" />
+                <div className="overflow-hidden">
+                  <p className="text-sm font-semibold text-text-primary truncate">{file.name}</p>
+                  <p className="text-xs text-text-muted mt-0.5">{file.type} / {file.size}</p>
+                </div>
               </div>
+              {(canManageAnyFile || file.sessionId === currentSessionId) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleDeleteFile(file.id, file.name);
+                  }}
+                  disabled={deleteProjectFileMutation.isPending}
+                  className="text-[10px] font-semibold uppercase tracking-wide text-error hover:opacity-80 disabled:opacity-50 shrink-0"
+                >
+                  Remove
+                </button>
+              )}
             </div>
           ))}
 
           {files.length === 0 && (
-            <div className="text-xs text-text-muted py-4">No files uploaded.</div>
+            <div className="text-xs text-text-muted py-4">No sources added.</div>
           )}
         </div>
 
@@ -345,15 +447,15 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
 
         <button
           onClick={() => fileInputRef.current?.click()}
-          disabled={uploadFileMutation.isPending}
+          disabled={uploadSourceFileMutation.isPending}
           className="btn-ghost border border-solid border-border rounded-full flex items-center justify-center gap-1.5 py-2 hover:border-primary hover:text-primary disabled:opacity-60"
         >
-          {uploadFileMutation.isPending ? (
+          {uploadSourceFileMutation.isPending ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
           ) : (
             <Plus className="w-3.5 h-3.5" />
           )}
-          <span>{uploadFileMutation.isPending ? 'Uploading...' : 'Add File'}</span>
+          <span>{uploadSourceFileMutation.isPending ? 'Uploading...' : 'Add Sources'}</span>
         </button>
       </aside>
 
@@ -429,21 +531,63 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
                   {msg.senderInitials}
                 </div>
 
-                <div className={`flex flex-col gap-1 w-full ${isUser ? 'items-end' : 'items-start'}`}>
+                <div className={`flex flex-col gap-1.5 w-full ${isUser ? 'items-end' : 'items-start'}`}>
                   <div className={`flex items-baseline gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
                     <span className="text-xs font-semibold text-text-muted">{msg.senderName}</span>
                     <span className="text-[10px] text-text-muted font-medium">{msg.timestamp}</span>
                   </div>
 
-                  {/* Message Bubble Container */}
-                  <div
-                    className={`rounded-2xl py-2 px-4 text-sm max-w-[85%] select-text whitespace-pre-wrap leading-relaxed ${isUser
-                      ? 'bg-primary-muted border border-primary/10 text-text-primary rounded-tr-none'
-                      : 'bg-surface-raised border border-border-subtle text-text-secondary rounded-tl-none'
-                      }`}
-                  >
-                    {msg.content}
-                  </div>
+                  {/* Message Bubble Container - Only for Text */}
+                  {renderMessageText(msg.content, msg.attachments) && (
+                    <div
+                      className={`rounded-2xl py-2 px-4 text-sm max-w-[85%] select-text whitespace-pre-wrap leading-relaxed ${isUser
+                        ? 'bg-primary-muted border border-primary/10 text-text-primary rounded-tr-none'
+                        : 'bg-surface-raised border border-border-subtle text-text-secondary rounded-tl-none'
+                        }`}
+                    >
+                      {renderMessageText(msg.content, msg.attachments)}
+                    </div>
+                  )}
+
+                  {/* Attachments rendered outside of the text bubble container */}
+                  {msg.attachments.length > 0 && (
+                    <div className="flex flex-col gap-2 w-full max-w-[85%] sm:max-w-[360px]">
+                      {msg.attachments.map((attachment) => {
+                        const isInSources = sourceFileIds.has(attachment.uploadedFileId);
+                        return (
+                          <div
+                            key={attachment.uploadedFileId}
+                            className="rounded-xl border border-border-subtle bg-background/60 px-3 py-3 flex flex-col gap-3"
+                          >
+                            <ChatAttachmentPreview
+                              projectId={projectId}
+                              attachment={attachment}
+                              onOpenMedia={(media) =>
+                                setActiveMediaAttachment({
+                                  ...media,
+                                  uploadedFileId: attachment.uploadedFileId,
+                                  sizeBytes: attachment.sizeBytes,
+                                  isInSources,
+                                  canRemove: canManageAnyFile || msg.isCurrentUser,
+                                })
+                              }
+                            />
+                            <div className="min-w-0 flex items-center gap-2">
+                              <FileText className="w-4 h-4 text-text-muted shrink-0" />
+                              <div className="min-w-0">
+                                <div className="text-xs font-semibold text-text-primary truncate">
+                                  {attachment.filename}
+                                </div>
+                                <div className="text-[11px] text-text-muted">
+                                  {attachment.mimeType.split('/').pop()?.toUpperCase() || 'FILE'} / {formatFileSize(attachment.sizeBytes)}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
 
                   {isUser && (msg.isOptimistic || msg.id === lastUserMessageId) && (
                     <div className="mt-0.5 flex justify-end items-center text-text-muted select-none">
@@ -472,12 +616,41 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
           onSubmit={handleSend}
           className="p-6 border-t border-border-subtle bg-surface flex flex-col shrink-0"
         >
+          {pendingChatFiles.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {pendingChatFiles.map((file) => (
+                <div
+                  key={`${file.name}-${file.lastModified}`}
+                  className="inline-flex items-center gap-2 rounded-full border border-border bg-surface-raised px-3 py-1 text-xs text-text-secondary"
+                >
+                  <FileText className="w-3.5 h-3.5 text-text-muted" />
+                  <span className="max-w-[180px] truncate">{file.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemovePendingChatFile(file.name, file.lastModified)}
+                    className="text-text-muted hover:text-text-primary"
+                    aria-label={`Remove ${file.name}`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <input
+            ref={chatFileInputRef}
+            type="file"
+            className="hidden"
+            multiple
+            onChange={handleChatAttachmentSelection}
+          />
+
           <div
             style={{ backgroundColor: 'transparent' }}
             className="flex items-center gap-3 bg-transparent border border-border rounded-xl pr-3 pl-5 py-2 w-full focus-within:border-text-muted transition-colors"
           >
             <textarea
-              required
               placeholder="Type your message here..."
               value={messageText}
               onChange={(e) => setMessageText(e.target.value)}
@@ -493,8 +666,23 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
             />
 
             <button
+              type="button"
+              onClick={() => chatFileInputRef.current?.click()}
+              disabled={sendMessageMutation.isPending || uploadChatFileMutation.isPending}
+              className="h-8 w-8 rounded-full flex items-center justify-center transition-colors bg-surface-raised hover:bg-border text-text-secondary hover:text-text-primary disabled:opacity-40 disabled:hover:bg-surface-raised disabled:hover:text-text-secondary shrink-0"
+              title="Attach file to team chat"
+              aria-label="Attach file to team chat"
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
+
+            <button
               type="submit"
-              disabled={!messageText.trim() || sendMessageMutation.isPending}
+              disabled={
+                (!messageText.trim() && pendingChatFiles.length === 0) ||
+                sendMessageMutation.isPending ||
+                uploadChatFileMutation.isPending
+              }
               className="h-8 w-8 rounded-full flex items-center justify-center transition-colors bg-surface-raised hover:bg-border text-text-secondary hover:text-text-primary disabled:opacity-40 disabled:hover:bg-surface-raised disabled:hover:text-text-secondary shrink-0 cursor-pointer disabled:cursor-not-allowed"
               title="Send message"
             >
@@ -745,6 +933,66 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
         projectId={projectId}
         projectName={currentProject?.name || 'Project Workspace'}
       />
+      <Modal
+        isOpen={Boolean(activeMediaAttachment)}
+        onClose={() => setActiveMediaAttachment(null)}
+        title={
+          activeMediaAttachment?.mimeType.startsWith('image/')
+            ? 'Image Preview'
+            : activeMediaAttachment?.mimeType.startsWith('video/')
+              ? 'Video Preview'
+              : 'File Preview'
+        }
+        maxWidthClass="max-w-[1100px]"
+        className="p-5"
+      >
+        {activeMediaAttachment && (
+          <div className="flex flex-col gap-4">
+            <div className="text-xs text-text-muted">{activeMediaAttachment.filename}</div>
+            {activeMediaAttachment.mimeType.startsWith('image/') ? (
+              <img
+                src={activeMediaAttachment.signedUrl}
+                alt={activeMediaAttachment.filename}
+                className="block max-h-[75vh] w-full object-contain rounded-lg bg-black/10"
+              />
+            ) : activeMediaAttachment.mimeType.startsWith('video/') ? (
+              <video
+                controls
+                preload="metadata"
+                className="block max-h-[75vh] w-full rounded-lg bg-black"
+                src={activeMediaAttachment.signedUrl}
+              />
+            ) : (
+              <div className="rounded-lg border border-border-subtle bg-surface-raised p-4 text-sm text-text-secondary">
+                <div className="font-semibold text-text-primary">{activeMediaAttachment.filename}</div>
+                <div className="mt-1 text-xs text-text-muted">
+                  {activeMediaAttachment.mimeType} / {formatFileSize(activeMediaAttachment.sizeBytes)}
+                </div>
+              </div>
+            )}
+            <ChatAttachmentActions
+              attachment={activeMediaAttachment}
+              onAddToSources={() => {
+                void handlePromoteChatAttachment(
+                  activeMediaAttachment.uploadedFileId,
+                  activeMediaAttachment.filename
+                );
+              }}
+              onRemove={() => {
+                void handleDeleteFile(
+                  activeMediaAttachment.uploadedFileId,
+                  activeMediaAttachment.filename
+                );
+                setActiveMediaAttachment(null);
+              }}
+              canRemove={activeMediaAttachment.canRemove}
+              isInSources={activeMediaAttachment.isInSources}
+              isPromoting={promoteProjectFileMutation.isPending}
+              isDeleting={deleteProjectFileMutation.isPending}
+            />
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
@@ -764,6 +1012,191 @@ function formatFileSize(sizeBytes: number): string {
   if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
   if (sizeBytes < 1024 * 1024 * 1024) return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(sizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function renderMessageText(
+  content: string,
+  attachments: Array<{ uploadedFileId: string }>
+): string {
+  const normalized = content.trim();
+  if (
+    attachments.length > 0 &&
+    (normalized === 'Shared an attachment.' || normalized === `Shared ${attachments.length} attachments.`)
+  ) {
+    return '';
+  }
+
+  return content;
+}
+
+type ChatAttachmentDisplay = {
+  uploadedFileId: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
+function ChatAttachmentPreview({
+  projectId,
+  attachment,
+  onOpenMedia,
+}: {
+  projectId: string;
+  attachment: ChatAttachmentDisplay;
+  onOpenMedia: (media: { filename: string; mimeType: string; signedUrl: string }) => void;
+}) {
+  const { data, isLoading } = useProjectFileAccessUrl(projectId, attachment.uploadedFileId);
+  const signedUrl = data?.signedUrl;
+  const isImage = attachment.mimeType.startsWith('image/');
+  const isVideo = attachment.mimeType.startsWith('video/');
+  const canPreviewVideo = isVideo && attachment.sizeBytes <= 50 * 1024 * 1024;
+
+  if (!signedUrl || (!isImage && !canPreviewVideo)) {
+    if (isLoading) {
+      return <div className="text-[11px] text-text-muted">Loading preview...</div>;
+    }
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          onOpenMedia({
+            filename: attachment.filename,
+            mimeType: attachment.mimeType,
+            signedUrl: signedUrl || '',
+          })
+        }
+        className="flex items-center justify-between rounded-lg border border-border-subtle bg-surface-raised px-3 py-2 text-left transition-colors hover:border-primary/40"
+      >
+        <span className="text-[11px] font-medium text-text-primary">Open file details</span>
+        <ExternalLink className="w-3.5 h-3.5 text-text-muted" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface-raised">
+      {isImage ? (
+        <button
+          type="button"
+          onClick={() =>
+            onOpenMedia({
+              filename: attachment.filename,
+              mimeType: attachment.mimeType,
+              signedUrl,
+            })
+          }
+          className="block w-full"
+        >
+          <img
+            src={signedUrl}
+            alt={attachment.filename}
+            className="block max-h-72 w-full object-contain bg-black/5"
+          />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() =>
+            onOpenMedia({
+              filename: attachment.filename,
+              mimeType: attachment.mimeType,
+              signedUrl,
+            })
+          }
+          className="block w-full"
+        >
+          <video
+            muted
+            preload="metadata"
+            className="block max-h-72 w-full bg-black"
+            src={signedUrl}
+          />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ChatAttachmentActions({
+  attachment,
+  onAddToSources,
+  onRemove,
+  canRemove,
+  isInSources,
+  isPromoting,
+  isDeleting,
+}: {
+  attachment: {
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+    signedUrl: string;
+  };
+  onAddToSources: () => void;
+  onRemove: () => void;
+  canRemove: boolean;
+  isInSources: boolean;
+  isPromoting: boolean;
+  isDeleting: boolean;
+}) {
+  const signedUrl = attachment.signedUrl;
+  const isMedia =
+    attachment.mimeType.startsWith('image/') || attachment.mimeType.startsWith('video/');
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {isInSources ? (
+        <span className="inline-flex items-center rounded-md border border-success/30 bg-success/10 px-2.5 py-1.5 text-[11px] font-medium text-success">
+          In Sources
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={onAddToSources}
+          disabled={isPromoting}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-[11px] font-medium text-text-primary hover:border-primary/40 hover:text-primary transition-colors disabled:opacity-50"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span>{isPromoting ? 'Adding...' : 'Add to Sources'}</span>
+        </button>
+      )}
+      {!isMedia && (
+        <a
+          href={signedUrl || '#'}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-[11px] font-medium text-text-primary hover:border-primary/40 hover:text-primary transition-colors"
+          aria-disabled={!signedUrl}
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
+          <span>Open file</span>
+        </a>
+      )}
+      <a
+        href={signedUrl || '#'}
+        download={attachment.filename}
+        className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-[11px] font-medium text-text-primary hover:border-primary/40 hover:text-primary transition-colors"
+        aria-disabled={!signedUrl}
+      >
+        <Download className="w-3.5 h-3.5" />
+        <span>Download</span>
+      </a>
+      {canRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={isDeleting}
+          className="inline-flex items-center gap-1 rounded-md border border-error/30 bg-error/10 px-2.5 py-1.5 text-[11px] font-medium text-error hover:opacity-80 disabled:opacity-50"
+        >
+          <X className="w-3.5 h-3.5" />
+          <span>{isDeleting ? 'Removing...' : 'Remove'}</span>
+        </button>
+      )}
+      {attachment.mimeType.startsWith('video/') && attachment.sizeBytes > 50 * 1024 * 1024 && (
+        <span className="text-[11px] text-text-muted">Preview limited to 50 MB.</span>
+      )}
+    </div>
+  );
 }
 
 function buildSuggestionClusters(

@@ -10,6 +10,7 @@ const UploadedFileCreateSchema = z.object({
   mime_type: z.string().trim().min(1).max(255),
   storage_path: z.string().trim().min(1).max(1024),
   size_bytes: z.number().int().positive(),
+  purpose: z.enum(['chat', 'source']).default('source'),
 });
 
 export const GET: APIRoute = async (context) => {

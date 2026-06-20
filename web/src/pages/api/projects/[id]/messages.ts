@@ -5,9 +5,28 @@ import { jsonResponse, proxyApiRequest } from '../../../../lib/api/server';
 
 export const prerender = false;
 
-const MessageCreateSchema = z.object({
-  content: z.string().trim().min(1).max(4000),
+const MessageAttachmentSchema = z.object({
+  uploaded_file_id: z.string().uuid(),
+  filename: z.string().trim().min(1).max(255),
+  mime_type: z.string().trim().min(1).max(255),
+  storage_path: z.string().trim().min(1).max(1024),
+  size_bytes: z.number().int().nonnegative(),
 });
+
+const MessageCreateSchema = z
+  .object({
+    content: z.string().max(4000).default(''),
+    attachments: z.array(MessageAttachmentSchema).default([]),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.content.trim() && value.attachments.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Message content or attachments are required.',
+        path: ['content'],
+      });
+    }
+  });
 
 export const GET: APIRoute = async (context) => {
   const projectId = context.params.id;

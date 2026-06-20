@@ -30,6 +30,7 @@ export interface ProjectMessage {
   projectId: string;
   sessionId: string;
   content: string;
+  attachments: ProjectMessageAttachment[];
   createdAt: string;
   isOptimistic?: boolean;
 }
@@ -43,6 +44,18 @@ export interface ProjectFile {
   storagePath: string;
   sizeBytes: number;
   createdAt: string;
+}
+
+export interface ProjectMessageAttachment {
+  uploadedFileId: string;
+  filename: string;
+  mimeType: string;
+  storagePath: string;
+  sizeBytes: number;
+}
+
+export interface FileAccessUrl {
+  signedUrl: string;
 }
 
 export interface ApiEnvelope<T> {
@@ -77,7 +90,16 @@ export interface ApiProjectMessage {
   project_id: string;
   session_id: string;
   content: string;
+  attachments?: ApiProjectMessageAttachment[];
   created_at: string;
+}
+
+export interface ApiProjectMessageAttachment {
+  uploaded_file_id: string;
+  filename: string;
+  mime_type: string;
+  storage_path: string;
+  size_bytes: number;
 }
 
 export interface ApiProjectFile {
@@ -88,6 +110,8 @@ export interface ApiProjectFile {
   mime_type: string;
   storage_path: string;
   size_bytes: number;
+  purpose?: 'chat' | 'source';
+  is_ai_context?: boolean;
   created_at: string;
 }
 

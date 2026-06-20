@@ -20,6 +20,7 @@ def _iso_now() -> str:
 class FakeStorageBucket:
     def __init__(self, bucket_name: str) -> None:
         self.bucket_name = bucket_name
+        self.removed_paths: list[list[str]] = []
 
     def create_signed_upload_url(self, path: str, options: dict | None = None) -> dict:
         return {
@@ -29,10 +30,24 @@ class FakeStorageBucket:
             "options": options or {},
         }
 
+    def create_signed_url(self, path: str, expires_in: int) -> dict:
+        return {
+            "signedURL": f"https://storage.example/{self.bucket_name}/{path}?expires_in={expires_in}",
+        }
+
+    def remove(self, paths: list[str]) -> dict:
+        self.removed_paths.append(list(paths))
+        return {"data": paths}
+
 
 class FakeStorage:
+    def __init__(self) -> None:
+        self.buckets: dict[str, FakeStorageBucket] = {}
+
     def from_(self, bucket_name: str) -> FakeStorageBucket:
-        return FakeStorageBucket(bucket_name)
+        if bucket_name not in self.buckets:
+            self.buckets[bucket_name] = FakeStorageBucket(bucket_name)
+        return self.buckets[bucket_name]
 
 
 class FakeExecuteResult:
@@ -152,8 +167,11 @@ class FakeSupabase:
             row.setdefault("redeemed_by_session_id", None)
         if table_name == "chat_message":
             row.setdefault("created_at", _iso_now())
+            row.setdefault("attachments", [])
         if table_name == "uploaded_file":
             row.setdefault("created_at", _iso_now())
+            row.setdefault("purpose", "source")
+            row.setdefault("is_ai_context", row["purpose"] == "source")
         if table_name == "agent_status":
             row.setdefault("updated_at", _iso_now())
         if table_name == "plan_proposal":
@@ -543,6 +561,8 @@ async def test_finalize_and_list_uploaded_files(
     uploaded = finalize_upload.json()["data"]
     assert uploaded["filename"] == "brief.pdf"
     assert uploaded["size_bytes"] == 2048
+    assert uploaded["purpose"] == "source"
+    assert uploaded["is_ai_context"] is True
     assert len(fake_supabase.tables["agent_run"]) == 1
     assert fake_supabase.tables["agent_run"][0]["new_file_ids"] == [uploaded["id"]]
     assert fake_queue_producer.enqueued_run_ids == [fake_supabase.tables["agent_run"][0]["id"]]
@@ -584,6 +604,243 @@ async def test_file_finalization_rejects_storage_path_outside_project_scope(
     )
 
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_chat_file_upload_does_not_enqueue_and_can_be_added_to_sources(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+    fake_queue_producer: FakeQueueProducer,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+
+    upload_response = await client.post(
+        f"/api/v1/projects/{project['id']}/files",
+        headers={"X-Session-Id": "alpha"},
+        json={
+            "filename": "walkthrough.mp4",
+            "mime_type": "video/mp4",
+            "storage_path": f"{project['id']}/alpha/{uuid4()}-walkthrough.mp4",
+            "size_bytes": 4096,
+            "purpose": "chat",
+        },
+    )
+
+    assert upload_response.status_code == 201
+    uploaded = upload_response.json()["data"]
+    assert uploaded["purpose"] == "chat"
+    assert uploaded["is_ai_context"] is False
+    assert fake_supabase.tables["agent_run"] == []
+    assert fake_queue_producer.enqueued_run_ids == []
+
+    files_response = await client.get(
+        f"/api/v1/projects/{project['id']}/files",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert files_response.status_code == 200
+    assert files_response.json()["data"] == []
+
+    promote_response = await client.post(
+        f"/api/v1/projects/{project['id']}/files/{uploaded['id']}/add-to-sources",
+        headers={"X-Session-Id": "alpha"},
+    )
+    assert promote_response.status_code == 200
+    promoted = promote_response.json()["data"]
+    assert promoted["purpose"] == "source"
+    assert promoted["is_ai_context"] is True
+    assert fake_queue_producer.enqueued_run_ids == []
+    assert fake_supabase.tables["agent_run"] == []
+
+
+@pytest.mark.asyncio
+async def test_attachment_only_chat_message_is_persisted_without_triggering_agents(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+    fake_queue_producer: FakeQueueProducer,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    uploaded_file = fake_supabase.insert_row(
+        "uploaded_file",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "filename": "brief.pdf",
+            "mime_type": "application/pdf",
+            "storage_path": f"{project['id']}/alpha/brief.pdf",
+            "size_bytes": 2048,
+            "purpose": "chat",
+            "is_ai_context": False,
+        },
+    )
+
+    response = await client.post(
+        f"/api/v1/projects/{project['id']}/messages",
+        headers={"X-Session-Id": "alpha"},
+        json={
+            "content": "",
+            "attachments": [
+                {
+                    "uploaded_file_id": uploaded_file["id"],
+                    "filename": uploaded_file["filename"],
+                    "mime_type": uploaded_file["mime_type"],
+                    "storage_path": uploaded_file["storage_path"],
+                    "size_bytes": uploaded_file["size_bytes"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 201
+    message = response.json()["data"]
+    assert message["content"] == "Shared an attachment."
+    assert message["attachments"] == [
+        {
+            "uploaded_file_id": uploaded_file["id"],
+            "filename": "brief.pdf",
+            "mime_type": "application/pdf",
+            "storage_path": f"{project['id']}/alpha/brief.pdf",
+            "size_bytes": 2048,
+        }
+    ]
+    assert fake_supabase.tables["agent_run"] == []
+    assert fake_queue_producer.enqueued_runs == []
+
+
+@pytest.mark.asyncio
+async def test_delete_uploaded_file_removes_storage_and_chat_attachment(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    uploaded_file = fake_supabase.insert_row(
+        "uploaded_file",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "filename": "brief.pdf",
+            "mime_type": "application/pdf",
+            "storage_path": f"{project['id']}/alpha/chat/brief.pdf",
+            "size_bytes": 2048,
+            "purpose": "chat",
+            "is_ai_context": False,
+        },
+    )
+    fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Shared an attachment.",
+            "attachments": [
+                {
+                    "uploaded_file_id": uploaded_file["id"],
+                    "filename": uploaded_file["filename"],
+                    "mime_type": uploaded_file["mime_type"],
+                    "storage_path": uploaded_file["storage_path"],
+                    "size_bytes": uploaded_file["size_bytes"],
+                }
+            ],
+        },
+    )
+
+    response = await client.delete(
+        f"/api/v1/projects/{project['id']}/files/{uploaded_file['id']}",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 204
+    assert fake_supabase.tables["uploaded_file"] == []
+    assert fake_supabase.storage.from_("orca-uploads").removed_paths == [
+        [f"{project['id']}/alpha/chat/brief.pdf"]
+    ]
+    assert fake_supabase.tables["chat_message"][0]["attachments"] == []
+
+
+@pytest.mark.asyncio
+async def test_delete_project_removes_project_files_from_storage(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "uploaded_file",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "filename": "brief.pdf",
+            "mime_type": "application/pdf",
+            "storage_path": f"{project['id']}/alpha/source/brief.pdf",
+            "size_bytes": 2048,
+            "purpose": "source",
+            "is_ai_context": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "uploaded_file",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "filename": "clip.mp4",
+            "mime_type": "video/mp4",
+            "storage_path": f"{project['id']}/alpha/chat/clip.mp4",
+            "size_bytes": 4096,
+            "purpose": "chat",
+            "is_ai_context": False,
+        },
+    )
+
+    response = await client.delete(
+        f"/api/v1/projects/{project['id']}",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 204
+    assert fake_supabase.storage.from_("orca-uploads").removed_paths == [
+        [
+            f"{project['id']}/alpha/source/brief.pdf",
+            f"{project['id']}/alpha/chat/clip.mp4",
+        ]
+    ]
 
 
 @pytest.mark.asyncio

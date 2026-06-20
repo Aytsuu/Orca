@@ -192,8 +192,11 @@ async def update_project(
 
 
 async def delete_project(supabase: AsyncClient, *, project_id: UUID) -> None:
+    from src.chat.delete_service import delete_project_storage_objects
+
     project = await get_project_by_id(supabase, project_id=project_id)
     project_id_str = str(project["id"])
+    await delete_project_storage_objects(supabase, project_id=project_id_str)
     for table_name in (
         "agent_run",
         "project_memory",

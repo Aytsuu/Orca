@@ -76,6 +76,8 @@ async def test_finalize_upload_and_list_files(
     uploaded = finalize_response.json()["data"]
     assert uploaded["filename"] == "brief.pdf"
     assert uploaded["size_bytes"] == 2048
+    assert uploaded["purpose"] == "source"
+    assert uploaded["is_ai_context"] is True
     assert fake_queue_producer.enqueued_run_ids == [fake_supabase.tables["agent_run"][0]["id"]]
 
     files_response = await client.get(
@@ -116,6 +118,53 @@ async def test_finalize_upload_rejects_out_of_scope_storage_path(
     )
 
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_chat_upload_requires_explicit_source_promotion_to_enqueue(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+    fake_queue_producer: FakeQueueProducer,
+) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+
+    chat_upload = await client.post(
+        f"/api/v1/projects/{project['id']}/files",
+        headers={"X-Session-Id": "alpha"},
+        json={
+            "filename": "demo.mov",
+            "mime_type": "video/quicktime",
+            "storage_path": f"{project['id']}/alpha/{uuid4()}-demo.mov",
+            "size_bytes": 8192,
+            "purpose": "chat",
+        },
+    )
+
+    assert chat_upload.status_code == 201
+    uploaded = chat_upload.json()["data"]
+    assert uploaded["is_ai_context"] is False
+    assert fake_queue_producer.enqueued_run_ids == []
+
+    promote_response = await client.post(
+        f"/api/v1/projects/{project['id']}/files/{uploaded['id']}/add-to-sources",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert promote_response.status_code == 200
+    promoted = promote_response.json()["data"]
+    assert promoted["purpose"] == "source"
+    assert promoted["is_ai_context"] is True
+    assert fake_queue_producer.enqueued_run_ids == []
 
 
 @pytest.mark.asyncio

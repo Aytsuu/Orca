@@ -91,6 +91,8 @@ describe('projectStore tests', () => {
       createProjectMessage: vi.fn(),
       fetchProjectFiles: vi.fn(),
       uploadProjectFile: vi.fn(),
+      promoteProjectFileToSource: vi.fn(),
+      deleteProjectFile: vi.fn(),
       fetchProjectMembers: vi.fn(),
       fetchProjectInvitationLink: vi.fn(),
       createProjectInvitation: vi.fn(),
@@ -243,6 +245,8 @@ describe('projectStore tests', () => {
       createProjectMessage: vi.fn(),
       fetchProjectFiles: vi.fn(),
       uploadProjectFile: vi.fn(),
+      promoteProjectFileToSource: vi.fn(),
+      deleteProjectFile: vi.fn(),
       fetchProjectMembers: vi.fn(),
       fetchProjectInvitationLink: vi.fn(),
       createProjectInvitation: vi.fn(),
@@ -346,6 +350,8 @@ describe('projectStore tests', () => {
       createProjectMessage: vi.fn(),
       fetchProjectFiles: vi.fn(),
       uploadProjectFile: vi.fn(),
+      promoteProjectFileToSource: vi.fn(),
+      deleteProjectFile: vi.fn(),
       fetchProjectMembers: vi.fn(),
       fetchProjectInvitationLink: vi.fn(),
       createProjectInvitation: vi.fn(),
@@ -387,6 +393,7 @@ describe('projectStore tests', () => {
             project_id: 'proj_1',
             session_id: 'alpha',
             content: 'First message',
+            attachments: [],
             created_at: '2026-06-17T10:00:00Z',
           },
         ],
@@ -401,6 +408,7 @@ describe('projectStore tests', () => {
           projectId: 'proj_1',
           sessionId: 'alpha',
           content: 'First message',
+          attachments: [],
           createdAt: '2026-06-17T10:00:00Z',
         },
       ]);
@@ -415,21 +423,27 @@ describe('projectStore tests', () => {
           project_id: 'proj_1',
           session_id: 'beta',
           content: 'Reply from beta',
+          attachments: [],
           created_at: '2026-06-17T10:01:00Z',
         },
       });
 
-      const message = await repo.createProjectMessage('proj_1', 'Reply from beta', 'beta');
+      const message = await repo.createProjectMessage(
+        'proj_1',
+        { content: 'Reply from beta', attachments: [] },
+        'beta'
+      );
 
       expect(apiFetch).toHaveBeenCalledWith('/api/projects/proj_1/messages', 'beta', {
         method: 'POST',
-        body: JSON.stringify({ content: 'Reply from beta' }),
+        body: JSON.stringify({ content: 'Reply from beta', attachments: [] }),
       });
       expect(message).toEqual({
         id: 'msg_2',
         projectId: 'proj_1',
         sessionId: 'beta',
         content: 'Reply from beta',
+        attachments: [],
         createdAt: '2026-06-17T10:01:00Z',
       });
     });

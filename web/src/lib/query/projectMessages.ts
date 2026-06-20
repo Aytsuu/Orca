@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { getSupabaseBrowserClient } from '../supabase/browser';
 import { defaultProjectRepository } from '../../stores/project/repository';
 import { sessionId } from '../../stores/project/session';
-import type { ApiProjectMessage, ProjectMessage } from '../../stores/project/types';
+import type { ApiProjectMessage, ProjectMessage, ProjectMessageAttachment } from '../../stores/project/types';
 
 interface ProjectMessagesRealtimePayload {
   new: ApiProjectMessage;
@@ -77,12 +77,17 @@ export function useSendProjectMessage(projectId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (content: string) =>
-      defaultProjectRepository.createProjectMessage(projectId, content, sessionId.get()),
-    onMutate: async (content: string) => {
+    mutationFn: (payload: { content: string; attachments?: ProjectMessageAttachment[] }) =>
+      defaultProjectRepository.createProjectMessage(projectId, payload, sessionId.get()),
+    onMutate: async (payload: { content: string; attachments?: ProjectMessageAttachment[] }) => {
       await queryClient.cancelQueries({ queryKey: ['project-messages', projectId] });
       const previousMessages = queryClient.getQueryData<ProjectMessage[]>(['project-messages', projectId]);
-      const newMessage = buildOptimisticProjectMessage(projectId, sessionId.get(), content);
+      const newMessage = buildOptimisticProjectMessage(
+        projectId,
+        sessionId.get(),
+        payload.content,
+        payload.attachments || []
+      );
       queryClient.setQueryData<ProjectMessage[]>(
         ['project-messages', projectId],
         (old) => (old ? [...old, newMessage] : [newMessage])
@@ -111,6 +116,7 @@ export function buildOptimisticProjectMessage(
   projectId: string,
   sessionId: string,
   content: string,
+  attachments: ProjectMessageAttachment[] = [],
   now: Date = new Date()
 ): ProjectMessage {
   return {
@@ -118,6 +124,7 @@ export function buildOptimisticProjectMessage(
     projectId,
     sessionId,
     content,
+    attachments,
     createdAt: now.toISOString(),
     isOptimistic: true,
   };
@@ -143,7 +150,8 @@ export function mergeIncomingProjectMessage(
     msg =>
       msg.isOptimistic &&
       msg.sessionId === incoming.sessionId &&
-      msg.content === incoming.content
+      msg.content === incoming.content &&
+      JSON.stringify(msg.attachments) === JSON.stringify(incoming.attachments)
   );
 
   if (optIndex !== -1) {
@@ -192,6 +200,13 @@ function mapRealtimeProjectMessage(message: ApiProjectMessage): ProjectMessage {
     projectId: message.project_id,
     sessionId: message.session_id,
     content: message.content,
+    attachments: (message.attachments || []).map((attachment) => ({
+      uploadedFileId: attachment.uploaded_file_id,
+      filename: attachment.filename,
+      mimeType: attachment.mime_type,
+      storagePath: attachment.storage_path,
+      sizeBytes: attachment.size_bytes,
+    })),
     createdAt: message.created_at,
   };
 }

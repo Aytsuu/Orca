@@ -180,13 +180,6 @@ export interface Phase {
   gaps: GapItem[];
 }
 
-export interface Stakeholder {
-  userId: string;
-  name: string;
-  role: string;
-  initials: string;
-}
-
 export interface RiskItem {
   id: string;
   description: string;
@@ -212,7 +205,6 @@ export interface StructuredPlan {
   updatedAt: string;
   finalizedAt?: string;
   objectives: string[];
-  stakeholders: Stakeholder[];
   technologyStack: TechnologyStackItem[];
   phases: Phase[];
   globalRisks: RiskItem[];
@@ -225,7 +217,6 @@ export interface ProposedChange {
     | 'title'
     | 'description'
     | 'objectives'
-    | 'stakeholders'
     | 'technology_stack'
     | 'tasks'
     | 'phases'
@@ -301,13 +292,6 @@ export interface ApiPlanRisk {
   source_excerpt?: string | null;
 }
 
-export interface ApiPlanStakeholder {
-  user_id: string;
-  name: string;
-  role: string;
-  initials: string;
-}
-
 export interface ApiProjectPlan {
   id: string;
   project_id: string;
@@ -317,7 +301,6 @@ export interface ApiProjectPlan {
   title?: string;
   description?: string;
   objectives?: string[];
-  stakeholders?: ApiPlanStakeholder[];
   technology_stack?: { title?: string; value?: string }[];
   phases?: ApiPlanPhase[];
   global_risks?: ApiPlanRisk[];

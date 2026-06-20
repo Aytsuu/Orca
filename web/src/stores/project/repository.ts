@@ -64,7 +64,7 @@ export interface ProjectRepository {
   fetchProjectPlanVersions(projectId: string, sessionId: string): Promise<PlanVersion[]>;
   updateProjectPlan(
     projectId: string,
-    planPatch: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives' | 'stakeholders'>>,
+    planPatch: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives'>>,
     sessionId: string
   ): Promise<StructuredPlan>;
   revertProjectPlan(projectId: string, sessionId: string): Promise<void>;
@@ -320,7 +320,7 @@ export class ApiProjectRepository implements ProjectRepository {
 
   async updateProjectPlan(
     projectId: string,
-    planPatch: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives' | 'stakeholders'>>,
+    planPatch: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives'>>,
     sessionId: string
   ): Promise<StructuredPlan> {
     const response = await apiFetch<ApiEnvelope<ApiProjectPlan>>(
@@ -332,12 +332,6 @@ export class ApiProjectRepository implements ProjectRepository {
           title: planPatch.title,
           description: planPatch.description,
           objectives: planPatch.objectives,
-          stakeholders: planPatch.stakeholders?.map((stakeholder) => ({
-            user_id: stakeholder.userId,
-            name: stakeholder.name,
-            role: stakeholder.role,
-            initials: stakeholder.initials,
-          })),
         }),
       }
     );
@@ -625,7 +619,6 @@ export function createEmptyPlan(projectId: string): StructuredPlan {
     createdAt: '',
     updatedAt: '',
     objectives: [],
-    stakeholders: [],
     technologyStack: [],
     phases: [],
     globalRisks: [],
@@ -684,12 +677,6 @@ export function mapPlan(plan: ApiProjectPlan, fallbackProjectId: string): Struct
     createdAt: plan.created_at || '',
     updatedAt: plan.finalized_at || plan.created_at || '',
     objectives: (plan.objectives || []).map((objective) => recoverObjectiveText(objective)).filter(Boolean),
-    stakeholders: (plan.stakeholders || []).map((stakeholder) => ({
-      userId: stakeholder.user_id,
-      name: stakeholder.name,
-      role: stakeholder.role,
-      initials: stakeholder.initials,
-    })),
     technologyStack: (plan.technology_stack || []).map((item) => ({
       title: item.title || '',
       value: item.value || '',

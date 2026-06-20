@@ -83,9 +83,6 @@ async def update_plan_endpoint(
         title=payload.title,
         description=payload.description,
         objectives=payload.objectives,
-        stakeholders=[item.model_dump(mode="python") for item in payload.stakeholders]
-        if payload.stakeholders is not None
-        else None,
     )
     return MetaEnvelope(data=StructuredPlanOut.model_validate(plan), meta={"conflicts": conflicts})
 

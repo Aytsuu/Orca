@@ -14,7 +14,6 @@ ChangeSection = Literal[
     "title",
     "description",
     "objectives",
-    "stakeholders",
     "technology_stack",
     "tasks",
     "phases",
@@ -27,13 +26,6 @@ Priority = Literal["critical", "high", "medium", "low"]
 Severity = Literal["critical", "major", "minor"]
 Confidence = Literal["high", "medium", "low"]
 PlanVersionStatus = Literal["current", "archived"]
-
-
-class Stakeholder(ApiModel):
-    user_id: str = Field(min_length=1, max_length=255)
-    name: str = Field(min_length=1, max_length=200)
-    role: str = Field(min_length=1, max_length=200)
-    initials: str = Field(min_length=1, max_length=10)
 
 
 class PhaseAssignedMember(ApiModel):
@@ -111,7 +103,6 @@ class StructuredPlanOut(ApiModel):
     title: str = ""
     description: str = ""
     objectives: list[str] = Field(default_factory=list)
-    stakeholders: list[Stakeholder] = Field(default_factory=list)
     technology_stack: list[TechnologyStackItemOut] = Field(default_factory=list)
     phases: list[PhaseOut] = Field(default_factory=list)
     global_risks: list[RiskOut] = Field(default_factory=list)
@@ -232,7 +223,6 @@ class PlanMetaUpdate(ApiModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=4000)
     objectives: list[str] | None = None
-    stakeholders: list[Stakeholder] | None = None
 
 
 class PhaseCreate(ApiModel):

@@ -30,7 +30,6 @@ interface ApiProposalChange {
     | 'title'
     | 'description'
     | 'objectives'
-    | 'stakeholders'
     | 'technology_stack'
     | 'tasks'
     | 'phases'
@@ -151,7 +150,7 @@ function rollbackOptimisticProposalUpdate(
 
 export function applyPlanMetaPatch(
   plan: StructuredPlan,
-  patch: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives' | 'stakeholders'>>
+  patch: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives'>>
 ): StructuredPlan {
   return {
     ...plan,
@@ -417,22 +416,6 @@ function toObjectiveList(value: unknown): string[] {
   return objective ? [objective] : [];
 }
 
-function toOptimisticStakeholder(entry: Record<string, unknown>) {
-  return {
-    userId: String(entry.user_id || entry.userId || buildOptimisticId('stakeholder')),
-    name: typeof entry.name === 'string' ? entry.name : typeof entry.title === 'string' ? entry.title : 'Proposed stakeholder',
-    role: typeof entry.role === 'string' ? entry.role : '',
-    initials:
-      typeof entry.initials === 'string'
-        ? entry.initials
-        : typeof entry.name === 'string'
-          ? entry.name.slice(0, 2).toUpperCase()
-          : typeof entry.title === 'string'
-            ? entry.title.slice(0, 2).toUpperCase()
-            : 'PR',
-  };
-}
-
 function toOptimisticPhase(entry: Record<string, unknown>): Phase {
   const assignedMembers = Array.isArray(entry.assigned_members)
     ? entry.assigned_members
@@ -579,19 +562,6 @@ export function applyAcceptedProposalChange(plan: StructuredPlan, change: Propos
     }
     return applyPlanMetaPatch(plan, {
       objectives: change.action === 'add' ? [...plan.objectives, ...objectives] : objectives,
-    });
-  }
-
-  if (change.section === 'stakeholders') {
-    const stakeholders = asObjectArray(change.content).map(toOptimisticStakeholder);
-    if (change.action === 'remove') {
-      const namesToRemove = new Set(stakeholders.map((stakeholder) => stakeholder.name));
-      return applyPlanMetaPatch(plan, {
-        stakeholders: plan.stakeholders.filter((stakeholder) => !namesToRemove.has(stakeholder.name)),
-      });
-    }
-    return applyPlanMetaPatch(plan, {
-      stakeholders: change.action === 'add' ? [...plan.stakeholders, ...stakeholders] : stakeholders,
     });
   }
 
@@ -809,7 +779,7 @@ export function useProjectPlanVersions(projectId: string) {
 export function useUpdateProjectPlan(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (planPatch: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives' | 'stakeholders'>>) =>
+    mutationFn: (planPatch: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives'>>) =>
       defaultProjectRepository.updateProjectPlan(projectId, planPatch, sessionId.get()),
     onMutate: (planPatch) =>
       prepareOptimisticPlanUpdate(queryClient, projectId, (plan) => applyPlanMetaPatch(plan, planPatch)),

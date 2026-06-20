@@ -29,7 +29,6 @@ import type {
   PhaseAssignedMember,
   Task,
   GapItem,
-  Stakeholder,
   RiskItem,
   ProposedChange,
 } from '../../../stores/projectStore';
@@ -51,6 +50,12 @@ import {
   useDeleteProjectRisk,
   useDismissProjectGap,
 } from '../../../lib/query/projectPlan';
+import {
+  getProposalPhasePreviewItems,
+  getProposalRiskPreviewItems,
+  getProposalTaskPreviewItems,
+  matchesPhaseTarget,
+} from '../../../lib/planProposal';
 import { QueryProvider } from '../providers/QueryProvider';
 import { Modal } from '../ui/Modal';
 
@@ -89,44 +94,6 @@ const INITIAL_CHANGES: ProposedChange[] = [
     sourceQuote: '"do we really need this for MVP? Let\'s push it out" — @jan, Jun 14'
   }
 ];
-
-function toDraftStakeholder(change: ProposedChange): Stakeholder[] {
-  const content = change.content;
-  const entries = Array.isArray(content)
-    ? content.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
-    : typeof content === 'object' && content !== null
-      ? [content as Record<string, unknown>]
-      : [];
-
-  const fallbackTitle = change.title || 'Stakeholder';
-  const normalizeText = (value: unknown, fallback = '') => (typeof value === 'string' && value.trim() ? value : fallback);
-  const toInitials = (value: string) =>
-    value
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase() || '')
-      .join('') || 'NA';
-
-  if (entries.length === 0) {
-    return [
-      {
-        userId: fallbackTitle.toLowerCase().replace(/\s+/g, '_'),
-        name: fallbackTitle,
-        role: fallbackTitle,
-        initials: toInitials(fallbackTitle),
-      },
-    ];
-  }
-
-  return entries.map((entry, index) => {
-    const name = normalizeText(entry.name ?? entry.title ?? entry.role ?? entry.description, fallbackTitle);
-    const role = normalizeText(entry.role ?? entry.title, name);
-    const userId = normalizeText(entry.user_id ?? entry.userId ?? entry.id, `${name.toLowerCase().replace(/\s+/g, '_')}_${index + 1}`);
-    const initials = normalizeText(entry.initials, toInitials(name)).slice(0, 10);
-    return { userId, name, role, initials };
-  });
-}
 
 // --- Inner PlanView component ---
 const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
@@ -224,24 +191,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
   }, [activePhaseAssigneePickerId]);
 
   const pendingChanges: ProposedChange[] = pendingProposal?.changes || [];
-  const [proposalStakeholderDrafts, setProposalStakeholderDrafts] = useState<Record<string, Stakeholder[]>>({});
-
-  useEffect(() => {
-    setProposalStakeholderDrafts((current) => {
-      const next = { ...current };
-      for (const change of pendingChanges) {
-        if (change.section === 'stakeholders' && !next[change.id]) {
-          next[change.id] = toDraftStakeholder(change);
-        }
-      }
-      for (const changeId of Object.keys(next)) {
-        if (!pendingChanges.some((change) => change.id === changeId && change.section === 'stakeholders')) {
-          delete next[changeId];
-        }
-      }
-      return next;
-    });
-  }, [pendingChanges]);
 
   if (isPlanLoading || !activePlan) {
     return (
@@ -259,13 +208,12 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
   }, 0);
   const hasNoPlanBody =
     activePlan.objectives.length === 0 &&
-    activePlan.stakeholders.length === 0 &&
     activePlan.technologyStack.length === 0 &&
     activePlan.phases.length === 0 &&
     activePlan.globalRisks.length === 0;
 
   const persistPlanMeta = async (
-    nextValues: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives' | 'stakeholders'>>,
+    nextValues: Partial<Pick<StructuredPlan, 'title' | 'description' | 'objectives'>>,
     successMessage: string
   ) => {
     try {
@@ -369,20 +317,12 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
   };
 
   // --- Handlers for Review Panel Action ---
-  const getStakeholderOverrideContent = (change: ProposedChange): unknown | undefined => {
-    if (change.section !== 'stakeholders') return undefined;
-    return proposalStakeholderDrafts[change.id];
-  };
-
   const applyChangeState = async (changeId: string, accept: boolean) => {
     const change = pendingChanges.find(c => c.id === changeId);
     if (!change) return;
     try {
       if (accept) {
-        await acceptProjectProposalChangeMutation.mutateAsync({
-          changeId,
-          content: getStakeholderOverrideContent(change),
-        });
+        await acceptProjectProposalChangeMutation.mutateAsync({ changeId });
         addToast('success', `"${change.title}" accepted.`);
       } else {
         await rejectProjectProposalChangeMutation.mutateAsync(changeId);
@@ -398,12 +338,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     try {
       await approveProjectProposalMutation.mutateAsync({
         changeIds: pendingChanges.map((change) => change.id),
-        changeOverrides: pendingChanges
-          .filter((change) => change.section === 'stakeholders')
-          .map((change) => ({
-            changeId: change.id,
-            content: proposalStakeholderDrafts[change.id] || toDraftStakeholder(change),
-          })),
       });
       addToast('success', 'All pending changes accepted.');
     } catch (error) {
@@ -435,15 +369,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
           objectiveIndex === index ? value : objective
         );
         await persistPlanMeta({ objectives: nextObjectives }, 'Field updated.');
-      } else if (type === 'stakeholder' && id) {
-        const nextStakeholders = activePlan.stakeholders.map((stakeholder) => {
-          if (stakeholder.userId !== id) return stakeholder;
-          if (currentEdit.field === 'name') return { ...stakeholder, name: value };
-          if (currentEdit.field === 'role') return { ...stakeholder, role: value };
-          if (currentEdit.field === 'initials') return { ...stakeholder, initials: value.toUpperCase().slice(0, 2) };
-          return stakeholder;
-        });
-        await persistPlanMeta({ stakeholders: nextStakeholders }, 'Field updated.');
       } else if (type === 'phase-title' && id) {
         const phase = activePlan.phases.find((item) => item.id === id);
         if (!phase) return;
@@ -599,17 +524,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     }
   };
 
-  const handleDeleteStakeholder = async (userId: string) => {
-    try {
-      await persistPlanMeta(
-        { stakeholders: activePlan.stakeholders.filter((stakeholder) => stakeholder.userId !== userId) },
-        'Team member removed.'
-      );
-    } catch (error) {
-      addToast('error', error instanceof Error ? error.message : 'Failed to remove team member.');
-    }
-  };
-
   const handleDeletePhase = async (phaseId: string) => {
     try {
       await deleteProjectPhaseMutation.mutateAsync(phaseId);
@@ -727,12 +641,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     if (type === 'risk-desc') return 'Describe the risk, blocker, or issue to watch...';
     if (type === 'risk-mitigation') return 'Describe how the team should reduce or respond to this risk...';
     if (type === 'risk-severity') return 'Enter a severity such as critical, major, or minor...';
-    if (type === 'stakeholder') {
-      if (field === 'name') return 'Enter the stakeholder name...';
-      if (field === 'role') return 'Enter the stakeholder role or responsibility...';
-      if (field === 'initials') return 'Enter the stakeholder initials...';
-      return 'Enter stakeholder details...';
-    }
     return fallback;
   };
 
@@ -837,18 +745,12 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
   const getChangesForTarget = (sections: ProposedChange['section'][], targetId: string) =>
     pendingChanges.filter((change) => sections.includes(change.section) && change.targetId === targetId);
 
-  const normalizePhaseReference = (value: string) =>
-    value.trim().toLowerCase().replaceAll('_', ' ').split(/\s+/).filter(Boolean).join(' ');
-
-  const getTaskChangesForPhase = (phase: Phase) =>
+  const getTaskChangesForPhase = (phase: Phase, phaseIndex?: number) =>
     pendingChanges.filter(
       (change) =>
         change.section === 'tasks' &&
         change.action === 'add' &&
-        (
-          change.targetId === phase.id ||
-          normalizePhaseReference(change.targetId) === normalizePhaseReference(phase.title)
-        )
+        matchesPhaseTarget(change.targetId, phase, phaseIndex)
     );
 
   const getAddedChangesForSection = (...sections: ProposedChange['section'][]) =>
@@ -922,81 +824,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                 {change.sourceQuote}
               </div>
             )}
-            {change.section === 'stakeholders' && (
-              <div className="mt-3 flex flex-col gap-2">
-                {(proposalStakeholderDrafts[change.id] || toDraftStakeholder(change)).map((stakeholder, index) => (
-                  <div
-                    key={`${change.id}-${stakeholder.userId}-${index}`}
-                    className="grid grid-cols-2 gap-2 rounded-lg border border-border-subtle bg-surface-raised/40 p-2"
-                  >
-                    <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
-                      <span>Name</span>
-                      <input
-                        value={stakeholder.name}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setProposalStakeholderDrafts((current) => ({
-                            ...current,
-                            [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
-                              itemIndex === index ? { ...item, name: value } : item
-                            ),
-                          }));
-                        }}
-                        className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
-                      <span>Role</span>
-                      <input
-                        value={stakeholder.role}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setProposalStakeholderDrafts((current) => ({
-                            ...current,
-                            [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
-                              itemIndex === index ? { ...item, role: value } : item
-                            ),
-                          }));
-                        }}
-                        className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
-                      <span>User ID</span>
-                      <input
-                        value={stakeholder.userId}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setProposalStakeholderDrafts((current) => ({
-                            ...current,
-                            [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
-                              itemIndex === index ? { ...item, userId: value } : item
-                            ),
-                          }));
-                        }}
-                        className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
-                      <span>Initials</span>
-                      <input
-                        value={stakeholder.initials}
-                        onChange={(event) => {
-                          const value = event.target.value.toUpperCase().slice(0, 10);
-                          setProposalStakeholderDrafts((current) => ({
-                            ...current,
-                            [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
-                              itemIndex === index ? { ...item, initials: value } : item
-                            ),
-                          }));
-                        }}
-                        className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
-                      />
-                    </label>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         ))}
       </div>
@@ -1036,82 +863,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
           </div>
         )}
 
-        {change.section === 'stakeholders' && isApprover && (
-          <div className="mt-1 flex flex-col gap-2">
-            {(proposalStakeholderDrafts[change.id] || toDraftStakeholder(change)).map((stakeholder, index) => (
-              <div
-                key={`${change.id}-${stakeholder.userId}-${index}`}
-                className="grid grid-cols-2 gap-2 rounded-lg border border-border-subtle bg-surface-raised/40 p-2"
-              >
-                <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
-                  <span>Name</span>
-                  <input
-                    value={stakeholder.name}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setProposalStakeholderDrafts((current) => ({
-                        ...current,
-                        [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, name: value } : item
-                        ),
-                      }));
-                    }}
-                    className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
-                  <span>Role</span>
-                  <input
-                    value={stakeholder.role}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setProposalStakeholderDrafts((current) => ({
-                        ...current,
-                        [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, role: value } : item
-                        ),
-                      }));
-                    }}
-                    className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
-                  <span>User ID</span>
-                  <input
-                    value={stakeholder.userId}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setProposalStakeholderDrafts((current) => ({
-                        ...current,
-                        [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, userId: value } : item
-                        ),
-                      }));
-                    }}
-                    className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-text-muted">
-                  <span>Initials</span>
-                  <input
-                    value={stakeholder.initials}
-                    onChange={(event) => {
-                      const value = event.target.value.toUpperCase().slice(0, 10);
-                      setProposalStakeholderDrafts((current) => ({
-                        ...current,
-                        [change.id]: (current[change.id] || toDraftStakeholder(change)).map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, initials: value } : item
-                        ),
-                      }));
-                    }}
-                    className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
-                  />
-                </label>
-              </div>
-            ))}
-          </div>
-        )}
-
         {isApprover ? (
           <div className="flex gap-2 mt-1.5 select-none">
             <button
@@ -1136,7 +887,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     );
   };
 
-  const renderProposedTaskRows = (phase: Phase) => {
+  const _renderProposedTaskRowsLegacy = (phase: Phase) => {
     const proposedTaskChanges = getTaskChangesForPhase(phase);
     if (proposedTaskChanges.length === 0) return null;
 
@@ -1196,7 +947,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     });
   };
 
-  const renderProposedPhaseBlocks = () => {
+  const _renderProposedPhaseBlocksLegacy = () => {
     const proposedPhaseChanges = getAddedChangesForSection('phases');
     if (proposedPhaseChanges.length === 0) return null;
 
@@ -1243,7 +994,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
     });
   };
 
-  const renderProposedRiskRows = () => {
+  const _renderProposedRiskRowsLegacy = () => {
     const proposedRiskChanges = getChangesForSection('risks', 'global_risks').filter((change) => change.action === 'add');
     if (proposedRiskChanges.length === 0) return null;
 
@@ -1282,6 +1033,188 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
         </div>
       ));
     });
+  };
+
+  const renderProposedTaskRows = (phase: Phase, phaseIndex?: number) => {
+    const proposedTaskChanges = getTaskChangesForPhase(phase, phaseIndex);
+    if (proposedTaskChanges.length === 0) return null;
+
+    return proposedTaskChanges.flatMap((change) =>
+      getProposalTaskPreviewItems(change).map((task, index) => (
+        <div
+          key={`${change.id}-${index}`}
+          className="flex items-start gap-4 transition-all duration-200 p-2 -mx-2 rounded-xl border border-primary/15 bg-primary-muted/10"
+        >
+          <span className="font-mono text-xs text-text-muted mt-1 select-none w-6 text-right shrink-0">
+            ++
+          </span>
+          <div className="flex-grow min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="font-bold text-text-primary text-sm tracking-tight truncate max-w-full">
+                {task.title}
+              </div>
+              <span className="category-badge badge--approver text-[9px] py-0.5 px-1.5 font-bold">
+                NEW
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-text-muted">
+              <span>Owner:</span>
+              <span className="font-semibold text-text-secondary">{task.owner || '—'}</span>
+              <span>·</span>
+              <span>Due:</span>
+              <span className="font-semibold text-text-secondary">{task.due || '—'}</span>
+              <span>·</span>
+              <span className="font-semibold text-text-secondary capitalize">{task.priority || 'medium'}</span>
+            </div>
+            {change.detail && (
+              <div className="mt-2 text-[11px] text-text-muted leading-relaxed">
+                {change.detail}
+              </div>
+            )}
+            {task.description && (
+              <div className="mt-2 text-xs text-text-secondary leading-relaxed">
+                {task.description}
+              </div>
+            )}
+            {task.acceptanceCriteria.length > 0 && (
+              <div className="mt-2 flex flex-col gap-1">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Done When</span>
+                <ul className="list-disc pl-4 text-[11px] text-text-secondary leading-relaxed">
+                  {task.acceptanceCriteria.map((criterion, criterionIndex) => (
+                    <li key={`${change.id}-${index}-${criterionIndex}`}>{criterion}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      ))
+    );
+  };
+
+  const renderProposedPhaseBlocks = () => {
+    const proposedPhases = getProposalPhasePreviewItems(getAddedChangesForSection('phases'));
+    if (proposedPhases.length === 0) return null;
+
+    return proposedPhases.map((phase) => {
+      const proposedTaskChanges = pendingChanges.filter(
+        (change) =>
+          change.section === 'tasks' &&
+          change.action === 'add' &&
+          matchesPhaseTarget(change.targetId, { title: phase.title }, Number(phase.key))
+      );
+
+      return (
+        <div key={phase.key} className="flex flex-col gap-4 relative rounded-xl border border-primary/15 bg-primary-muted/10 p-5">
+          <div className="flex items-start justify-between">
+            <div className="flex-1 flex flex-col gap-1.5">
+              <div className="flex items-center gap-3">
+                <span className="text-lg font-bold text-text-primary tracking-tight">
+                  {phase.title}
+                </span>
+                {phase.timeframe && (
+                  <span className="category-badge badge--viewer text-[11px] py-0.5 px-2 font-semibold bg-surface-raised border border-border">
+                    {phase.timeframe}
+                  </span>
+                )}
+                <span className="category-badge badge--approver text-[9px] py-0.5 px-1.5 font-bold">
+                  NEW
+                </span>
+              </div>
+              {(phase.goal || phase.change.detail) && (
+                <span className="text-sm text-text-secondary italic">
+                  {phase.goal || phase.change.detail}
+                </span>
+              )}
+              {phase.description && (
+                <span className="text-sm text-text-muted leading-relaxed">
+                  {phase.description}
+                </span>
+              )}
+            </div>
+          </div>
+          {phase.sourceQuote && (
+            <div className="border-l border-border-subtle pl-2 text-[10px] italic text-text-muted leading-normal">
+              {phase.sourceQuote}
+            </div>
+          )}
+          {proposedTaskChanges.length > 0 && (
+            <div className="flex flex-col gap-4 pl-6 ml-3 select-none">
+              {proposedTaskChanges.flatMap((change) =>
+                getProposalTaskPreviewItems(change).map((task, index) => (
+                  <div
+                    key={`${phase.key}-${change.id}-${index}`}
+                    className="flex items-start gap-4 transition-all duration-200 p-2 -mx-2 rounded-xl border border-primary/15 bg-background/40"
+                  >
+                    <span className="font-mono text-xs text-text-muted mt-1 select-none w-6 text-right shrink-0">
+                      ++
+                    </span>
+                    <div className="flex-grow min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="font-bold text-text-primary text-sm tracking-tight truncate max-w-full">
+                          {task.title}
+                        </div>
+                        <span className="category-badge badge--approver text-[9px] py-0.5 px-1.5 font-bold">
+                          NEW
+                        </span>
+                      </div>
+                      {task.acceptanceCriteria.length > 0 && (
+                        <div className="mt-2 flex flex-col gap-1">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Done When</span>
+                          <ul className="list-disc pl-4 text-[11px] text-text-secondary leading-relaxed">
+                            {task.acceptanceCriteria.map((criterion, criterionIndex) => (
+                              <li key={`${phase.key}-${change.id}-${index}-${criterionIndex}`}>{criterion}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      );
+    });
+  };
+
+  const renderProposedRiskRows = () => {
+    const proposedRiskChanges = getChangesForSection('risks', 'global_risks').filter((change) => change.action === 'add');
+    if (proposedRiskChanges.length === 0) return null;
+
+    return proposedRiskChanges.flatMap((change) =>
+      getProposalRiskPreviewItems(change).map((risk, index) => (
+        <div
+          key={`${change.id}-${index}`}
+          className="group/risk flex flex-col gap-1.5 relative border-l border-primary/30 pl-4 py-0.5 bg-primary-muted/10 rounded-r-lg"
+        >
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full shrink-0 bg-warning" />
+            <span className="text-xs font-bold uppercase tracking-widest shrink-0 text-warning">
+              {risk.severity || 'proposed'}
+            </span>
+            <span className="category-badge badge--approver text-[9px] py-0.5 px-1.5 font-bold">
+              NEW
+            </span>
+          </div>
+          <div className="text-sm text-text-secondary leading-relaxed">
+            {risk.description}
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-text-muted select-text mt-1">
+            <span className="font-semibold select-none text-[11px] uppercase tracking-wider">Mitigation:</span>
+            <span className="italic text-text-secondary text-xs">
+              {risk.mitigation || 'No mitigation defined.'}
+            </span>
+          </div>
+          {change.detail && (
+            <div className="text-[11px] text-text-muted leading-relaxed">
+              {change.detail}
+            </div>
+          )}
+        </div>
+      ))
+    );
   };
 
   return (
@@ -1407,37 +1340,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                     {activePlan.objectives.length === 0 && (
                       <span className="text-xs text-text-muted italic">
                         {hasNoPlanBody ? 'No plan yet, start your brainstorming conversation.' : 'No objectives defined.'}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-3 pl-1">
-                    {renderProposalCards(getChangesForSection('stakeholders'), 'mb-1')}
-                    {activePlan.stakeholders.map(stk => (
-                      <div key={stk.userId} className="group/stk flex items-center justify-between hover:bg-surface-raised/20 p-1 rounded-lg transition-colors">
-                        <div className="flex min-w-0 flex-col">
-                          <div>
-                            {renderEditableText(stk.name, 'stakeholder', stk.userId, undefined, 'name', false, "text-sm font-semibold text-text-primary")}
-                            {renderEditableText(stk.role, 'stakeholder', stk.userId, undefined, 'role', false, "text-xs text-text-muted")}
-                          </div>
-                        </div>
-
-                        {isApprover && (
-                          <button
-                            onClick={() => handleDeleteStakeholder(stk.userId)}
-                            className="opacity-0 group-hover/stk:opacity-100 text-text-muted hover:text-error transition-all p-1"
-                            title="Remove stakeholder"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    {activePlan.stakeholders.length === 0 && (
-                      <span className="text-xs text-text-muted italic">
-                        {hasNoPlanBody ? 'No plan yet, start your brainstorming conversation.' : 'No team members assigned.'}
                       </span>
                     )}
                   </div>
@@ -1686,7 +1588,7 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
 
                       {/* 3.4 Tasks in Phase */}
                       <div className="flex flex-col gap-4 pl-6 ml-3 select-none">
-                        {renderProposedTaskRows(phase)}
+                        {renderProposedTaskRows(phase, pIdx)}
                         {phase.tasks.map((task: Task, tIdx: number) => {
                           const stepNum = String(tIdx + 1).padStart(2, '0');
                           const isExpanded = expandedTaskId === task.id;

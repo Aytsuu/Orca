@@ -35,7 +35,6 @@ def _empty_plan_content() -> dict[str, Any]:
         "title": "",
         "description": "",
         "objectives": [],
-        "stakeholders": [],
         "technology_stack": [],
         "phases": [],
         "global_risks": [],
@@ -181,39 +180,6 @@ def _to_initials(value: str) -> str:
     return initials[:10] or "NA"
 
 
-def _normalize_stakeholder(stakeholder: Any) -> dict[str, str]:
-    if isinstance(stakeholder, dict):
-        name = str(
-            stakeholder.get("name")
-            or stakeholder.get("title")
-            or stakeholder.get("role")
-            or stakeholder.get("description")
-            or "Unknown stakeholder"
-        )
-        role = str(stakeholder.get("role") or stakeholder.get("title") or name)
-        user_id = str(
-            stakeholder.get("user_id")
-            or stakeholder.get("userId")
-            or stakeholder.get("id")
-            or name.lower().replace(" ", "_")
-        )
-        initials = str(stakeholder.get("initials") or _to_initials(name))
-        return {
-            "user_id": user_id,
-            "name": name,
-            "role": role,
-            "initials": initials,
-        }
-
-    name = str(stakeholder or "Unknown stakeholder")
-    return {
-        "user_id": name.lower().replace(" ", "_"),
-        "name": name,
-        "role": name,
-        "initials": _to_initials(name),
-    }
-
-
 def _normalize_phase_assigned_member(member: Any) -> dict[str, str]:
     if isinstance(member, dict):
         name = str(
@@ -272,6 +238,16 @@ def _normalize_proposal_change(change: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _sanitize_proposal_row(proposal: dict[str, Any]) -> dict[str, Any]:
+    sanitized = deepcopy(proposal)
+    sanitized["changes"] = [
+        _normalize_proposal_change(change)
+        for change in list(sanitized.get("changes") or [])
+        if str(change.get("section") or "") != "stakeholders"
+    ]
+    return sanitized
+
+
 def normalize_plan_content(content: dict[str, Any] | None) -> dict[str, Any]:
     raw = deepcopy(content or {})
     normalized = _empty_plan_content()
@@ -280,10 +256,6 @@ def normalize_plan_content(content: dict[str, Any] | None) -> dict[str, Any]:
     normalized["objectives"] = [
         _coerce_objective(objective)
         for objective in list(raw.get("objectives") or [])
-    ]
-    normalized["stakeholders"] = [
-        _normalize_stakeholder(stakeholder)
-        for stakeholder in list(raw.get("stakeholders") or [])
     ]
     normalized["technology_stack"] = [
         _normalize_technology_stack_item(item)
@@ -310,7 +282,6 @@ def serialize_plan_row(plan_row: dict[str, Any]) -> dict[str, Any]:
         "title": content["title"],
         "description": content["description"],
         "objectives": content["objectives"],
-        "stakeholders": content["stakeholders"],
         "technology_stack": content["technology_stack"],
         "phases": content["phases"],
         "global_risks": content["global_risks"],
@@ -403,7 +374,6 @@ def _has_structured_shape(content: dict[str, Any] | None) -> bool:
             "title",
             "description",
             "objectives",
-            "stakeholders",
             "technology_stack",
         )
     )
@@ -599,7 +569,7 @@ async def get_pending_proposal(supabase: AsyncClient, project_id: str) -> dict[s
         .limit(1)
         .execute()
     ).data
-    return rows[0] if rows else None
+    return _sanitize_proposal_row(rows[0]) if rows else None
 
 
 async def get_latest_proposal(supabase: AsyncClient, project_id: str) -> dict[str, Any] | None:
@@ -611,7 +581,7 @@ async def get_latest_proposal(supabase: AsyncClient, project_id: str) -> dict[st
         .limit(1)
         .execute()
     ).data
-    return rows[0] if rows else None
+    return _sanitize_proposal_row(rows[0]) if rows else None
 
 
 async def list_plan_versions(supabase: AsyncClient, project_id: str) -> list[dict[str, Any]]:
@@ -948,7 +918,6 @@ async def update_plan_meta(
     title: str | None,
     description: str | None,
     objectives: list[str] | None,
-    stakeholders: list[dict[str, Any]] | None,
 ) -> tuple[dict[str, Any], list[str]]:
     plan = await _mutate_plan(
         supabase,
@@ -958,7 +927,6 @@ async def update_plan_meta(
                 **({"title": title.strip()} if title is not None else {}),
                 **({"description": description.strip()} if description is not None else {}),
                 **({"objectives": list(objectives)} if objectives is not None else {}),
-                **({"stakeholders": deepcopy(stakeholders)} if stakeholders is not None else {}),
             }
         ),
     )

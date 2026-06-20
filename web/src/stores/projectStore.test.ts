@@ -541,7 +541,6 @@ describe('projectStore tests', () => {
           title: 'Updated title',
           description: 'Existing description',
           objectives: [],
-          stakeholders: [],
           phases: [],
           global_risks: [],
         },
@@ -570,7 +569,6 @@ describe('projectStore tests', () => {
           objectives: [
             "{'goal': 'Improve project planning and execution by identifying gaps in conversations and generated plans.'}",
           ],
-          stakeholders: [],
           technology_stack: [],
           phases: [],
           global_risks: [],

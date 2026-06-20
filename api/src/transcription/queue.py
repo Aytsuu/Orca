@@ -10,8 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class TranscriptQueueProducer(Protocol):
-    def enqueue_transcription(self, uploaded_file_id: str, project_id: str) -> str | None:
-        ...
+    def enqueue_transcription(self, uploaded_file_id: str, project_id: str) -> str | None: ...
 
 
 def build_transcription_job_id(uploaded_file_id: str) -> str:

@@ -66,21 +66,31 @@ async def set_agent_status(
     agent: str,
     status: str,
 ) -> None:
-    await supabase.table("agent_status").update(
-        {
-            "status": status,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-    ).eq("project_id", project_id).eq("agent", agent).execute()
+    await (
+        supabase.table("agent_status")
+        .update(
+            {
+                "status": status,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        .eq("project_id", project_id)
+        .eq("agent", agent)
+        .execute()
+    )
 
 
 async def set_agent_statuses_for_new_run(supabase: AsyncClient, project_id: str) -> None:
     updated_at = datetime.now(timezone.utc).isoformat()
     for index, agent_name in enumerate(AGENT_NAMES):
         status = "queued" if index == 0 else "idle"
-        await supabase.table("agent_status").update(
-            {"status": status, "updated_at": updated_at}
-        ).eq("project_id", project_id).eq("agent", agent_name).execute()
+        await (
+            supabase.table("agent_status")
+            .update({"status": status, "updated_at": updated_at})
+            .eq("project_id", project_id)
+            .eq("agent", agent_name)
+            .execute()
+        )
 
 
 async def get_active_run(supabase: AsyncClient, project_id: str) -> dict[str, Any] | None:
@@ -274,7 +284,9 @@ def _derive_change_title(change: dict[str, Any]) -> str:
                 derived = first.get(key)
                 if isinstance(derived, str) and derived.strip():
                     return derived
-    return str(change.get("title") or f'{change.get("action", "update")} {change.get("section", "change")}')
+    return str(
+        change.get("title") or f"{change.get('action', 'update')} {change.get('section', 'change')}"
+    )
 
 
 def _normalize_change(change: dict[str, Any], index: int) -> dict[str, Any]:
@@ -295,7 +307,7 @@ def _build_pending_proposal_activity_items(pending: dict[str, Any] | None) -> li
         normalized_change = _normalize_change(change, index)
         items.append(
             {
-                "id": f'pending-proposal-change:{pending["id"]}:{normalized_change["id"]}',
+                "id": f"pending-proposal-change:{pending['id']}:{normalized_change['id']}",
                 "artifact_id": pending["id"],
                 "agent": "planner",
                 "kind": "proposal_change",
@@ -319,10 +331,13 @@ async def append_plan_proposal_changes(
     normalized_changes = [_normalize_change(change, index) for index, change in enumerate(changes)]
     if pending:
         existing_changes = [
-            _normalize_change(change, index) for index, change in enumerate(list(pending.get("changes") or []))
+            _normalize_change(change, index)
+            for index, change in enumerate(list(pending.get("changes") or []))
         ]
         existing_ids = {change["id"] for change in existing_changes}
-        merged = existing_changes + [change for change in normalized_changes if change["id"] not in existing_ids]
+        merged = existing_changes + [
+            change for change in normalized_changes if change["id"] not in existing_ids
+        ]
         updated = (
             await supabase.table("plan_proposal")
             .update({"changes": merged})
@@ -359,7 +374,7 @@ async def get_agent_activity(supabase: AsyncClient, project_id: str) -> list[dic
                     continue
                 items.append(
                     {
-                        "id": f'planner-change:{artifact["id"]}:{normalized_change["id"]}',
+                        "id": f"planner-change:{artifact['id']}:{normalized_change['id']}",
                         "artifact_id": artifact["id"],
                         "agent": "planner",
                         "kind": "proposal_change",
@@ -373,7 +388,7 @@ async def get_agent_activity(supabase: AsyncClient, project_id: str) -> list[dic
             if payload.get("summary"):
                 items.append(
                     {
-                        "id": f'planner-summary:{artifact["id"]}',
+                        "id": f"planner-summary:{artifact['id']}",
                         "artifact_id": artifact["id"],
                         "agent": "planner",
                         "kind": "insight",
@@ -388,7 +403,7 @@ async def get_agent_activity(supabase: AsyncClient, project_id: str) -> list[dic
             for gap in list(payload.get("gaps") or []):
                 items.append(
                     {
-                        "id": f'gap:{artifact["id"]}:{gap.get("title", len(items))}',
+                        "id": f"gap:{artifact['id']}:{gap.get('title', len(items))}",
                         "artifact_id": artifact["id"],
                         "agent": "analyzer",
                         "kind": "gap",
@@ -402,7 +417,7 @@ async def get_agent_activity(supabase: AsyncClient, project_id: str) -> list[dic
             for risk in list(payload.get("risks") or []):
                 items.append(
                     {
-                        "id": f'risk:{artifact["id"]}:{risk.get("title", len(items))}',
+                        "id": f"risk:{artifact['id']}:{risk.get('title', len(items))}",
                         "artifact_id": artifact["id"],
                         "agent": "analyzer",
                         "kind": "risk",
@@ -416,7 +431,7 @@ async def get_agent_activity(supabase: AsyncClient, project_id: str) -> list[dic
             for index, suggestion in enumerate(list(payload.get("panel_suggestions") or [])):
                 items.append(
                     {
-                        "id": f'panel:{artifact["id"]}:{index}',
+                        "id": f"panel:{artifact['id']}:{index}",
                         "artifact_id": artifact["id"],
                         "agent": "analyzer",
                         "kind": "insight",
@@ -430,7 +445,7 @@ async def get_agent_activity(supabase: AsyncClient, project_id: str) -> list[dic
         elif artifact["agent"] == "monitor" and payload.get("summary_candidate"):
             items.append(
                 {
-                    "id": f'monitor-summary:{artifact["id"]}',
+                    "id": f"monitor-summary:{artifact['id']}",
                     "artifact_id": artifact["id"],
                     "agent": "monitor",
                     "kind": "insight",
@@ -471,7 +486,11 @@ async def promote_all_actionable_activity(
     project_id: str,
 ) -> dict[str, Any]:
     activity_items = await get_agent_activity(supabase, project_id)
-    changes = [item["proposal_change"] for item in activity_items if item.get("actionable") and item.get("proposal_change")]
+    changes = [
+        item["proposal_change"]
+        for item in activity_items
+        if item.get("actionable") and item.get("proposal_change")
+    ]
     if not changes:
         raise NotFound("There are no actionable activity items to send for review.")
     proposal = await append_plan_proposal_changes(supabase, project_id=project_id, changes=changes)

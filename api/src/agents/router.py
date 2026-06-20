@@ -53,7 +53,10 @@ async def get_latest_agent_artifacts_endpoint(
     return DataEnvelope(data=[AgentArtifactOut.model_validate(row) for row in artifacts])
 
 
-@router.get("/{project_id}/agents/activity", response_model=DataEnvelope[list[AgentActivityItemOut]])
+@router.get(
+    "/{project_id}/agents/activity",
+    response_model=DataEnvelope[list[AgentActivityItemOut]],
+)
 async def get_agent_activity_endpoint(
     project_id: UUID,
     _: Annotated[dict, Depends(get_project_context)],

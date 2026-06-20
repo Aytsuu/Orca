@@ -7,9 +7,7 @@ from supabase import AsyncClient
 
 
 async def get_agent_run(supabase: AsyncClient, run_id: str) -> dict[str, Any]:
-    rows = (
-        await supabase.table("agent_run").select("*").eq("id", run_id).limit(1).execute()
-    ).data
+    rows = (await supabase.table("agent_run").select("*").eq("id", run_id).limit(1).execute()).data
     if not rows:
         raise ValueError(f"Agent run {run_id} was not found.")
     return rows[0]
@@ -79,9 +77,11 @@ async def set_agent_status(
         .execute()
     ).data
     if not updated:
-        await supabase.table("agent_status").insert(
-            {"project_id": project_id, "agent": agent, **payload}
-        ).execute()
+        await (
+            supabase.table("agent_status")
+            .insert({"project_id": project_id, "agent": agent, **payload})
+            .execute()
+        )
 
 
 async def create_agent_artifact(
@@ -138,9 +138,12 @@ async def supersede_pending_proposals(supabase: AsyncClient, project_id: str) ->
         .execute()
     ).data
     for row in pending_rows:
-        await supabase.table("plan_proposal").update({"status": "superseded"}).eq(
-            "id", row["id"]
-        ).execute()
+        await (
+            supabase.table("plan_proposal")
+            .update({"status": "superseded"})
+            .eq("id", row["id"])
+            .execute()
+        )
 
 
 def _merge_proposal_changes(
@@ -148,11 +151,7 @@ def _merge_proposal_changes(
     incoming_changes: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     merged = [dict(change) for change in existing_changes]
-    existing_ids = {
-        str(change.get("id"))
-        for change in merged
-        if change.get("id") is not None
-    }
+    existing_ids = {str(change.get("id")) for change in merged if change.get("id") is not None}
     for change in incoming_changes:
         change_id = change.get("id")
         if change_id is not None and str(change_id) in existing_ids:
@@ -208,14 +207,18 @@ async def create_conversation_summary(
     source_message_ids: list[str],
     last_message_created_at: str | None,
 ) -> None:
-    await supabase.table("conversation_summary").insert(
-        {
-            "project_id": project_id,
-            "summary": summary,
-            "source_message_ids": source_message_ids,
-            "last_message_created_at": last_message_created_at,
-        }
-    ).execute()
+    await (
+        supabase.table("conversation_summary")
+        .insert(
+            {
+                "project_id": project_id,
+                "summary": summary,
+                "source_message_ids": source_message_ids,
+                "last_message_created_at": last_message_created_at,
+            }
+        )
+        .execute()
+    )
 
 
 async def get_llm_usage(

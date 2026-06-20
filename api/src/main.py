@@ -69,4 +69,3 @@ app.include_router(members_router, prefix="/api/v1/projects")
 app.include_router(plans_router, prefix="/api/v1/projects")
 app.include_router(agents_router, prefix="/api/v1/projects")
 app.include_router(invitations_router, prefix="/api/v1")
-

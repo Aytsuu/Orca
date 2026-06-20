@@ -6,9 +6,9 @@ from types import ModuleType, SimpleNamespace
 import pytest
 from pydantic import BaseModel
 
+from src.agents.schemas import PlannerOutput
 from src.exceptions import AuthenticationError, InvalidOutputError, TransportError
 from src.llm.gemini import GeminiJsonLlmClient
-from src.agents.schemas import PlannerOutput
 
 
 class Ping(BaseModel):
@@ -257,7 +257,9 @@ async def test_gemini_client_uses_flattened_planner_response_schema(
 
     assert result.summary == "ok"
     response_schema = captured_configs[0].kwargs["response_schema"]
-    content_any_of = response_schema["properties"]["changes"]["items"]["properties"]["content"]["anyOf"]
+    content_any_of = response_schema["properties"]["changes"]["items"]["properties"][
+        "content"
+    ]["anyOf"]
     object_array_schema = content_any_of[0]
     assert object_array_schema["items"]["properties"]["acceptance_criteria"] == {
         "type": "array",

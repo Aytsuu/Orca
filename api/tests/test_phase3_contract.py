@@ -46,8 +46,8 @@ def override_dependencies(
     except ImportError:
         get_transcript_queue_producer = None
     if get_transcript_queue_producer is not None:
-        app.dependency_overrides[get_transcript_queue_producer] = (
-            lambda: fake_transcript_queue_producer
+        app.dependency_overrides[get_transcript_queue_producer] = lambda: (
+            fake_transcript_queue_producer
         )
     yield
     app.dependency_overrides.clear()

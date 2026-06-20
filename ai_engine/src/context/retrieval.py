@@ -14,8 +14,7 @@ class RetrievalStrategy(Protocol):
         project_id: str,
         query_messages: list[dict],
         limit: int,
-    ) -> list[dict]:
-        ...
+    ) -> list[dict]: ...
 
 
 class TranscriptEmbedder(Protocol):
@@ -24,8 +23,7 @@ class TranscriptEmbedder(Protocol):
         texts: list[str],
         *,
         task_type: str = "RETRIEVAL_DOCUMENT",
-    ) -> list[list[float]]:
-        ...
+    ) -> list[list[float]]: ...
 
 
 def _keywords(text: str) -> set[str]:

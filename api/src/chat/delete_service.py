@@ -4,20 +4,26 @@ from copy import deepcopy
 from inspect import isawaitable
 from typing import Any
 
+from postgrest.exceptions import APIError
 from supabase import AsyncClient
 
 from src.chat.exceptions import UploadedFileNotFound
-from src.chat.service import UPLOAD_BUCKET, is_missing_uploaded_file_column, normalize_uploaded_file_row
+from src.chat.service import (
+    UPLOAD_BUCKET,
+    is_missing_uploaded_file_column,
+    normalize_uploaded_file_row,
+)
 from src.exceptions import Forbidden
-from postgrest.exceptions import APIError
 
 
 def _chunked(values: list[str], size: int) -> list[list[str]]:
-    return [values[index:index + size] for index in range(0, len(values), size)]
+    return [values[index : index + size] for index in range(0, len(values), size)]
 
 
 async def _remove_storage_paths(supabase: AsyncClient, storage_paths: list[str]) -> None:
-    unique_paths = [path for path in dict.fromkeys(path.strip() for path in storage_paths if path.strip())]
+    unique_paths = [
+        path for path in dict.fromkeys(path.strip() for path in storage_paths if path.strip())
+    ]
     if not unique_paths:
         return
 
@@ -36,10 +42,7 @@ async def _scrub_chat_message_attachments(
 ) -> None:
     try:
         rows = (
-            await supabase.table("chat_message")
-            .select("*")
-            .eq("project_id", project_id)
-            .execute()
+            await supabase.table("chat_message").select("*").eq("project_id", project_id).execute()
         ).data
     except APIError as error:
         if not is_missing_uploaded_file_column(error, "attachments"):
@@ -55,9 +58,12 @@ async def _scrub_chat_message_attachments(
         ]
         if len(next_attachments) == len(attachments):
             continue
-        await supabase.table("chat_message").update({"attachments": next_attachments}).eq(
-            "id", row["id"]
-        ).execute()
+        await (
+            supabase.table("chat_message")
+            .update({"attachments": next_attachments})
+            .eq("id", row["id"])
+            .execute()
+        )
 
 
 async def _scrub_plan_attachments(
@@ -106,7 +112,9 @@ async def delete_uploaded_file(
         or actor_membership.get("role") == "creator"
     )
     if not can_remove:
-        raise Forbidden("You can only remove your own files unless you can approve project changes.")
+        raise Forbidden(
+            "You can only remove your own files unless you can approve project changes."
+        )
 
     await _remove_storage_paths(supabase, [uploaded_file["storage_path"]])
     await _scrub_chat_message_attachments(
@@ -119,9 +127,13 @@ async def delete_uploaded_file(
         project_id=project_id,
         uploaded_file_id=uploaded_file_id,
     )
-    await supabase.table("uploaded_file").delete().eq("project_id", project_id).eq(
-        "id", uploaded_file_id
-    ).execute()
+    await (
+        supabase.table("uploaded_file")
+        .delete()
+        .eq("project_id", project_id)
+        .eq("id", uploaded_file_id)
+        .execute()
+    )
     return deepcopy(uploaded_file)
 
 

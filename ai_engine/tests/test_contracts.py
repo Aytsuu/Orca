@@ -90,8 +90,18 @@ def test_guardrail_rejects_unsupported_remove_without_explicit_request() -> None
 def test_partition_safety_violations_ignores_confidence_wording_false_positives() -> None:
     ignored, blocking = partition_safety_violations(
         [
-            "The confidence level for the 'description' update is 'medium', but the justification suggests a 'high' confidence level by stating the user's message provides a 'clear concept'. The evidence cited does not fully support the 'high' confidence level.",
-            "The confidence level for the 'phases' addition is 'medium', but the justification states the requirements 'imply significant development work' which suggests a higher degree of certainty. The evidence cited does not fully support the 'medium' confidence level.",
+            (
+                "The confidence level for the 'description' update is 'medium', but the "
+                "justification suggests a 'high' confidence level by stating the user's "
+                "message provides a 'clear concept'. The evidence cited does not fully "
+                "support the 'high' confidence level."
+            ),
+            (
+                "The confidence level for the 'phases' addition is 'medium', but the "
+                "justification states the requirements 'imply significant development work' "
+                "which suggests a higher degree of certainty. The evidence cited does not "
+                "fully support the 'medium' confidence level."
+            ),
             "No remove action exists without explicit user intent.",
         ]
     )

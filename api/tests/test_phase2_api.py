@@ -254,8 +254,8 @@ def override_dependencies(
     except ImportError:
         get_transcript_queue_producer = None
     if get_transcript_queue_producer is not None:
-        app.dependency_overrides[get_transcript_queue_producer] = (
-            lambda: fake_transcript_queue_producer
+        app.dependency_overrides[get_transcript_queue_producer] = lambda: (
+            fake_transcript_queue_producer
         )
     yield
     app.dependency_overrides.clear()
@@ -1150,7 +1150,11 @@ async def test_agent_activity_keeps_pending_proposal_changes_visible_across_runs
     assert activity_response.status_code == 200
     activity_items = activity_response.json()["data"]
 
-    pending_items = [item for item in activity_items if item["id"].startswith("pending-proposal-change:")]
+    pending_items = [
+        item
+        for item in activity_items
+        if item["id"].startswith("pending-proposal-change:")
+    ]
     assert [item["proposal_change"]["id"] for item in pending_items] == ["chg-1"]
     assert pending_items[0]["actionable"] is False
     assert pending_items[0]["artifact_id"] == fake_supabase.tables["plan_proposal"][0]["id"]
@@ -1365,17 +1369,20 @@ async def test_agent_activity_is_sorted_oldest_to_latest(
     activity_items = activity_response.json()["data"]
 
     assert [item["id"] for item in activity_items] == [
-        f'pending-proposal-change:{fake_supabase.tables["plan_proposal"][0]["id"]}:chg-1',
-        "monitor-summary:" + next(
+        f"pending-proposal-change:{fake_supabase.tables['plan_proposal'][0]['id']}:chg-1",
+        "monitor-summary:"
+        + next(
             row["id"]
             for row in fake_supabase.tables["agent_artifact"]
             if row["run_id"] == second_run["id"] and row["agent"] == "monitor"
         ),
-        "gap:" + next(
+        "gap:"
+        + next(
             row["id"]
             for row in fake_supabase.tables["agent_artifact"]
             if row["run_id"] == second_run["id"] and row["agent"] == "analyzer"
-        ) + ":Owner missing",
+        )
+        + ":Owner missing",
         f"planner-summary:{latest_planner_artifact['id']}",
     ]
 
@@ -1995,7 +2002,12 @@ async def test_get_plan_coerces_objective_objects_to_strings(
                 "title": "Runway Q3 Launch",
                 "description": "AI-generated plan",
                 "objectives": [
-                    {"goal": "Enhance team productivity through intelligent conversation monitoring and structured plan generation."},
+                    {
+                        "goal": (
+                            "Enhance team productivity through intelligent conversation "
+                            "monitoring and structured plan generation."
+                        )
+                    },
                     {"title": "Develop a messaging workflow for team productivity."},
                     {"description": "Turn AI outputs into actionable planning steps."},
                     "Keep explicit string objectives intact.",
@@ -2016,7 +2028,10 @@ async def test_get_plan_coerces_objective_objects_to_strings(
 
     assert response.status_code == 200
     assert response.json()["data"]["objectives"] == [
-        "Enhance team productivity through intelligent conversation monitoring and structured plan generation.",
+        (
+            "Enhance team productivity through intelligent conversation monitoring "
+            "and structured plan generation."
+        ),
         "Develop a messaging workflow for team productivity.",
         "Turn AI outputs into actionable planning steps.",
         "Keep explicit string objectives intact.",
@@ -2047,7 +2062,10 @@ async def test_get_plan_recovers_stringified_objective_objects(
                 "title": "Runway Q3 Launch",
                 "description": "AI-generated plan",
                 "objectives": [
-                    "{'goal': 'Improve project planning and execution by identifying gaps in conversations and generated plans.'}",
+                    (
+                        "{'goal': 'Improve project planning and execution by identifying "
+                        "gaps in conversations and generated plans.'}"
+                    ),
                     '{"title": "Keep generated changes visible to all team members."}',
                 ],
                 "stakeholders": [],
@@ -2066,7 +2084,10 @@ async def test_get_plan_recovers_stringified_objective_objects(
 
     assert response.status_code == 200
     assert response.json()["data"]["objectives"] == [
-        "Improve project planning and execution by identifying gaps in conversations and generated plans.",
+        (
+            "Improve project planning and execution by identifying gaps in "
+            "conversations and generated plans."
+        ),
         "Keep generated changes visible to all team members.",
     ]
 
@@ -2116,7 +2137,10 @@ async def test_accept_plan_change_coerces_objective_objects_to_strings(
                     "action": "add",
                     "content": [
                         {
-                            "goal": "Enhance team productivity through intelligent conversation monitoring and structured plan generation."
+                            "goal": (
+                                "Enhance team productivity through intelligent conversation "
+                                "monitoring and structured plan generation."
+                            )
                         }
                     ],
                 }
@@ -2131,7 +2155,10 @@ async def test_accept_plan_change_coerces_objective_objects_to_strings(
 
     assert response.status_code == 200
     assert response.json()["data"]["objectives"] == [
-        "Enhance team productivity through intelligent conversation monitoring and structured plan generation."
+        (
+            "Enhance team productivity through intelligent conversation monitoring "
+            "and structured plan generation."
+        )
     ]
 
 

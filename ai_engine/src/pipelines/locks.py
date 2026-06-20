@@ -6,13 +6,11 @@ from uuid import uuid4
 
 
 class ProjectLock(Protocol):
-    async def release(self) -> None:
-        ...
+    async def release(self) -> None: ...
 
 
 class ProjectLockManager(Protocol):
-    async def acquire(self, project_id: str) -> ProjectLock | None:
-        ...
+    async def acquire(self, project_id: str) -> ProjectLock | None: ...
 
 
 @dataclass

@@ -20,4 +20,3 @@ async def get_supabase_admin() -> AsyncClient:
         raise SupabaseNotConfigured()
 
     return await acreate_client(settings.supabase_url, settings.supabase_admin_key)
-

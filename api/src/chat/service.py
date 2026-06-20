@@ -3,14 +3,14 @@ from __future__ import annotations
 from inspect import isawaitable
 from pathlib import PurePosixPath
 from types import SimpleNamespace
-from uuid import uuid4
 from typing import Literal
+from uuid import uuid4
 
 from postgrest.exceptions import APIError
 from supabase import AsyncClient
 
-from src.chat.schemas import FileAccessUrlOut, UploadUrlOut
 from src.chat.exceptions import UploadedFileNotFound
+from src.chat.schemas import FileAccessUrlOut, UploadUrlOut
 from src.exceptions import BadRequest
 
 UPLOAD_BUCKET = "orca-uploads"
@@ -265,7 +265,7 @@ async def promote_uploaded_file_to_ai_context(
             raise
         raise BadRequest(
             message="Adding chat attachments to Sources requires the latest database migration."
-        )
+        ) from error
 
 
 def build_storage_path(project_id: str, session_id: str, filename: str) -> str:
@@ -348,4 +348,3 @@ async def create_signed_file_access_url(
         raise BadRequest(message="Unable to generate a signed access URL for this file.")
 
     return FileAccessUrlOut(signed_url=signed_url)
-

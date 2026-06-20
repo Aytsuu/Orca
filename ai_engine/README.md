@@ -81,6 +81,21 @@ Transcript processing uses the shared per-project LLM budget. Media extraction
 separate LLM calls by design, so a single source file can consume more than one
 budget unit.
 
+## Transcript deployment checklist
+
+Before testing source transcription in a real environment, verify:
+
+- Redis is reachable from `ai_engine` using the configured `REDIS_URL`.
+- Gemini is reachable from `ai_engine` via `python -m src.llm.smoke`.
+- The transcript migration has been applied to the target Supabase project:
+  - `public.source_transcript`
+  - `public.source_transcript_chunk`
+  - `public.match_source_transcripts(...)`
+- The transcript worker is running and listening on `orca-transcripts`.
+
+If the migration is missing, source uploads will enqueue successfully but the
+worker will fail when it tries to read or write transcript rows.
+
 ## Gemini fallback profile
 
 The primary and fallback LLM profiles are both server-side `ai_engine`

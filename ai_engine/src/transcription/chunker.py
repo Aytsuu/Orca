@@ -58,9 +58,7 @@ def chunk_text(text: str, max_tokens: int = 400, overlap: int = 50) -> list[str]
 
 def _split_sentences(text: str) -> list[str]:
     return [
-        sentence.strip()
-        for sentence in SENTENCE_BOUNDARY_PATTERN.split(text)
-        if sentence.strip()
+        sentence.strip() for sentence in SENTENCE_BOUNDARY_PATTERN.split(text) if sentence.strip()
     ]
 
 

@@ -50,4 +50,3 @@ class SupabaseNotConfigured(AppException):
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     message = "Supabase credentials are not configured for this environment."
     error_code = "SUPABASE_NOT_CONFIGURED"
-

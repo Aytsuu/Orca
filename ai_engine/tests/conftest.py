@@ -108,8 +108,7 @@ class FakeTableQuery:
         if self._action == "insert":
             payloads = self._payload if isinstance(self._payload, list) else [self._payload]
             inserted = [
-                deepcopy(self.client.insert_row(self.table_name, payload))
-                for payload in payloads
+                deepcopy(self.client.insert_row(self.table_name, payload)) for payload in payloads
             ]
             return FakeExecuteResult(inserted)
 

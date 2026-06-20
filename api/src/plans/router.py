@@ -13,10 +13,10 @@ from src.plans.schemas import (
     PhaseOut,
     PhaseUpdate,
     PlanApprove,
-    ProposalChangeAccept,
     PlanMetaUpdate,
     PlanReject,
     PlanVersionOut,
+    ProposalChangeAccept,
     ProposalOut,
     RiskCreate,
     RiskOut,
@@ -66,7 +66,9 @@ async def get_plan_endpoint(
     supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
 ) -> DataEnvelope[StructuredPlanOut | None]:
     plan = await get_current_plan(supabase, str(project_id))
-    return DataEnvelope(data=StructuredPlanOut.model_validate(serialize_plan_row(plan)) if plan else None)
+    return DataEnvelope(
+        data=StructuredPlanOut.model_validate(serialize_plan_row(plan)) if plan else None
+    )
 
 
 @router.patch("/{project_id}/plan", response_model=MetaEnvelope[StructuredPlanOut])
@@ -139,7 +141,9 @@ async def reject_plan_change_endpoint(
     supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
 ) -> DataEnvelope[ProposalOut]:
     require_approver_membership(project_context["membership"])
-    proposal = await reject_proposal_change(supabase, project_id=str(project_id), change_id=change_id)
+    proposal = await reject_proposal_change(
+        supabase, project_id=str(project_id), change_id=change_id
+    )
     return DataEnvelope(data=ProposalOut.model_validate(proposal))
 
 
@@ -311,7 +315,10 @@ async def update_task_endpoint(
     return MetaEnvelope(data=TaskOut.model_validate(task), meta={"conflicts": conflicts})
 
 
-@router.delete("/{project_id}/plan/phases/{phase_id}/tasks/{task_id}", response_model=DataEnvelope[TaskOut])
+@router.delete(
+    "/{project_id}/plan/phases/{phase_id}/tasks/{task_id}",
+    response_model=DataEnvelope[TaskOut],
+)
 async def delete_task_endpoint(
     project_id: UUID,
     phase_id: str,
@@ -325,7 +332,10 @@ async def delete_task_endpoint(
     return DataEnvelope(data=TaskOut.model_validate(task))
 
 
-@router.delete("/{project_id}/plan/phases/{phase_id}/gaps/{gap_id}", response_model=MetaEnvelope[dict])
+@router.delete(
+    "/{project_id}/plan/phases/{phase_id}/gaps/{gap_id}",
+    response_model=MetaEnvelope[dict],
+)
 async def delete_gap_endpoint(
     project_id: UUID,
     phase_id: str,

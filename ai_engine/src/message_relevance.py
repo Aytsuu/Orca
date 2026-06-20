@@ -87,11 +87,15 @@ def is_obviously_actionable(content: str) -> bool:
     return False
 
 
-def split_messages_by_signal(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def split_messages_by_signal(
+    messages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     meaningful: list[dict[str, Any]] = []
     ambiguous: list[dict[str, Any]] = []
     for message in messages:
-        should_consider, _reason = classify_message_for_agent_trigger(str(message.get("content") or ""))
+        should_consider, _reason = classify_message_for_agent_trigger(
+            str(message.get("content") or "")
+        )
         if not should_consider:
             continue
         if is_obviously_actionable(str(message.get("content") or "")):

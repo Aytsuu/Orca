@@ -56,12 +56,7 @@ def _strip_non_citation_ids(payload):
             if key in {"source_message_ids", "sourceMessageIds"}:
                 sanitized[key] = value
                 continue
-            if (
-                key == "id"
-                or key.endswith("_id")
-                or key.endswith("_ids")
-                or key.endswith("_at")
-            ):
+            if key == "id" or key.endswith("_id") or key.endswith("_ids") or key.endswith("_at"):
                 continue
             sanitized[key] = _strip_non_citation_ids(value)
         return sanitized
@@ -325,9 +320,7 @@ class PlannerStep(AgentStep):
             safety.violations
         )
         if not safety.safe and blocking_safety_violations:
-            raise ValueError(
-                f"Planner output failed safety check: {blocking_safety_violations}"
-            )
+            raise ValueError(f"Planner output failed safety check: {blocking_safety_violations}")
 
         artifacts = {
             "changes": normalized_changes,

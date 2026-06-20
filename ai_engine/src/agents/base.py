@@ -19,5 +19,4 @@ class AgentStep(ABC):
     agent_name: str
 
     @abstractmethod
-    async def execute(self, context: Any, prior_results: list[StepResult]) -> StepResult:
-        ...
+    async def execute(self, context: Any, prior_results: list[StepResult]) -> StepResult: ...

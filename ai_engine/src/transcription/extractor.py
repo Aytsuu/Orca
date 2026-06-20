@@ -119,9 +119,7 @@ class TranscriptExtractor:
 
         document = Document(BytesIO(file_bytes))
         parts = [
-            paragraph.text.strip()
-            for paragraph in document.paragraphs
-            if paragraph.text.strip()
+            paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()
         ]
         for table in document.tables:
             for row in table.rows:

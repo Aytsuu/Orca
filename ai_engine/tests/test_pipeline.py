@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.agents.schemas import AnalyzerOutput, MonitorOutput, QuestionAnalyzerOutput, RelevanceOutput
+from src.agents.schemas import (
+    AnalyzerOutput,
+    MonitorOutput,
+    QuestionAnalyzerOutput,
+    RelevanceOutput,
+)
 from src.context.builder import AssembledContext
 from src.exceptions import (
     ConfigurationError,
@@ -49,9 +54,7 @@ async def test_pipeline_short_circuits_after_monitor_when_no_actionable_items(
     assert len(results) == 1
     assert results[0].agent == "monitor"
     skipped = [
-        row
-        for row in fake_supabase.tables["agent_artifact"]
-        if row["payload"].get("skipped")
+        row for row in fake_supabase.tables["agent_artifact"] if row["payload"].get("skipped")
     ]
     assert len(skipped) == 2
 
@@ -83,7 +86,9 @@ async def test_pipeline_skips_without_llm_for_obvious_filler_messages(fake_supab
 
     assert results == []
     assert llm.calls == []
-    skipped_artifacts = [row for row in fake_supabase.tables["agent_artifact"] if row["payload"].get("skipped")]
+    skipped_artifacts = [
+        row for row in fake_supabase.tables["agent_artifact"] if row["payload"].get("skipped")
+    ]
     assert len(skipped_artifacts) == 3
     assert skipped_artifacts[0]["payload"]["reason"] == "no_meaningful_messages"
 
@@ -231,12 +236,16 @@ async def test_pipeline_repairs_single_character_planner_source_id_typo(fake_sup
     )
 
     assert [result.agent for result in results] == ["monitor", "analyzer", "planner"]
-    assert fake_supabase.tables["plan_proposal"][0]["changes"][0]["source_message_ids"] == [message["id"]]
+    assert fake_supabase.tables["plan_proposal"][0]["changes"][0]["source_message_ids"] == [
+        message["id"]
+    ]
     assert fake_supabase.tables["plan_proposal"][0]["status"] == "pending"
 
 
 @pytest.mark.asyncio
-async def test_pipeline_appends_new_planner_changes_to_existing_pending_proposal(fake_supabase) -> None:
+async def test_pipeline_appends_new_planner_changes_to_existing_pending_proposal(
+    fake_supabase,
+) -> None:
     project = fake_supabase.insert_row("project", {"name": "Alpha"})
     message = fake_supabase.insert_row(
         "chat_message",
@@ -371,7 +380,9 @@ async def test_pipeline_uses_relevance_gate_for_ambiguous_messages(fake_supabase
 
 
 @pytest.mark.asyncio
-async def test_pipeline_routes_question_only_monitor_output_to_question_analyzer(fake_supabase) -> None:
+async def test_pipeline_routes_question_only_monitor_output_to_question_analyzer(
+    fake_supabase,
+) -> None:
     project = fake_supabase.insert_row("project", {"name": "Alpha"})
     message = fake_supabase.insert_row(
         "chat_message",
@@ -407,8 +418,15 @@ async def test_pipeline_routes_question_only_monitor_output_to_question_analyzer
             QuestionAnalyzerOutput(
                 interpreted_intent="The user wants guidance on how to shape the first phase.",
                 missing_information=["Success criteria for phase one are not defined."],
-                clarifying_questions=["Is the first phase primarily discovery, delivery, or validation?"],
-                panel_suggestions=["Review the current plan and decide whether phase one is for discovery or execution."],
+                clarifying_questions=[
+                    "Is the first phase primarily discovery, delivery, or validation?"
+                ],
+                panel_suggestions=[
+                    (
+                        "Review the current plan and decide whether phase one is "
+                        "for discovery or execution."
+                    )
+                ],
                 source_message_ids=[message["id"]],
             ),
         ]
@@ -477,7 +495,10 @@ async def test_pipeline_skips_planner_when_analyzer_flags_unsupported_proposal_s
                 gaps=[
                     {
                         "title": "Unsupported section type",
-                        "detail": "The requested budget section is not in the allowed proposal section type list.",
+                        "detail": (
+                            "The requested budget section is not in the allowed "
+                            "proposal section type list."
+                        ),
                         "severity": "major",
                         "source_message_ids": [message["id"]],
                     }
@@ -590,7 +611,9 @@ async def test_pipeline_allows_analyzer_and_planner_to_cite_ids_from_supplied_co
                         "section": "tasks",
                         "action": "add",
                         "content": [{"title": "Assign QA owner before launch"}],
-                        "justification": "Historical conversation evidence still supports this gap.",
+                        "justification": (
+                            "Historical conversation evidence still supports this gap."
+                        ),
                         "source_message_ids": [prior_message["id"]],
                         "confidence": "medium",
                     }
@@ -710,7 +733,9 @@ async def test_pipeline_sanitizes_analyzer_and_planner_prompt_payload_ids(fake_s
                         "section": "tasks",
                         "action": "add",
                         "content": [{"title": "Assign QA owner before launch"}],
-                        "justification": "Historical conversation evidence still supports this gap.",
+                        "justification": (
+                            "Historical conversation evidence still supports this gap."
+                        ),
                         "source_message_ids": [prior_message["id"]],
                         "confidence": "medium",
                     }
@@ -728,8 +753,12 @@ async def test_pipeline_sanitizes_analyzer_and_planner_prompt_payload_ids(fake_s
         safety_client=llm,
     )
 
-    analyzer_prompt = next(call["prompt"] for call in llm.calls if call["schema"] == "AnalyzerOutput")
-    planner_prompt = next(call["prompt"] for call in llm.calls if call["schema"] == "PlannerOutput")
+    analyzer_prompt = next(
+        call["prompt"] for call in llm.calls if call["schema"] == "AnalyzerOutput"
+    )
+    planner_prompt = next(
+        call["prompt"] for call in llm.calls if call["schema"] == "PlannerOutput"
+    )
 
     for prompt in (analyzer_prompt, planner_prompt):
         assert prior_message["id"] in prompt
@@ -744,9 +773,12 @@ async def test_pipeline_sanitizes_analyzer_and_planner_prompt_payload_ids(fake_s
         assert run["id"] not in prompt
         assert "phase-row-id" not in prompt
         assert "task-row-id" not in prompt
-    assert "treat missing task descriptions and missing acceptance criteria as real planning gaps" in analyzer_prompt
-    assert 'Treat task descriptions and acceptance_criteria as expected outputs' in planner_prompt
-    assert 'leave those fields empty rather than inventing detail' in planner_prompt
+    assert (
+        "treat missing task descriptions and missing acceptance criteria as real planning gaps"
+        in analyzer_prompt
+    )
+    assert "Treat task descriptions and acceptance_criteria as expected outputs" in planner_prompt
+    assert "leave those fields empty rather than inventing detail" in planner_prompt
 
 
 @pytest.mark.asyncio
@@ -817,8 +849,12 @@ async def test_pipeline_uses_wording_neutral_safety_confidence_rubric(fake_supab
         safety_client=llm,
     )
 
-    planner_prompt = next(call["prompt"] for call in llm.calls if call["schema"] == "PlannerOutput")
-    safety_prompt = next(call["prompt"] for call in llm.calls if call["schema"] == "SafetyCheckOutput")
+    planner_prompt = next(
+        call["prompt"] for call in llm.calls if call["schema"] == "PlannerOutput"
+    )
+    safety_prompt = next(
+        call["prompt"] for call in llm.calls if call["schema"] == "SafetyCheckOutput"
+    )
     assert "Assign confidence from the evidence structure using this rubric" in planner_prompt
     assert "single explicit and unambiguous instruction" in planner_prompt
     assert "Judge confidence from the evidence structure" in safety_prompt
@@ -1391,7 +1427,10 @@ async def test_pipeline_ignores_confidence_wording_only_safety_false_positive(
         {
             "project_id": project["id"],
             "session_id": "alpha",
-            "content": "Add a project description and split the work into phases for setup, rollout, and validation.",
+            "content": (
+                "Add a project description and split the work into phases for setup, "
+                "rollout, and validation."
+            ),
         },
     )
     run = fake_supabase.insert_row(
@@ -1442,7 +1481,10 @@ async def test_pipeline_ignores_confidence_wording_only_safety_false_positive(
                         "section": "description",
                         "action": "update",
                         "content": "Project delivery plan for setup, rollout, and validation.",
-                        "justification": "The user's message provides a clear concept for the description update.",
+                        "justification": (
+                            "The user's message provides a clear concept for the "
+                            "description update."
+                        ),
                         "source_message_ids": [message["id"]],
                         "confidence": "medium",
                     },
@@ -1464,7 +1506,10 @@ async def test_pipeline_ignores_confidence_wording_only_safety_false_positive(
                                 "description": "Validate the delivered work.",
                             },
                         ],
-                        "justification": "The requirements imply significant development work across setup, rollout, and validation.",
+                        "justification": (
+                            "The requirements imply significant development work "
+                            "across setup, rollout, and validation."
+                        ),
                         "source_message_ids": [message["id"]],
                         "confidence": "medium",
                     },
@@ -1474,8 +1519,20 @@ async def test_pipeline_ignores_confidence_wording_only_safety_false_positive(
             {
                 "safe": False,
                 "violations": [
-                    "The confidence level for the 'description' update is 'medium', but the justification suggests a 'high' confidence level by stating the user's message provides a 'clear concept'. The evidence cited does not fully support the 'high' confidence level.",
-                    "The confidence level for the 'phases' addition is 'medium', but the justification states the requirements 'imply significant development work' which suggests a higher degree of certainty. The evidence cited does not fully support the 'medium' confidence level.",
+                    (
+                        "The confidence level for the 'description' update is "
+                        "'medium', but the justification suggests a 'high' "
+                        "confidence level by stating the user's message provides "
+                        "a 'clear concept'. The evidence cited does not fully "
+                        "support the 'high' confidence level."
+                    ),
+                    (
+                        "The confidence level for the 'phases' addition is "
+                        "'medium', but the justification states the requirements "
+                        "'imply significant development work' which suggests a "
+                        "higher degree of certainty. The evidence cited does not "
+                        "fully support the 'medium' confidence level."
+                    ),
                 ],
             },
         ]

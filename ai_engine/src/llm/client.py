@@ -15,5 +15,4 @@ class JsonLlmClient(Protocol):
         *,
         model: str,
         temperature: float,
-    ) -> SchemaT:
-        ...
+    ) -> SchemaT: ...

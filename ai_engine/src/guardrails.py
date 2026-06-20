@@ -29,7 +29,9 @@ def validate_source_message_ids(valid_ids: Iterable[str], cited_ids: Iterable[st
         raise InvalidOutputError(f"Output cited unknown source_message_ids: {invalid}")
 
 
-def canonicalize_source_message_ids(valid_ids: Iterable[str], cited_ids: Iterable[str]) -> list[str]:
+def canonicalize_source_message_ids(
+    valid_ids: Iterable[str], cited_ids: Iterable[str]
+) -> list[str]:
     valid = [str(message_id) for message_id in valid_ids if message_id]
     valid_set = set(valid)
     canonicalized: list[str] = []
@@ -184,7 +186,9 @@ def _extract_change_fragments(change: dict) -> list[str]:
     if fragments:
         return list(dict.fromkeys(fragments))
 
-    fallback = [_normalize_text(fragment) for fragment in raw_fragments if _normalize_text(fragment)]
+    fallback = [
+        _normalize_text(fragment) for fragment in raw_fragments if _normalize_text(fragment)
+    ]
     return list(dict.fromkeys(fallback[:1]))
 
 

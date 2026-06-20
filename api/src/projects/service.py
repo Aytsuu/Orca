@@ -63,21 +63,27 @@ async def create_project(
         "can_edit": True,
     }
     member_result = await supabase.table("project_member").insert(member_payload).execute()
-    await supabase.table("project_plan").insert(
-        {
-            "project_id": project["id"],
-            "content": _initial_project_plan_content(
-                title=name.strip(),
-                description=description.strip(),
-            ),
-            "version": 1,
-            "finalized_at": None,
-        }
-    ).execute()
+    await (
+        supabase.table("project_plan")
+        .insert(
+            {
+                "project_id": project["id"],
+                "content": _initial_project_plan_content(
+                    title=name.strip(),
+                    description=description.strip(),
+                ),
+                "version": 1,
+                "finalized_at": None,
+            }
+        )
+        .execute()
+    )
     for agent_name in AGENT_NAMES:
-        await supabase.table("agent_status").insert(
-            {"project_id": project["id"], "agent": agent_name, "status": "idle"}
-        ).execute()
+        await (
+            supabase.table("agent_status")
+            .insert({"project_id": project["id"], "agent": agent_name, "status": "idle"})
+            .execute()
+        )
     await ensure_default_member_invitation(
         supabase,
         project_id=project["id"],
@@ -89,10 +95,7 @@ async def create_project(
 
 async def list_projects_for_session(supabase: AsyncClient, session_id: str) -> list[dict[str, Any]]:
     member_rows = (
-        await supabase.table("project_member")
-        .select("*")
-        .eq("session_id", session_id)
-        .execute()
+        await supabase.table("project_member").select("*").eq("session_id", session_id).execute()
     ).data
     projects: list[dict[str, Any]] = []
     for member in member_rows:

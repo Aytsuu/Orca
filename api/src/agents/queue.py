@@ -9,8 +9,7 @@ from src.config import Settings, get_settings
 
 
 class QueueProducer(Protocol):
-    def enqueue_run(self, run_id: str, *, delay_seconds: int | None = None) -> str | None:
-        ...
+    def enqueue_run(self, run_id: str, *, delay_seconds: int | None = None) -> str | None: ...
 
 
 def build_run_job_id(run_id: str, *, delay_seconds: int | None = None) -> str:

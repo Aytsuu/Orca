@@ -30,7 +30,8 @@ When the source messages are concrete enough to define task scope or completion 
 treat missing task descriptions and missing acceptance criteria as real planning gaps rather than
 optional polish. A source message is concrete enough when it gives a clear action, deliverable,
 constraint, or observable "done when" condition with low interpretation cost.
-If the evidence is vague, high-level, or exploratory, prefer missing_information over invented detail.
+If the evidence is vague, high-level, or exploratory, prefer missing_information
+over invented detail.
 
 Context:
 {context}

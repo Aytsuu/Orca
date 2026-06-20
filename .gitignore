@@ -151,6 +151,7 @@ activemq-data/
 .env
 .envrc
 .venv
+node_modules/
 env/
 venv/
 ENV/
@@ -229,4 +230,3 @@ contexts
 # Others
 issues.txt
 to-dos.txt
-node_modules/

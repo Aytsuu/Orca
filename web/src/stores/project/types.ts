@@ -248,6 +248,7 @@ export interface ApiPlanTask {
   id: string;
   title: string;
   description?: string | null;
+  value?: string | null;
   acceptance_criteria?: string[];
   owner?: string | null;
   due?: string | null;
@@ -272,6 +273,7 @@ export interface ApiPlanPhase {
   title: string;
   goal?: string | null;
   description?: string | null;
+  value?: string | null;
   timeframe?: string | null;
   assigned_members?: {
     session_id: string;
@@ -304,6 +306,14 @@ export interface ApiProjectPlan {
   technology_stack?: { title?: string; value?: string }[];
   phases?: ApiPlanPhase[];
   global_risks?: ApiPlanRisk[];
+  content?: {
+    title?: string;
+    description?: string;
+    objectives?: string[];
+    technology_stack?: { title?: string; value?: string }[];
+    phases?: ApiPlanPhase[];
+    global_risks?: ApiPlanRisk[];
+  } | null;
 }
 
 export interface ApiPlanVersion {

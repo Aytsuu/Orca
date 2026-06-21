@@ -1880,16 +1880,6 @@ const PlanViewInner: React.FC<PlanViewProps> = ({ projectId }) => {
                                       {task.attachments.length === 0 && (
                                         <span className="text-xs text-text-muted italic pl-1">No attachments.</span>
                                       )}
-
-                                      <div className="flex justify-end mt-1 select-none">
-                                        <a
-                                          href={`/project/${projectId}/chat`}
-                                          className="text-[10px] font-semibold text-text-muted hover:text-text-primary flex items-center gap-0.5 transition-colors"
-                                        >
-                                          <span>View All Project Files</span>
-                                          <ExternalLink className="w-3 h-3" />
-                                        </a>
-                                      </div>
                                     </div>
                                   </div>
 

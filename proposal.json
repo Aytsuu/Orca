@@ -1,0 +1,162 @@
+{
+    "data": {
+        "id": "e3923bd5-d4d9-48b9-9d76-f72b773bc6ab",
+        "project_id": "faceaf6f-d16c-4915-9ea6-9aef173c5c17",
+        "status": "pending",
+        "changes": [
+            {
+                "id": "title",
+                "action": "update",
+                "section": "title",
+                "targetId": null,
+                "title": "Messaging App for Team Productivity with AI Planning",
+                "detail": "The current plan title is 'Untitled'. This update reflects the core idea of a messaging app with AI planning capabilities as proposed by the user.",
+                "confidence": "medium",
+                "sourceQuote": null,
+                "state": null,
+                "justification": "The current plan title is 'Untitled'. This update reflects the core idea of a messaging app with AI planning capabilities as proposed by the user.",
+                "source_message_ids": [
+                    "b15fa3da-42f9-4261-9378-99937426dd4f"
+                ],
+                "content": "Messaging App for Team Productivity with AI Planning"
+            },
+            {
+                "id": "description",
+                "action": "update",
+                "section": "description",
+                "targetId": null,
+                "title": "A messaging app designed to enhance team productivity by integrating an AI assistant. The AI will monitor conversations, extract key details, generate structured plans, and identify gaps within discussions and plans to facilitate better decision-making.",
+                "detail": "The plan's description is currently empty. This description provides an overview of the proposed messaging app and its AI features, directly derived from the user's initial idea.",
+                "confidence": "medium",
+                "sourceQuote": null,
+                "state": null,
+                "justification": "The plan's description is currently empty. This description provides an overview of the proposed messaging app and its AI features, directly derived from the user's initial idea.",
+                "source_message_ids": [
+                    "b15fa3da-42f9-4261-9378-99937426dd4f"
+                ],
+                "content": "A messaging app designed to enhance team productivity by integrating an AI assistant. The AI will monitor conversations, extract key details, generate structured plans, and identify gaps within discussions and plans to facilitate better decision-making."
+            },
+            {
+                "id": "objectives",
+                "action": "add",
+                "section": "objectives",
+                "targetId": null,
+                "title": "Develop a core messaging application",
+                "detail": "The plan is missing explicit objectives. These objectives define the core aims of the messaging app project, derived from the user's initial idea and the identified requirements.",
+                "confidence": "medium",
+                "sourceQuote": null,
+                "state": null,
+                "justification": "The plan is missing explicit objectives. These objectives define the core aims of the messaging app project, derived from the user's initial idea and the identified requirements.",
+                "source_message_ids": [
+                    "b15fa3da-42f9-4261-9378-99937426dd4f"
+                ],
+                "content": [
+                    {
+                        "title": "Develop a core messaging application",
+                        "value": "Provide a reliable and intuitive communication channel for teams."
+                    },
+                    {
+                        "title": "Integrate AI for conversation monitoring and detail extraction",
+                        "value": "Automate the identification of critical discussion points and decisions."
+                    },
+                    {
+                        "title": "Enable AI to generate structured plans",
+                        "value": "Streamline the planning process by converting discussions into concrete plans."
+                    },
+                    {
+                        "title": "Implement AI-driven gap identification",
+                        "value": "Enhance plan completeness and proactively address potential issues."
+                    }
+                ]
+            },
+            {
+                "id": "phases",
+                "action": "add",
+                "section": "phases",
+                "targetId": null,
+                "title": "Phase 1: Discovery & Planning",
+                "detail": "The plan is missing a breakdown into distinct project phases. These phases provide a logical structure for the project lifecycle.",
+                "confidence": "medium",
+                "sourceQuote": null,
+                "state": null,
+                "justification": "The plan is missing a breakdown into distinct project phases. These phases provide a logical structure for the project lifecycle.",
+                "source_message_ids": [
+                    "b15fa3da-42f9-4261-9378-99937426dd4f"
+                ],
+                "content": [
+                    {
+                        "title": "Phase 1: Discovery & Planning",
+                        "value": "Define detailed requirements, user stories, technical specifications, and create a project roadmap."
+                    },
+                    {
+                        "title": "Phase 2: Design & Prototyping",
+                        "value": "Develop UI/UX designs, create mockups and interactive prototypes for the messaging app and AI integration."
+                    },
+                    {
+                        "title": "Phase 3: Core Development",
+                        "value": "Build the backend infrastructure, messaging functionalities, and initial AI modules for conversation monitoring and detail extraction."
+                    },
+                    {
+                        "title": "Phase 4: AI Planning & Gap Analysis Development",
+                        "value": "Develop and integrate the AI's capabilities for structured plan generation and gap identification."
+                    },
+                    {
+                        "title": "Phase 5: Testing & Deployment",
+                        "value": "Conduct comprehensive testing, gather user feedback, and deploy the application to a production environment."
+                    }
+                ]
+            },
+            {
+                "id": "phase-3-tasks",
+                "action": "add",
+                "section": "tasks",
+                "targetId": "2",
+                "title": "Develop core messaging functionalities",
+                "detail": "These tasks are essential for building the foundational messaging capabilities and the initial AI monitoring feature, derived from the overall goal of a 'messaging app for team productivity' and specific requirements.",
+                "confidence": "medium",
+                "sourceQuote": null,
+                "state": null,
+                "justification": "These tasks are essential for building the foundational messaging capabilities and the initial AI monitoring feature, derived from the overall goal of a 'messaging app for team productivity' and specific requirements.",
+                "source_message_ids": [
+                    "b15fa3da-42f9-4261-9378-99937426dd4f"
+                ],
+                "content": [
+                    {
+                        "title": "Develop core messaging functionalities",
+                        "value": "Implement user authentication, real-time messaging, group chat capabilities, and message storage for the application's foundation."
+                    },
+                    {
+                        "title": "Implement AI for conversation monitoring and key detail extraction",
+                        "value": "Develop and integrate an AI module that can monitor team conversations, identify relevant topics, and extract key details such as decisions, action items, and important facts."
+                    }
+                ]
+            },
+            {
+                "id": "phase-4-tasks",
+                "action": "add",
+                "section": "tasks",
+                "targetId": "3",
+                "title": "Develop AI for structured plan generation",
+                "detail": "These tasks directly address the requirements for the AI to generate structured plans and identify gaps based on conversations and the generated plan.",
+                "confidence": "medium",
+                "sourceQuote": null,
+                "state": null,
+                "justification": "These tasks directly address the requirements for the AI to generate structured plans and identify gaps based on conversations and the generated plan.",
+                "source_message_ids": [
+                    "b15fa3da-42f9-4261-9378-99937426dd4f"
+                ],
+                "content": [
+                    {
+                        "title": "Develop AI for structured plan generation",
+                        "value": "Build the AI component responsible for taking extracted key details and synthesizing them into a coherent, structured plan, including tasks, owners, and deadlines."
+                    },
+                    {
+                        "title": "Implement AI for gap identification",
+                        "value": "Integrate an AI capability to analyze both conversations and generated plans to identify missing information, logical inconsistencies, or unaddressed topics."
+                    }
+                ]
+            }
+        ],
+        "created_at": "2026-06-21T11:41:46.160728+00:00"
+    }
+}

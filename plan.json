@@ -1,0 +1,196 @@
+{
+    "data": {
+        "id": "edeb1c26-054a-4a48-bf12-969f6731200c",
+        "project_id": "c3c511b9-4016-442e-9a57-6110884fe4ea",
+        "content": {
+            "title": "AI-Powered Team Productivity Messaging App",
+            "description": "A messaging application designed to enhance team productivity by integrating an AI that monitors conversations, extracts key details, generates structured plans, and identifies gaps based on discussion content and the generated plan.",
+            "objectives": [
+                "Enhance Team Productivity",
+                "Monitor Conversations and Extract Key Details",
+                "Generate Structured Plans",
+                "Identify Gaps in Conversations and Plans"
+            ],
+            "technology_stack": [],
+            "phases": [
+                {
+                    "id": "bd7cd79a-4e12-4e17-ac93-824fca8546dd",
+                    "gaps": [],
+                    "goal": null,
+                    "tasks": [
+                        {
+                            "id": "1e37e91c-28fe-4397-bef5-c7a466c9e2f0",
+                            "due": null,
+                            "owner": null,
+                            "title": "Design AI Conversation Monitoring Module",
+                            "value": "Define the architecture, technical specifications, and integration points for the AI component responsible for monitoring team conversations within the messaging app. This includes considering privacy, data handling, and scalability aspects.",
+                            "status": null,
+                            "priority": "medium",
+                            "confidence": null,
+                            "attachments": [],
+                            "description": null,
+                            "source_excerpt": null,
+                            "source_message_ids": [],
+                            "acceptance_criteria": []
+                        },
+                        {
+                            "id": "043f3c20-5042-424b-a4ad-67e67c564c64",
+                            "due": null,
+                            "owner": null,
+                            "title": "Develop AI Key Detail Extraction Logic",
+                            "value": "Implement the algorithms, machine learning models, and natural language processing (NLP) techniques for the AI to accurately identify, categorize, and extract key details from monitored conversations. This involves training and fine-tuning models.",
+                            "status": null,
+                            "priority": "medium",
+                            "confidence": null,
+                            "attachments": [],
+                            "description": null,
+                            "source_excerpt": null,
+                            "source_message_ids": [],
+                            "acceptance_criteria": []
+                        }
+                    ],
+                    "title": "AI Conversation Monitoring & Detail Extraction",
+                    "value": "Establish the foundation for the AI to observe and process team communications, identifying and extracting critical information to feed into subsequent planning stages. This phase focuses on the 'listening' and 'understanding' capabilities of the AI.",
+                    "timeframe": null,
+                    "description": null,
+                    "assigned_members": []
+                },
+                {
+                    "id": "a4e33e92-c4d7-411e-b8b0-ab8745fe3bd1",
+                    "gaps": [],
+                    "goal": null,
+                    "tasks": [
+                        {
+                            "id": "87d0a76c-4e05-4707-8449-fc6e01952f46",
+                            "due": null,
+                            "owner": null,
+                            "title": "Develop AI Structured Plan Generation",
+                            "value": "Create the AI component that takes the extracted key details and formulates them into a coherent, actionable, and structured plan. This involves defining plan templates, logical sequencing, and output formats.",
+                            "status": null,
+                            "priority": "medium",
+                            "confidence": null,
+                            "attachments": [],
+                            "description": null,
+                            "source_excerpt": null,
+                            "source_message_ids": [],
+                            "acceptance_criteria": []
+                        },
+                        {
+                            "id": "17bd678d-af27-4de7-9eb5-8e8dcb5f475c",
+                            "due": null,
+                            "owner": null,
+                            "title": "Implement AI Gap Identification",
+                            "value": "Build the AI functionality to analyze both the raw conversation data and the generated plans to detect missing information, logical inconsistencies, potential risks, or unaddressed points. This module should provide actionable insights for teams.",
+                            "status": null,
+                            "priority": "medium",
+                            "confidence": null,
+                            "attachments": [],
+                            "description": null,
+                            "source_excerpt": null,
+                            "source_message_ids": [],
+                            "acceptance_criteria": []
+                        }
+                    ],
+                    "title": "AI Plan Generation & Gap Identification",
+                    "value": "Develop the AI capabilities to synthesize extracted details into structured plans and proactively identify potential omissions or inconsistencies. This phase focuses on the 'acting' and 'improving' capabilities of the AI.",
+                    "timeframe": null,
+                    "description": null,
+                    "assigned_members": []
+                }
+            ],
+            "global_risks": []
+        },
+        "version": 7,
+        "finalized_at": "2026-06-21T12:06:59.555976+00:00",
+        "title": "AI-Powered Team Productivity Messaging App",
+        "description": "A messaging application designed to enhance team productivity by integrating an AI that monitors conversations, extracts key details, generates structured plans, and identifies gaps based on discussion content and the generated plan.",
+        "objectives": [
+            "Enhance Team Productivity",
+            "Monitor Conversations and Extract Key Details",
+            "Generate Structured Plans",
+            "Identify Gaps in Conversations and Plans"
+        ],
+        "technology_stack": [],
+        "phases": [
+            {
+                "id": "bd7cd79a-4e12-4e17-ac93-824fca8546dd",
+                "title": "AI Conversation Monitoring & Detail Extraction",
+                "goal": null,
+                "description": null,
+                "timeframe": null,
+                "assigned_members": [],
+                "tasks": [
+                    {
+                        "id": "1e37e91c-28fe-4397-bef5-c7a466c9e2f0",
+                        "title": "Design AI Conversation Monitoring Module",
+                        "owner": null,
+                        "due": null,
+                        "priority": "medium",
+                        "description": null,
+                        "acceptance_criteria": [],
+                        "attachments": [],
+                        "status": null,
+                        "source_message_ids": [],
+                        "source_excerpt": null,
+                        "confidence": null
+                    },
+                    {
+                        "id": "043f3c20-5042-424b-a4ad-67e67c564c64",
+                        "title": "Develop AI Key Detail Extraction Logic",
+                        "owner": null,
+                        "due": null,
+                        "priority": "medium",
+                        "description": null,
+                        "acceptance_criteria": [],
+                        "attachments": [],
+                        "status": null,
+                        "source_message_ids": [],
+                        "source_excerpt": null,
+                        "confidence": null
+                    }
+                ],
+                "gaps": []
+            },
+            {
+                "id": "a4e33e92-c4d7-411e-b8b0-ab8745fe3bd1",
+                "title": "AI Plan Generation & Gap Identification",
+                "goal": null,
+                "description": null,
+                "timeframe": null,
+                "assigned_members": [],
+                "tasks": [
+                    {
+                        "id": "87d0a76c-4e05-4707-8449-fc6e01952f46",
+                        "title": "Develop AI Structured Plan Generation",
+                        "owner": null,
+                        "due": null,
+                        "priority": "medium",
+                        "description": null,
+                        "acceptance_criteria": [],
+                        "attachments": [],
+                        "status": null,
+                        "source_message_ids": [],
+                        "source_excerpt": null,
+                        "confidence": null
+                    },
+                    {
+                        "id": "17bd678d-af27-4de7-9eb5-8e8dcb5f475c",
+                        "title": "Implement AI Gap Identification",
+                        "owner": null,
+                        "due": null,
+                        "priority": "medium",
+                        "description": null,
+                        "acceptance_criteria": [],
+                        "attachments": [],
+                        "status": null,
+                        "source_message_ids": [],
+                        "source_excerpt": null,
+                        "confidence": null
+                    }
+                ],
+                "gaps": []
+            }
+        ],
+        "global_risks": []
+    }
+}

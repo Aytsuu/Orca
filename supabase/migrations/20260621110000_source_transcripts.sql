@@ -84,6 +84,22 @@ as $$
     limit greatest(match_count, 1);
 $$;
 
+grant select, insert, update, delete on table public.source_transcript to service_role;
+grant select, insert, update, delete on table public.source_transcript_chunk to service_role;
+
+revoke all on function public.match_source_transcripts(
+    uuid,
+    vector,
+    integer,
+    double precision
+) from public, anon, authenticated;
+grant execute on function public.match_source_transcripts(
+    uuid,
+    vector,
+    integer,
+    double precision
+) to service_role;
+
 revoke all on table public.source_transcript from anon, authenticated;
 revoke all on table public.source_transcript_chunk from anon, authenticated;
 

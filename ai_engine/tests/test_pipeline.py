@@ -1761,6 +1761,7 @@ async def test_pipeline_uses_transcript_chunks_for_no_message_gate(
                         "similarity": 0.88,
                     }
                 ],
+                source_manifest=[],
                 token_estimate=12,
                 warnings=[],
             )

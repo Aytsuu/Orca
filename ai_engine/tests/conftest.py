@@ -73,8 +73,10 @@ class FakeTableQuery:
         self._filters: list[tuple[str, object]] = []
         self._order: tuple[str, bool] | None = None
         self._limit: int | None = None
+        self._columns = "*"
 
-    def select(self, _: str = "*") -> "FakeTableQuery":
+    def select(self, columns: str = "*") -> "FakeTableQuery":
+        self._columns = columns
         return self
 
     def insert(self, payload):
@@ -126,6 +128,12 @@ class FakeTableQuery:
             return FakeExecuteResult(deleted)
 
         selected = [deepcopy(row) for row in matched]
+        if (
+            self.table_name == "source_transcript"
+            and "uploaded_file(" in self._columns
+            and "source_transcript_chunk(" in self._columns
+        ):
+            selected = [self._source_manifest_projection(row) for row in selected]
         if self._order:
             column, desc = self._order
             selected.sort(key=lambda row: row.get(column), reverse=desc)
@@ -135,6 +143,31 @@ class FakeTableQuery:
 
     def _matches(self, row: dict) -> bool:
         return all(str(row.get(column)) == str(value) for column, value in self._filters)
+
+    def _source_manifest_projection(self, row: dict) -> dict:
+        uploaded_file = next(
+            (
+                item
+                for item in self.client.tables["uploaded_file"]
+                if item.get("id") == row.get("uploaded_file_id")
+            ),
+            None,
+        )
+        chunk_count = sum(
+            1
+            for item in self.client.tables["source_transcript_chunk"]
+            if item.get("transcript_id") == row.get("id")
+        )
+        return {
+            "uploaded_file_id": row.get("uploaded_file_id"),
+            "extraction_method": row.get("extraction_method"),
+            "plain_text": row.get("plain_text"),
+            "created_at": row.get("created_at"),
+            "uploaded_file": (
+                {"filename": uploaded_file.get("filename")} if uploaded_file is not None else None
+            ),
+            "source_transcript_chunk": [{"count": chunk_count}],
+        }
 
 
 class FakeSupabase:

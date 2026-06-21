@@ -21,10 +21,8 @@ def normalize_uploaded_file_row(row: dict) -> dict:
     storage_path = str(normalized.get("storage_path", "")).strip()
     normalized.setdefault("filename", storage_path.rsplit("/", 1)[-1] if storage_path else "file")
     normalized.setdefault("size_bytes", 0)
-    normalized.setdefault("purpose", infer_uploaded_file_purpose(normalized))
-    normalized.setdefault("is_ai_context", normalized.get("purpose") != "chat")
-    normalized["is_ai_context"] = bool(normalized.get("is_ai_context"))
-    normalized["purpose"] = "source" if normalized["is_ai_context"] else "chat"
+    normalized["purpose"] = infer_uploaded_file_purpose(normalized)
+    normalized["is_ai_context"] = normalized["purpose"] == "source"
     return normalized
 
 
@@ -128,22 +126,34 @@ async def list_uploaded_files(supabase: AsyncClient, project_id: str) -> list[di
             await supabase.table("uploaded_file")
             .select("*")
             .eq("project_id", project_id)
-            .eq("is_ai_context", True)
+            .eq("purpose", "source")
             .order("created_at", desc=True)
             .execute()
         ).data
     except APIError as error:
-        if not is_missing_uploaded_file_column(error, "is_ai_context"):
+        if not is_missing_uploaded_file_column(error, "purpose"):
             raise
-        rows = (
-            await supabase.table("uploaded_file")
-            .select("*")
-            .eq("project_id", project_id)
-            .order("created_at", desc=True)
-            .execute()
-        ).data
+        try:
+            rows = (
+                await supabase.table("uploaded_file")
+                .select("*")
+                .eq("project_id", project_id)
+                .eq("is_ai_context", True)
+                .order("created_at", desc=True)
+                .execute()
+            ).data
+        except APIError as legacy_error:
+            if not is_missing_uploaded_file_column(legacy_error, "is_ai_context"):
+                raise
+            rows = (
+                await supabase.table("uploaded_file")
+                .select("*")
+                .eq("project_id", project_id)
+                .order("created_at", desc=True)
+                .execute()
+            ).data
     normalized_rows = [normalize_uploaded_file_row(row) for row in rows]
-    return [row for row in normalized_rows if row["is_ai_context"]]
+    return [row for row in normalized_rows if row["purpose"] == "source"]
 
 
 def ensure_storage_path_scope(project_id: str, session_id: str, storage_path: str) -> None:

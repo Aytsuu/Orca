@@ -21,6 +21,15 @@ def load_phase3_migration() -> str:
     return matches[-1].read_text(encoding="utf-8")
 
 
+def load_source_transcript_migration() -> str:
+    migrations_dir = Path(__file__).resolve().parents[2] / "supabase" / "migrations"
+    matches = sorted(migrations_dir.glob("*_source_transcripts.sql"))
+
+    assert matches, "Expected a source transcript migration file in supabase/migrations."
+
+    return matches[-1].read_text(encoding="utf-8")
+
+
 def test_phase1_migration_defines_required_tables() -> None:
     migration_sql = load_phase1_migration()
 
@@ -37,6 +46,20 @@ def test_phase1_migration_defines_required_tables() -> None:
 
     for table_name in expected_tables:
         assert f"create table if not exists public.{table_name}" in migration_sql.lower()
+
+
+def test_source_transcript_migration_grants_service_role_data_api_access() -> None:
+    migration_sql = load_source_transcript_migration().lower()
+
+    assert (
+        "grant select, insert, update, delete on table public.source_transcript "
+        "to service_role;"
+    ) in migration_sql
+    assert (
+        "grant select, insert, update, delete on table public.source_transcript_chunk "
+        "to service_role;"
+    ) in migration_sql
+    assert "grant execute on function public.match_source_transcripts" in migration_sql
 
 
 def test_phase1_migration_wires_realtime_and_storage() -> None:

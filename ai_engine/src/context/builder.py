@@ -24,6 +24,7 @@ class AssembledContext:
     memory: list[dict[str, Any]]
     summaries: list[dict[str, Any]]
     transcript_chunks: list[dict[str, Any]]
+    source_manifest: list[dict[str, Any]]
     token_estimate: int
     warnings: list[str]
 
@@ -52,6 +53,7 @@ class ContextBuilder:
         memory = await self._retrieval_strategy.retrieve(project_id, new_messages, limit=20)
         summaries = await self._get_summaries(project_id, limit=10)
         transcript_chunks = await self._get_transcript_chunks(project_id, new_messages)
+        source_manifest = await self._get_source_manifest(project_id)
 
         assembled = {
             "plan": current_plan or {},
@@ -59,6 +61,7 @@ class ContextBuilder:
             "memory": memory,
             "summaries": summaries,
             "transcript_chunks": transcript_chunks,
+            "source_manifest": source_manifest,
         }
         token_estimate = int(len(str(assembled)) / 4)
         warnings: list[str] = []
@@ -73,6 +76,7 @@ class ContextBuilder:
             memory=memory,
             summaries=summaries,
             transcript_chunks=transcript_chunks,
+            source_manifest=source_manifest,
             token_estimate=token_estimate,
             warnings=warnings,
         )
@@ -142,3 +146,40 @@ class ContextBuilder:
             limit=self._settings.transcript_top_k,
             similarity_threshold=self._settings.transcript_similarity_threshold,
         )
+
+    async def _get_source_manifest(self, project_id: str) -> list[dict[str, Any]]:
+        rows = (
+            await self._supabase.table("source_transcript")
+            .select(
+                "uploaded_file_id,extraction_method,plain_text,created_at,"
+                "uploaded_file(filename),source_transcript_chunk(count)"
+            )
+            .eq("project_id", project_id)
+            .eq("status", "ready")
+            .order("created_at")
+            .execute()
+        ).data
+
+        manifest: list[dict[str, Any]] = []
+        for row in rows:
+            uploaded_file = row.get("uploaded_file") or {}
+            if isinstance(uploaded_file, list):
+                uploaded_file = uploaded_file[0] if uploaded_file else {}
+            chunk_count_rows = row.get("source_transcript_chunk") or []
+            chunk_count = 0
+            if isinstance(chunk_count_rows, list) and chunk_count_rows:
+                chunk_count = int(chunk_count_rows[0].get("count") or 0)
+            elif isinstance(chunk_count_rows, dict):
+                chunk_count = int(chunk_count_rows.get("count") or 0)
+
+            manifest.append(
+                {
+                    "uploaded_file_id": row.get("uploaded_file_id"),
+                    "filename": str(uploaded_file.get("filename") or "file"),
+                    "extraction_method": row.get("extraction_method"),
+                    "preview": str(row.get("plain_text") or "").strip()[:200],
+                    "uploaded_at": row.get("created_at"),
+                    "chunks_available": chunk_count,
+                }
+            )
+        return manifest

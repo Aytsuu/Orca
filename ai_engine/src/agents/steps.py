@@ -82,6 +82,19 @@ def _build_reasoning_context(
                 for chunk in context.transcript_chunks
                 if str(chunk.get("chunk_text") or "").strip()
             ],
+            "available_sources": [
+                {
+                    "filename": source["filename"],
+                    "preview": source["preview"],
+                    "extraction_method": source["extraction_method"],
+                    "chunks_retrieved": sum(
+                        1
+                        for chunk in context.transcript_chunks
+                        if chunk.get("uploaded_file_id") == source.get("uploaded_file_id")
+                    ),
+                }
+                for source in context.source_manifest
+            ],
             "warnings": list(context.warnings),
         }
     }

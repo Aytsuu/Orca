@@ -18,7 +18,7 @@ Transcribe uploaded source files into searchable text at upload time, store chun
 | 1 | Queue separation | **Separate** — `orca-transcripts` worker, independent of `orca-agent-pipeline` |
 | 2 | LLM budget for transcription | **Shared** — uses same `daily_llm_budget_per_project` guard |
 | 3 | `AssembledContext.files` fate | **Replace** — rename to `transcript_chunks`, update all references (see audit below) |
-| 4 | Agent pipeline trigger on upload | **No** — file upload enqueues transcript job only; `trigger_agents()` is NOT called for source uploads |
+| 4 | Agent pipeline trigger on upload | **Transcript fires immediately at upload** — `enqueue_transcription()` is called as soon as the file row is created. No chat message is needed. `trigger_agents()` (the AI planning pipeline) is NOT called at all for source uploads. |
 
 ---
 
@@ -41,14 +41,14 @@ Fetches `storage_path` + `mime_type` by explicit `file_ids` from the triggering 
 
 ### Current `chat/router.py` upload trigger (to be changed)
 
-`create_uploaded_file_endpoint` currently calls `trigger_agents()` when `uploaded_file["is_ai_context"] == True`. This will be **removed entirely** and replaced with a transcript job enqueue — but **only when `is_ai_context = True`**. Files where `is_ai_context = False` (chat attachments) are never processed through the transcript pipeline.
+`create_uploaded_file_endpoint` currently calls `trigger_agents()` when `uploaded_file["is_ai_context"] == True`. This will be **removed entirely** and replaced with an immediate `enqueue_transcription()` call — but **only when `purpose == 'source'`**. `purpose` is the primary field; `is_ai_context` is derived from it and is not used as a gate. Files with `purpose = 'chat'` are never processed through the transcript pipeline. Transcript generation does not wait for any chat message to be sent.
 
 ---
 
 ## Architecture
 
 ```
-POST /{project_id}/files  (is_ai_context=True, i.e. purpose=source)
+POST /{project_id}/files  (purpose='source')
   │
   ├── create_uploaded_file() → DB row (uploaded_file)
   │
@@ -73,14 +73,20 @@ Agent pipeline run (triggered separately, by messages only):
   │
   └── ContextBuilder.build()
         │
-        ├── _get_messages()          (unchanged)
-        ├── _get_memory()            (unchanged)
-        ├── _get_summaries()         (unchanged)
-        └── _get_transcript_chunks() (replaces _get_files)
+        ├── _get_messages()           (unchanged)
+        ├── _get_memory()             (unchanged)
+        ├── _get_summaries()          (unchanged)
+        ├── _get_transcript_chunks()  (replaces _get_files)
+        │     │
+        │     ├── embed query messages → vector(768)
+        │     └── match_source_transcripts RPC (pgvector cosine)
+        │           → top-K ready chunks as plain text strings
+        │
+        └── _get_source_manifest()   (NEW — Option B)
               │
-              ├── embed query messages → vector(768)
-              └── match_source_transcripts RPC (pgvector cosine)
-                    → top-5 ready chunks as plain text strings
+              └── SELECT id, filename, extraction_method, plain_text[:200], created_at
+                  FROM source_transcript WHERE project_id=? AND status='ready'
+                  → lightweight list injected as "available_sources" in context
 ```
 
 ---
@@ -330,13 +336,28 @@ class AssembledContext:
 @dataclass
 class AssembledContext:
     ...
-    transcript_chunks: list[dict[str, Any]]  # replaces files
+    transcript_chunks: list[dict[str, Any]]  # replaces files — semantically retrieved chunks
+    source_manifest: list[dict[str, Any]]    # NEW — lightweight metadata for all ready sources
 ```
+
+**`source_manifest` shape** (per entry, minimal tokens):
+```python
+{
+    "filename": "requirements-v2.pdf",
+    "extraction_method": "pdf",         # how it was transcribed
+    "preview": "This document outlines the API endpoints...",  # first 200 chars of plain_text
+    "uploaded_at": "2026-06-21T04:00:00Z",
+    "chunks_available": 12,             # count of stored chunks
+}
+```
+
+**Why this matters:** agents see both *what was retrieved* (matching chunks) and *what exists* (the manifest). If a source file exists but none of its chunks matched the current messages' embedding, the agent knows it exists and can surface a gap like: *"source file 'requirements-v2.pdf' is available but no content was retrieved — the current discussion may need explicit reference to it."*
 
 - Remove `_get_files()` method entirely
 - Add `_get_transcript_chunks(project_id)` using `SemanticTranscriptRetrievalStrategy`
-- Update token estimate dict key: `"transcript_chunks"` instead of `"files"`
-- `file_ids` parameter removed from `build()` — transcript retrieval is query-driven, not ID-driven
+- Add `_get_source_manifest(project_id)` — plain DB query, no embedding call, ~1 row per source file
+- Update token estimate dict: `"transcript_chunks"` + `"source_manifest"` instead of `"files"`
+- `file_ids` parameter removed from `build()` — retrieval is query-driven, not ID-driven
 
 ---
 
@@ -346,9 +367,25 @@ class AssembledContext:
 # BEFORE (line 86)
 "files": _strip_non_citation_ids(context.files),
 
-# AFTER
+# AFTER — two distinct keys in the context blob:
 "transcript_chunks": [chunk["chunk_text"] for chunk in context.transcript_chunks],
-# Transcript chunks are plain text — no IDs to strip, inject directly
+# ^ semantically retrieved content — directly relevant to current messages
+
+"available_sources": [
+    {
+        "filename": s["filename"],
+        "preview": s["preview"],
+        "extraction_method": s["extraction_method"],
+        "chunks_retrieved": sum(
+            1 for c in context.transcript_chunks
+            if c.get("uploaded_file_id") == s.get("uploaded_file_id")
+        ),
+    }
+    for s in context.source_manifest
+],
+# ^ manifest of ALL ready sources — lets agents know what files exist even if
+#   none of their chunks landed in transcript_chunks for this run.
+#   chunks_retrieved=0 signals a coverage gap the agent can surface.
 ```
 
 ---
@@ -380,14 +417,15 @@ if uploaded_file["is_ai_context"]:
     )
 
 # AFTER
-# Double guard: both flags must agree before a file enters the transcript pipeline.
-# is_ai_context=False OR purpose!='source' → skip silently, no transcript, no agent run.
-if uploaded_file["is_ai_context"] and uploaded_file["purpose"] == "source":
+# purpose is the single source of truth — is_ai_context is derived from it and not checked.
+# Transcript fires immediately on upload; no chat message trigger needed.
+if uploaded_file["purpose"] == "source":
     transcript_producer.enqueue_transcription(
         uploaded_file_id=uploaded_file["id"],
         project_id=str(project_id),
     )
 # trigger_agents() is NOT called for any file upload
+# chat attachments (purpose='chat') are silently skipped
 ```
 
 ---
@@ -449,6 +487,10 @@ python-docx>=1.1
 | `chunker.py` — empty/whitespace → `[]` | Empty string |
 | `embedder.py` — batch embed with mocked Gemini client | Assert output shape `[n_chunks][768]` |
 | `SemanticTranscriptRetrievalStrategy` — RPC mock | Assert top-K ordering, threshold filter |
+| `_get_source_manifest()` — returns all ready transcripts | 2 ready + 1 pending → assert only 2 returned |
+| `_get_source_manifest()` — preview truncated at 200 chars | Long `plain_text` → assert `preview` length ≤ 200 |
+| `_build_reasoning_context()` — manifest injected | Assert `available_sources` present in context dict |
+| `_build_reasoning_context()` — `chunks_retrieved` count | Source with no matching chunks → `chunks_retrieved=0` |
 
 ### Integration Tests
 
@@ -456,6 +498,8 @@ python-docx>=1.1
 - Upload image → assert `extraction_method = 'gemini_vision'`, chunk text non-empty
 - Upload `.exe` → assert `status = 'unsupported'`, no chunks inserted
 - Agent pipeline run → assert `AssembledContext.transcript_chunks` non-empty when ready transcript exists
+- Agent pipeline run → assert `AssembledContext.source_manifest` includes all `ready` transcripts for the project, including ones whose chunks did not match the current messages
+- `available_sources` in context blob → assert entry with `chunks_retrieved=0` present when a source exists but nothing matched
 
 ### Manual Smoke Test
 

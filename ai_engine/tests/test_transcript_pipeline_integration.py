@@ -127,6 +127,16 @@ async def test_transcript_pipeline_integration_surfaces_ready_chunks_in_context(
     ]
     assert context.transcript_chunks
     assert context.transcript_chunks[0]["chunk_text"] == "Roadmap owner is Jan Doe."
+    assert context.source_manifest == [
+        {
+            "uploaded_file_id": uploaded_file["id"],
+            "filename": "brief.txt",
+            "extraction_method": "plaintext",
+            "preview": "Roadmap owner is Jan Doe. QA sign-off belongs to Mia Ray.",
+            "uploaded_at": fake_supabase.tables["source_transcript"][0]["created_at"],
+            "chunks_available": 2,
+        }
+    ]
     assert fake_supabase.tables["source_transcript"][0]["status"] == "ready"
 
 

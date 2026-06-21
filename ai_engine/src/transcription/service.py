@@ -202,7 +202,7 @@ def _utc_now() -> str:
 
 
 def _is_transcript_eligible(uploaded_file: dict) -> bool:
-    return bool(uploaded_file.get("is_ai_context")) and uploaded_file.get("purpose") == "source"
+    return uploaded_file.get("purpose") == "source"
 
 
 def _mime_requires_llm(mime_type: str) -> bool:

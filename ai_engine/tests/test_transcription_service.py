@@ -130,6 +130,37 @@ async def test_transcribe_uploaded_file_marks_unsupported_without_creating_chunk
 
 
 @pytest.mark.asyncio
+async def test_transcribe_uploaded_file_uses_purpose_as_eligibility_source_of_truth(
+    fake_supabase,
+) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha"})
+    uploaded_file = fake_supabase.insert_row(
+        "uploaded_file",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "filename": "brief.txt",
+            "mime_type": "text/plain",
+            "storage_path": f"{project['id']}/alpha/source/brief.txt",
+            "size_bytes": 64,
+            "purpose": "source",
+            "is_ai_context": False,
+        },
+    )
+    fake_supabase.storage = FakeStorage({uploaded_file["storage_path"]: b"brief"})
+
+    await transcribe_uploaded_file(
+        fake_supabase,
+        project_id=project["id"],
+        uploaded_file_id=uploaded_file["id"],
+        extractor=FakeExtractor(ExtractionResult(text="Ready text.", method="plaintext")),
+        embedder=FakeEmbedder([[1.0, 0.0]]),
+    )
+
+    assert fake_supabase.tables["source_transcript"][0]["status"] == "ready"
+
+
+@pytest.mark.asyncio
 async def test_transcribe_uploaded_file_returns_early_when_ready_chunks_already_exist(
     fake_supabase,
 ) -> None:

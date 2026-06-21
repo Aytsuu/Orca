@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
-from uuid import uuid4
+from importlib import import_module
+from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
@@ -604,6 +605,107 @@ async def test_finalize_and_list_uploaded_files(
     )
     assert files_response.status_code == 200
     assert files_response.json()["data"] == [uploaded]
+
+
+@pytest.mark.asyncio
+async def test_source_upload_enqueue_uses_purpose_not_derived_ai_context_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_supabase: FakeSupabase,
+    fake_transcript_queue_producer: FakeTranscriptQueueProducer,
+) -> None:
+    from src.chat.schemas import UploadedFileCreate
+
+    router_module = import_module("src.chat.router")
+
+    async def _create_uploaded_file(*args, **kwargs):
+        del args, kwargs
+        return {
+            "id": "00000000-0000-0000-0000-000000000002",
+            "project_id": "00000000-0000-0000-0000-000000000001",
+            "session_id": "alpha",
+            "filename": "brief.pdf",
+            "mime_type": "application/pdf",
+            "storage_path": "project/alpha/source/brief.pdf",
+            "size_bytes": 2048,
+            "purpose": "source",
+            "is_ai_context": False,
+            "created_at": "2026-06-21T04:00:00Z",
+        }
+
+    monkeypatch.setattr(router_module, "create_uploaded_file", _create_uploaded_file)
+
+    await router_module.create_uploaded_file_endpoint(
+        UUID("00000000-0000-0000-0000-000000000001"),
+        UploadedFileCreate(
+            filename="brief.pdf",
+            mime_type="application/pdf",
+            storage_path="project/alpha/source/brief.pdf",
+            size_bytes=2048,
+            purpose="source",
+        ),
+        {"session_id": "alpha"},
+        fake_supabase,
+        fake_transcript_queue_producer,
+    )
+
+    assert fake_transcript_queue_producer.enqueued_transcriptions == [
+        {
+            "uploaded_file_id": "00000000-0000-0000-0000-000000000002",
+            "project_id": "00000000-0000-0000-0000-000000000001",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sources_listing_uses_purpose_not_derived_ai_context_flag(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    source = fake_supabase.insert_row(
+        "uploaded_file",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "filename": "requirements.pdf",
+            "mime_type": "application/pdf",
+            "storage_path": f"{project['id']}/alpha/source/requirements.pdf",
+            "size_bytes": 2048,
+            "purpose": "source",
+            "is_ai_context": False,
+        },
+    )
+    fake_supabase.insert_row(
+        "uploaded_file",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "filename": "chat.png",
+            "mime_type": "image/png",
+            "storage_path": f"{project['id']}/alpha/chat/chat.png",
+            "size_bytes": 1024,
+            "purpose": "chat",
+            "is_ai_context": True,
+        },
+    )
+
+    response = await client.get(
+        f"/api/v1/projects/{project['id']}/files",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["data"]] == [source["id"]]
 
 
 @pytest.mark.asyncio

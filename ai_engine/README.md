@@ -56,9 +56,10 @@ Each job loads the `agent_run`, acquires `pipeline_lock:{project_id}` for up to
 short-circuiting, persists `agent_artifact` rows, and stages a `plan_proposal`
 for approval.
 
-Source uploads use a separate `orca-transcripts` queue. Only uploaded files
-with `is_ai_context = true` and `purpose = "source"` are enqueued for
-transcription. Source uploads do not trigger the agent pipeline directly.
+Source uploads use a separate `orca-transcripts` queue. Files with
+`purpose = "source"` are enqueued immediately; `is_ai_context` is derived
+compatibility metadata and is not used as the processing gate. Source uploads
+do not trigger the agent pipeline directly.
 
 Chat messages use hybrid debounce from the API side:
 

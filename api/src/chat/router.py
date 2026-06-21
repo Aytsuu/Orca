@@ -125,7 +125,7 @@ async def create_uploaded_file_endpoint(
         size_bytes=payload.size_bytes,
         purpose=payload.purpose,
     )
-    if uploaded_file["is_ai_context"] and uploaded_file["purpose"] == "source":
+    if uploaded_file["purpose"] == "source":
         transcript_producer.enqueue_transcription(
             uploaded_file_id=uploaded_file["id"],
             project_id=str(project_id),
@@ -182,7 +182,7 @@ async def promote_uploaded_file_endpoint(
         project_id=str(project_id),
         uploaded_file_id=str(uploaded_file_id),
     )
-    if promoted and uploaded_file["is_ai_context"] and uploaded_file["purpose"] == "source":
+    if promoted and uploaded_file["purpose"] == "source":
         transcript_producer.enqueue_transcription(
             uploaded_file_id=uploaded_file["id"],
             project_id=str(project_id),

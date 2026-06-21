@@ -1784,6 +1784,89 @@ async def test_accept_plan_change_resolves_phase_title_reference_for_task_add(
 
 
 @pytest.mark.asyncio
+async def test_accept_plan_change_supports_phase_preview_index_target_ids(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    fake_supabase.insert_row(
+        "project_plan",
+        {
+            "project_id": project["id"],
+            "content": {
+                "title": "Initial",
+                "description": "Draft",
+                "objectives": [],
+                "stakeholders": [],
+                "technology_stack": [],
+                "phases": [
+                    {
+                        "id": "phase-discovery",
+                        "title": "Phase 1: Discovery",
+                        "tasks": [],
+                        "gaps": [],
+                    },
+                    {
+                        "id": "phase-design",
+                        "title": "Phase 2: Design",
+                        "tasks": [],
+                        "gaps": [],
+                    },
+                    {
+                        "id": "phase-build",
+                        "title": "Phase 3: Build",
+                        "tasks": [],
+                        "gaps": [],
+                    },
+                ],
+                "global_risks": [],
+            },
+            "version": 1,
+            "finalized_at": _iso_now(),
+        },
+    )
+    fake_supabase.insert_row(
+        "plan_proposal",
+        {
+            "project_id": project["id"],
+            "status": "pending",
+            "changes": [
+                {
+                    "id": "chg-build-task",
+                    "section": "tasks",
+                    "action": "add",
+                    "targetId": "2",
+                    "content": [
+                        {
+                            "title": "Implement realtime sync",
+                            "description": "Ship websocket-backed updates",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    response = await client.patch(
+        f"/api/v1/projects/{project['id']}/plan/proposal/changes/chg-build-task/accept",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["phases"][2]["tasks"][0]["title"] == "Implement realtime sync"
+
+
+@pytest.mark.asyncio
 async def test_agents_status_and_trigger(
     client: AsyncClient,
     fake_supabase: FakeSupabase,

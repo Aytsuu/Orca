@@ -425,7 +425,7 @@ function toOptimisticPhase(entry: Record<string, unknown>): Phase {
   return {
     id: typeof entry.id === 'string' ? entry.id : buildOptimisticId('phase'),
     title: typeof entry.title === 'string' ? entry.title : 'Proposed phase',
-    description: typeof entry.description === 'string' ? entry.description : '',
+    description: typeof entry.description === 'string' ? entry.description : typeof entry.value === 'string' ? entry.value : '',
     goal: typeof entry.goal === 'string' ? entry.goal : '',
     timeframe: typeof entry.timeframe === 'string' ? entry.timeframe : '',
     assignedMembers: assignedMembers
@@ -456,7 +456,7 @@ function toOptimisticTask(entry: Record<string, unknown>): Task {
   return {
     id: typeof entry.id === 'string' ? entry.id : buildOptimisticId('task'),
     title: typeof entry.title === 'string' ? entry.title : 'Proposed task',
-    description: typeof entry.description === 'string' ? entry.description : '',
+    description: typeof entry.description === 'string' ? entry.description : typeof entry.value === 'string' ? entry.value : '',
     acceptanceCriteria,
     owner: typeof entry.owner === 'string' ? entry.owner : undefined,
     due: typeof entry.due === 'string' ? entry.due : typeof entry.due_date === 'string' ? entry.due_date : undefined,
@@ -628,7 +628,12 @@ export function applyAcceptedProposalChange(plan: StructuredPlan, change: Propos
         taskId: change.targetId,
         updates: {
           title: typeof nextTask.title === 'string' ? nextTask.title : undefined,
-          description: typeof nextTask.description === 'string' ? nextTask.description : undefined,
+          description:
+            typeof nextTask.description === 'string'
+              ? nextTask.description
+              : typeof nextTask.value === 'string'
+                ? nextTask.value
+                : undefined,
           owner: typeof nextTask.owner === 'string' ? nextTask.owner : undefined,
           due:
             typeof nextTask.due === 'string'

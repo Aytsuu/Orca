@@ -60,6 +60,12 @@ def _normalize_task(task: dict[str, Any]) -> dict[str, Any]:
     normalized.setdefault("owner", None)
     normalized.setdefault("due", None)
     normalized.setdefault("priority", "medium")
+    
+    desc = normalized.get("description")
+    val = normalized.get("value")
+    if desc is None and val is not None:
+        normalized["description"] = val
+
     normalized.setdefault("description", None)
     normalized["acceptance_criteria"] = list(normalized.get("acceptance_criteria") or [])
     normalized["attachments"] = [
@@ -290,8 +296,12 @@ def serialize_plan_row(plan_row: dict[str, Any]) -> dict[str, Any]:
 
 def _find_phase(content: dict[str, Any], phase_id: str) -> dict[str, Any]:
     normalized_target = _normalize_phase_reference(phase_id)
-    for phase in content["phases"]:
-        if phase["id"] == phase_id or _normalize_phase_reference(phase.get("title", "")) == normalized_target:
+    for index, phase in enumerate(content["phases"]):
+        if (
+            phase["id"] == phase_id
+            or _normalize_phase_reference(phase.get("title", "")) == normalized_target
+            or phase_id == str(index)
+        ):
             return phase
     raise PlanPhaseNotFound()
 

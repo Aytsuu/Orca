@@ -667,25 +667,33 @@ export function mapPlanStatus(plan: ApiProjectPlan): StructuredPlan['status'] {
 }
 
 export function mapPlan(plan: ApiProjectPlan, fallbackProjectId: string): StructuredPlan {
+  const content = plan.content || {};
+  const title = content.title || plan.title || '';
+  const description = content.description || plan.description || '';
+  const objectives = content.objectives || plan.objectives || [];
+  const technologyStack = content.technology_stack || plan.technology_stack || [];
+  const phases = content.phases || plan.phases || [];
+  const globalRisks = content.global_risks || plan.global_risks || [];
+
   return {
     id: plan.id,
     projectId: plan.project_id || fallbackProjectId,
-    title: plan.title || '',
-    description: plan.description || '',
+    title,
+    description,
     status: mapPlanStatus(plan),
     version: plan.version || 1,
     createdAt: plan.created_at || '',
     updatedAt: plan.finalized_at || plan.created_at || '',
-    objectives: (plan.objectives || []).map((objective) => recoverObjectiveText(objective)).filter(Boolean),
-    technologyStack: (plan.technology_stack || []).map((item) => ({
+    objectives: objectives.map((objective) => recoverObjectiveText(objective)).filter(Boolean),
+    technologyStack: technologyStack.map((item) => ({
       title: item.title || '',
       value: item.value || '',
     })),
-    phases: (plan.phases || []).map((phase) => ({
+    phases: phases.map((phase) => ({
       id: phase.id,
       title: phase.title,
       goal: phase.goal || '',
-      description: phase.description || '',
+      description: phase.description || phase.value || '',
       timeframe: phase.timeframe || '',
       assignedMembers: (phase.assigned_members || []).map((member) => ({
         sessionId: member.session_id,
@@ -696,7 +704,7 @@ export function mapPlan(plan: ApiProjectPlan, fallbackProjectId: string): Struct
       tasks: (phase.tasks || []).map((task) => ({
         id: task.id,
         title: task.title,
-        description: task.description || '',
+        description: task.description || task.value || '',
         acceptanceCriteria: [...(task.acceptance_criteria || [])],
         owner: task.owner || undefined,
         due: task.due || undefined,
@@ -731,7 +739,7 @@ export function mapPlan(plan: ApiProjectPlan, fallbackProjectId: string): Struct
         sourceExcerpt: gap.source_excerpt || undefined,
       })),
     })),
-    globalRisks: (plan.global_risks || []).map((risk) => ({
+    globalRisks: globalRisks.map((risk) => ({
       id: risk.id,
       description: risk.description,
       severity: risk.severity || 'minor',

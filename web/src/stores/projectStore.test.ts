@@ -85,7 +85,7 @@ describe('projectStore tests', () => {
   });
 
   describe('Projects Store', () => {
-    const mockRepo: ProjectRepository = {
+    const mockRepo = {
       fetchProjects: vi.fn(),
       fetchProjectMessages: vi.fn(),
       createProjectMessage: vi.fn(),
@@ -101,7 +101,7 @@ describe('projectStore tests', () => {
       renameProject: vi.fn(),
       deleteProject: vi.fn(),
       acceptInvitation: vi.fn(),
-    };
+    } as unknown as ProjectRepository;
 
     it('loads projects successfully', async () => {
       const mockProjects: Project[] = [
@@ -239,7 +239,7 @@ describe('projectStore tests', () => {
   });
 
   describe('Members Store', () => {
-    const mockRepo: ProjectRepository = {
+    const mockRepo = {
       fetchProjects: vi.fn(),
       fetchProjectMessages: vi.fn(),
       createProjectMessage: vi.fn(),
@@ -255,7 +255,7 @@ describe('projectStore tests', () => {
       renameProject: vi.fn(),
       deleteProject: vi.fn(),
       acceptInvitation: vi.fn(),
-    };
+    } as unknown as ProjectRepository;
 
     it('ensures members are loaded successfully', async () => {
       const mockMembers: Teammate[] = [
@@ -344,7 +344,7 @@ describe('projectStore tests', () => {
   });
 
   describe('Invitations Store', () => {
-    const mockRepo: ProjectRepository = {
+    const mockRepo = {
       fetchProjects: vi.fn(),
       fetchProjectMessages: vi.fn(),
       createProjectMessage: vi.fn(),
@@ -360,7 +360,7 @@ describe('projectStore tests', () => {
       renameProject: vi.fn(),
       deleteProject: vi.fn(),
       acceptInvitation: vi.fn(),
-    };
+    } as unknown as ProjectRepository;
 
     it('loads project invitation links', async () => {
       (mockRepo.fetchProjectInvitationLink as Mock).mockResolvedValue('http://localhost:3000/invite/token123');

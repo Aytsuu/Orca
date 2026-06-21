@@ -334,4 +334,38 @@ describe('projectPlan optimistic helpers', () => {
     expect(updated.phases[0].tasks).toHaveLength(1);
     expect(updated.phases[0].tasks[0]).toMatchObject({ title: 'Setup environment' });
   });
+
+  it('maps task value to description if description is not set when applying proposal task additions', () => {
+    const plan = createPlanFixture();
+    const updated = applyAcceptedProposalChange(plan, {
+      id: 'change_value_test',
+      action: 'add',
+      section: 'tasks',
+      targetId: 'phase_1',
+      title: 'New task with value',
+      detail: '',
+      sourceQuote: '',
+      content: [{ title: 'New task with value', value: 'Task description from value attribute' }],
+    });
+
+    expect(updated.phases[0].tasks).toHaveLength(2);
+    expect(updated.phases[0].tasks[1].description).toBe('Task description from value attribute');
+  });
+
+  it('maps phase value to description if description is not set when applying proposal phase additions', () => {
+    const plan = createPlanFixture();
+    const updated = applyAcceptedProposalChange(plan, {
+      id: 'change_phase_value_test',
+      action: 'add',
+      section: 'phases',
+      targetId: '',
+      title: 'New phase with value',
+      detail: '',
+      sourceQuote: '',
+      content: [{ title: 'New phase with value', value: 'Phase description from value attribute' }],
+    });
+
+    expect(updated.phases).toHaveLength(2);
+    expect(updated.phases[1].description).toBe('Phase description from value attribute');
+  });
 });

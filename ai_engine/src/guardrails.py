@@ -209,6 +209,9 @@ def partition_safety_violations(violations: list[str]) -> tuple[list[str], list[
     blocking: list[str] = []
 
     for violation in violations:
+        if _looks_like_identifier_only_violation(violation):
+            ignored.append(violation)
+            continue
         if _is_non_blocking_confidence_wording_violation(violation):
             ignored.append(violation)
             continue
@@ -234,6 +237,13 @@ def _is_non_blocking_confidence_wording_violation(violation: str) -> bool:
     evidence_marker = "evidence cited does not fully support"
 
     return evidence_marker in normalized and any(marker in normalized for marker in wording_markers)
+
+
+def _looks_like_identifier_only_violation(violation: str) -> bool:
+    normalized = violation.strip().lower()
+    if not normalized or " " in normalized:
+        return False
+    return bool(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)+", normalized))
 
 
 def _repair_opaque_id_typo(valid_ids: list[str], cited_id: str) -> str | None:

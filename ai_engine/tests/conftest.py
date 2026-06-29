@@ -51,6 +51,14 @@ class FakeTableQuery:
         self._filters.append((column, value))
         return self
 
+    def in_(self, column: str, values: list[object]) -> "FakeTableQuery":
+        self._filters.append((column, ("in", [str(value) for value in values])))
+        return self
+
+    def gt(self, column: str, value: object) -> "FakeTableQuery":
+        self._filters.append((column, ("gt", value)))
+        return self
+
     def order(self, column: str, desc: bool = False) -> "FakeTableQuery":
         self._order = (column, desc)
         return self
@@ -60,6 +68,15 @@ class FakeTableQuery:
         return self
 
     async def execute(self) -> FakeExecuteResult:
+        self.client.query_history.append(
+            {
+                "table_name": self.table_name,
+                "action": self._action,
+                "filters": deepcopy(self._filters),
+                "order": self._order,
+                "limit": self._limit,
+            }
+        )
         rows = self.client.tables[self.table_name]
         if self._action == "insert":
             payloads = self._payload if isinstance(self._payload, list) else [self._payload]
@@ -91,11 +108,24 @@ class FakeTableQuery:
         return FakeExecuteResult(selected)
 
     def _matches(self, row: dict) -> bool:
-        return all(str(row.get(column)) == str(value) for column, value in self._filters)
+        for column, value in self._filters:
+            row_value = row.get(column)
+            if isinstance(value, tuple) and value[0] == "gt":
+                if row_value is None or str(row_value) <= str(value[1]):
+                    return False
+                continue
+            if isinstance(value, tuple) and value[0] == "in":
+                if str(row_value) not in value[1]:
+                    return False
+                continue
+            if str(row_value) != str(value):
+                return False
+        return True
 
 
 class FakeSupabase:
     def __init__(self) -> None:
+        self.query_history: list[dict] = []
         self.tables = {
             "project": [],
             "project_plan": [],

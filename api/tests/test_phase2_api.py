@@ -87,6 +87,10 @@ class FakeTableQuery:
         self._filters.append((column, value))
         return self
 
+    def gt(self, column: str, value: object) -> "FakeTableQuery":
+        self._filters.append((column, ("gt", value)))
+        return self
+
     def order(self, column: str, desc: bool = False) -> "FakeTableQuery":
         self._order = (column, desc)
         return self
@@ -128,7 +132,15 @@ class FakeTableQuery:
         return FakeExecuteResult(selected)
 
     def _matches(self, row: dict) -> bool:
-        return all(str(row.get(column)) == str(value) for column, value in self._filters)
+        for column, value in self._filters:
+            row_value = row.get(column)
+            if isinstance(value, tuple) and value[0] == "gt":
+                if row_value is None or str(row_value) <= str(value[1]):
+                    return False
+                continue
+            if str(row_value) != str(value):
+                return False
+        return True
 
 
 class FakeSupabase:
@@ -438,10 +450,8 @@ async def test_messages_and_upload_url_require_membership(
         json={"content": "Ship the API this week."},
     )
     assert post_message.status_code == 201
-    assert len(fake_supabase.tables["agent_run"]) == 1
-    assert fake_queue_producer.enqueued_runs == [
-        {"run_id": fake_supabase.tables["agent_run"][0]["id"], "delay_seconds": 8}
-    ]
+    assert fake_supabase.tables["agent_run"] == []
+    assert fake_queue_producer.enqueued_runs == []
 
     history = await client.get(
         f"/api/v1/projects/{project['id']}/messages",
@@ -460,7 +470,7 @@ async def test_messages_and_upload_url_require_membership(
 
 
 @pytest.mark.asyncio
-async def test_filler_message_is_persisted_without_triggering_agents(
+async def test_regular_message_is_persisted_without_triggering_agents(
     client: AsyncClient,
     fake_supabase: FakeSupabase,
     fake_queue_producer: FakeQueueProducer,
@@ -480,7 +490,7 @@ async def test_filler_message_is_persisted_without_triggering_agents(
     post_message = await client.post(
         f"/api/v1/projects/{project['id']}/messages",
         headers={"X-Session-Id": "alpha"},
-        json={"content": "the"},
+        json={"content": "Discuss the release checklist."},
     )
 
     assert post_message.status_code == 201
@@ -489,8 +499,9 @@ async def test_filler_message_is_persisted_without_triggering_agents(
     assert fake_queue_producer.enqueued_runs == []
 
 
+@pytest.mark.skip(reason="Legacy auto-trigger assertion replaced by slash-command coverage below.")
 @pytest.mark.asyncio
-async def test_non_english_message_still_triggers_agents_when_not_obvious_filler(
+async def test_analyze_slash_command_triggers_agents_ephemerally(
     client: AsyncClient,
     fake_supabase: FakeSupabase,
     fake_queue_producer: FakeQueueProducer,
@@ -507,7 +518,7 @@ async def test_non_english_message_still_triggers_agents_when_not_obvious_filler
         },
     )
 
-    post_message = await client.post(
+    response = await client.post(
         f"/api/v1/projects/{project['id']}/messages",
         headers={"X-Session-Id": "alpha"},
         json={"content": "可以"},
@@ -517,6 +528,118 @@ async def test_non_english_message_still_triggers_agents_when_not_obvious_filler
     assert len(fake_supabase.tables["agent_run"]) == 1
     assert fake_queue_producer.enqueued_runs == [
         {"run_id": fake_supabase.tables["agent_run"][0]["id"], "delay_seconds": 8}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_analyze_slash_command_returns_ephemeral_run_result(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+    fake_queue_producer: FakeQueueProducer,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+
+    response = await client.post(
+        f"/api/v1/projects/{project['id']}/messages",
+        headers={"X-Session-Id": "alpha"},
+        json={"content": "/analyze   now please"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["ephemeral"] is True
+    assert payload["command"] == "analyze"
+    assert payload["args"] == "now please"
+    assert len(fake_supabase.tables["chat_message"]) == 0
+    assert len(fake_supabase.tables["agent_run"]) == 1
+    assert fake_supabase.tables["agent_run"][0]["new_message_ids"] == []
+    assert fake_queue_producer.enqueued_runs == [
+        {"run_id": fake_supabase.tables["agent_run"][0]["id"], "delay_seconds": None}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_status_slash_command_returns_agent_statuses_without_persisting_message(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+
+    response = await client.post(
+        f"/api/v1/projects/{project['id']}/messages",
+        headers={"X-Session-Id": "alpha"},
+        json={"content": "/status"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["ephemeral"] is True
+    assert payload["command"] == "status"
+    assert payload["args"] == ""
+    assert len(payload["result"]["statuses"]) == 4
+    assert {status["agent"] for status in payload["result"]["statuses"]} == {
+        "monitor",
+        "analyzer",
+        "planner",
+        "updater",
+    }
+    assert fake_supabase.tables["chat_message"] == []
+
+
+@pytest.mark.asyncio
+async def test_commands_endpoint_lists_supported_slash_commands(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+
+    response = await client.get(
+        f"/api/v1/projects/{project['id']}/commands",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == [
+        {
+            "name": "analyze",
+            "description": "Run the AI pipeline for this project.",
+            "usage": "/analyze [optional note]",
+        },
+        {
+            "name": "status",
+            "description": "Show the current Orca agent statuses.",
+            "usage": "/status",
+        },
     ]
 
 
@@ -1902,7 +2025,62 @@ async def test_agents_status_and_trigger(
 
 
 @pytest.mark.asyncio
-async def test_trigger_reuses_active_run_for_new_messages(
+async def test_agents_trigger_only_includes_messages_newer_than_project_cursor(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+    fake_queue_producer: FakeQueueProducer,
+):
+    project = fake_supabase.insert_row(
+        "project",
+        {
+            "name": "Alpha",
+            "description": "A",
+            "last_processed_message_at": "2026-06-29T10:00:00+00:00",
+        },
+    )
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    old_message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Already processed",
+            "created_at": "2026-06-29T10:00:00+00:00",
+        },
+    )
+    new_message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Needs analysis",
+            "created_at": "2026-06-29T11:00:00+00:00",
+        },
+    )
+
+    trigger_response = await client.post(
+        f"/api/v1/projects/{project['id']}/agents/trigger",
+        headers={"X-Session-Id": "alpha"},
+    )
+
+    assert trigger_response.status_code == 202
+    assert len(fake_supabase.tables["agent_run"]) == 1
+    assert fake_supabase.tables["agent_run"][0]["new_message_ids"] == [new_message["id"]]
+    assert old_message["id"] not in fake_supabase.tables["agent_run"][0]["new_message_ids"]
+    assert fake_queue_producer.enqueued_run_ids == [fake_supabase.tables["agent_run"][0]["id"]]
+
+
+@pytest.mark.asyncio
+async def test_analyze_creates_follow_up_run_when_another_run_is_active(
     client: AsyncClient,
     fake_supabase: FakeSupabase,
     fake_queue_producer: FakeQueueProducer,
@@ -1928,19 +2106,96 @@ async def test_trigger_reuses_active_run_for_new_messages(
         },
     )
 
-    first_message = await client.post(
+    response = await client.post(
         f"/api/v1/projects/{project['id']}/messages",
         headers={"X-Session-Id": "alpha"},
-        json={"content": "Need frontend QA owner."},
+        json={"content": "/analyze"},
     )
 
-    assert first_message.status_code == 201
+    assert response.status_code == 200
     assert len(fake_supabase.tables["agent_run"]) == 2
     assert fake_supabase.tables["agent_run"][0]["id"] == active_run["id"]
     follow_up_run = fake_supabase.tables["agent_run"][1]
     assert follow_up_run["status"] == "queued"
-    assert first_message.json()["data"]["id"] in follow_up_run["new_message_ids"]
+    assert follow_up_run["new_message_ids"] == []
+    assert follow_up_run["new_file_ids"] == []
     assert fake_queue_producer.enqueued_run_ids == [follow_up_run["id"]]
+    statuses = {
+        row["agent"]: row["status"]
+        for row in fake_supabase.tables["agent_status"]
+        if row["project_id"] == project["id"]
+    }
+    assert statuses == {
+        "monitor": "queued",
+        "analyzer": "idle",
+        "planner": "idle",
+        "updater": "idle",
+    }
+
+
+@pytest.mark.asyncio
+async def test_analyze_reuses_queued_run_and_resets_stale_agent_statuses(
+    client: AsyncClient,
+    fake_supabase: FakeSupabase,
+    fake_queue_producer: FakeQueueProducer,
+):
+    project = fake_supabase.insert_row("project", {"name": "Alpha", "description": "A"})
+    fake_supabase.insert_row(
+        "project_member",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "role": "creator",
+            "can_approve": True,
+            "can_edit": True,
+        },
+    )
+    for agent, status in (
+        ("monitor", "completed"),
+        ("analyzer", "completed"),
+        ("planner", "running"),
+        ("updater", "idle"),
+    ):
+        fake_supabase.insert_row(
+            "agent_status",
+            {
+                "project_id": project["id"],
+                "agent": agent,
+                "status": status,
+            },
+        )
+    queued_run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [],
+            "new_file_ids": [],
+        },
+    )
+
+    response = await client.post(
+        f"/api/v1/projects/{project['id']}/messages",
+        headers={"X-Session-Id": "alpha"},
+        json={"content": "/analyze"},
+    )
+
+    assert response.status_code == 200
+    assert len(fake_supabase.tables["agent_run"]) == 1
+    assert fake_supabase.tables["agent_run"][0]["id"] == queued_run["id"]
+    assert fake_queue_producer.enqueued_run_ids == []
+    statuses = {
+        row["agent"]: row["status"]
+        for row in fake_supabase.tables["agent_status"]
+        if row["project_id"] == project["id"]
+    }
+    assert statuses == {
+        "monitor": "queued",
+        "analyzer": "idle",
+        "planner": "idle",
+        "updater": "idle",
+    }
 
 
 @pytest.mark.asyncio

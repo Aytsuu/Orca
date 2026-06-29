@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import Field, model_validator
@@ -35,6 +35,20 @@ class MessageOut(ApiModel):
     content: str
     attachments: list[ChatAttachment] = Field(default_factory=list)
     created_at: datetime
+
+
+class SlashCommandOut(ApiModel):
+    name: str
+    description: str
+    usage: str
+
+
+class SlashCommandResultOut(ApiModel):
+    command: str
+    args: str = ""
+    ephemeral: bool = True
+    message: str
+    result: dict[str, Any] = Field(default_factory=dict)
 
 
 class UploadUrlOut(ApiModel):

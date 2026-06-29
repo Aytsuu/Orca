@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapActivitySuggestion } from './projectAiActivity';
+import { getProjectAiActivityRefetchInterval, mapActivitySuggestion } from './projectAiActivity';
 
 describe('mapActivitySuggestion', () => {
   it('marks proposal change task suggestions as non-actionable in AI activity', () => {
@@ -22,5 +22,19 @@ describe('mapActivitySuggestion', () => {
       actionable: false,
       agent: 'planner',
     });
+  });
+});
+
+describe('getProjectAiActivityRefetchInterval', () => {
+  it('always polls on the fixed interval before the first activity payload arrives', () => {
+    expect(getProjectAiActivityRefetchInterval()).toBe(3000);
+  });
+
+  it('always polls on the fixed interval while agents are active', () => {
+    expect(getProjectAiActivityRefetchInterval()).toBe(3000);
+  });
+
+  it('keeps polling on the fixed interval when agents are inactive', () => {
+    expect(getProjectAiActivityRefetchInterval()).toBe(3000);
   });
 });

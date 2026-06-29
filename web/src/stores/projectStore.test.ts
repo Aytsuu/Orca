@@ -439,12 +439,15 @@ describe('projectStore tests', () => {
         body: JSON.stringify({ content: 'Reply from beta', attachments: [] }),
       });
       expect(message).toEqual({
-        id: 'msg_2',
-        projectId: 'proj_1',
-        sessionId: 'beta',
-        content: 'Reply from beta',
-        attachments: [],
-        createdAt: '2026-06-17T10:01:00Z',
+        kind: 'message',
+        message: {
+          id: 'msg_2',
+          projectId: 'proj_1',
+          sessionId: 'beta',
+          content: 'Reply from beta',
+          attachments: [],
+          createdAt: '2026-06-17T10:01:00Z',
+        },
       });
     });
   });

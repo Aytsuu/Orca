@@ -6,7 +6,6 @@ from typing import Any
 from supabase import AsyncClient
 
 from src.agents.queue import QueueProducer
-from src.config import get_settings
 from src.exceptions import NotFound
 
 AGENT_NAMES = ("monitor", "analyzer", "planner", "updater")
@@ -154,6 +153,33 @@ async def create_agent_run(
     return inserted
 
 
+async def get_project_ai_cursor(supabase: AsyncClient, project_id: str) -> str | None:
+    rows = (
+        await supabase.table("project")
+        .select("last_processed_message_at")
+        .eq("id", project_id)
+        .limit(1)
+        .execute()
+    ).data
+    if not rows:
+        raise NotFound("The requested project was not found.")
+    return rows[0].get("last_processed_message_at")
+
+
+async def get_unprocessed_message_ids(supabase: AsyncClient, project_id: str) -> list[str]:
+    cursor = await get_project_ai_cursor(supabase, project_id)
+    query = (
+        supabase.table("chat_message")
+        .select("id,created_at")
+        .eq("project_id", project_id)
+        .order("created_at")
+    )
+    if cursor:
+        query = query.gt("created_at", cursor)
+    rows = (await query.execute()).data
+    return [str(row["id"]) for row in rows]
+
+
 async def trigger_agents(
     supabase: AsyncClient,
     queue_producer: QueueProducer,
@@ -162,9 +188,11 @@ async def trigger_agents(
     triggered_by: str,
     message_ids: list[str] | None = None,
     file_ids: list[str] | None = None,
-    debounce: bool = False,
 ) -> dict[str, Any]:
-    settings = get_settings()
+    resolved_message_ids = list(message_ids or [])
+    if not resolved_message_ids:
+        resolved_message_ids = await get_unprocessed_message_ids(supabase, project_id)
+
     await get_agent_statuses(supabase, project_id)
     queued_run = await get_latest_run_with_statuses(supabase, project_id, {"queued"})
 
@@ -172,15 +200,10 @@ async def trigger_agents(
         updated_run = await append_run_inputs(
             supabase,
             run=queued_run,
-            message_ids=message_ids,
+            message_ids=resolved_message_ids,
             file_ids=file_ids,
         )
-        if (
-            debounce
-            and updated_run["status"] == "queued"
-            and len(updated_run.get("new_message_ids", [])) >= settings.debounce_message_count
-        ):
-            queue_producer.enqueue_run(updated_run["id"])
+        await set_agent_statuses_for_new_run(supabase, project_id)
         return {
             "run_id": updated_run["id"],
             "project_id": project_id,
@@ -194,9 +217,10 @@ async def trigger_agents(
             supabase,
             project_id=project_id,
             triggered_by=triggered_by,
-            message_ids=message_ids,
+            message_ids=resolved_message_ids,
             file_ids=file_ids,
         )
+        await set_agent_statuses_for_new_run(supabase, project_id)
         queue_producer.enqueue_run(created_run["id"])
         return {
             "run_id": created_run["id"],
@@ -209,14 +233,11 @@ async def trigger_agents(
         supabase,
         project_id=project_id,
         triggered_by=triggered_by,
-        message_ids=message_ids,
+        message_ids=resolved_message_ids,
         file_ids=file_ids,
     )
     await set_agent_statuses_for_new_run(supabase, project_id)
-    delay_seconds = None
-    if debounce and len(created_run.get("new_message_ids", [])) < settings.debounce_message_count:
-        delay_seconds = settings.debounce_silence_seconds
-    queue_producer.enqueue_run(created_run["id"], delay_seconds=delay_seconds)
+    queue_producer.enqueue_run(created_run["id"])
     return {
         "run_id": created_run["id"],
         "project_id": project_id,

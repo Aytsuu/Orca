@@ -21,6 +21,24 @@ def load_phase3_migration() -> str:
     return matches[-1].read_text(encoding="utf-8")
 
 
+def load_phase2_windowing_migration() -> str:
+    migrations_dir = Path(__file__).resolve().parents[2] / "supabase" / "migrations"
+    matches = sorted(migrations_dir.glob("*_phase_2_conversation_windowing.sql"))
+
+    assert matches, "Expected a Phase 2 conversation windowing migration file in supabase/migrations."
+
+    return matches[-1].read_text(encoding="utf-8")
+
+
+def load_project_ai_cursor_restore_migration() -> str:
+    migrations_dir = Path(__file__).resolve().parents[2] / "supabase" / "migrations"
+    matches = sorted(migrations_dir.glob("*_restore_project_ai_cursor.sql"))
+
+    assert matches, "Expected a project AI cursor restore migration file in supabase/migrations."
+
+    return matches[-1].read_text(encoding="utf-8")
+
+
 def test_phase1_migration_defines_required_tables() -> None:
     migration_sql = load_phase1_migration()
 
@@ -106,3 +124,18 @@ def test_phase3_migration_enables_row_level_security() -> None:
         "project_llm_usage",
     }:
         assert f"alter table public.{table_name} enable row level security" in migration_sql
+
+
+def test_phase2_windowing_migration_adds_project_message_cursor() -> None:
+    migration_sql = load_phase2_windowing_migration().lower()
+
+    assert "alter table public.project" in migration_sql
+    assert "add column if not exists last_processed_message_at timestamptz" in migration_sql
+
+
+def test_project_ai_cursor_restore_migration_readds_cursor_column_and_index() -> None:
+    migration_sql = load_project_ai_cursor_restore_migration().lower()
+
+    assert "alter table public.project" in migration_sql
+    assert "add column if not exists last_processed_message_at timestamptz" in migration_sql
+    assert "create index if not exists project_last_processed_message_at_idx" in migration_sql

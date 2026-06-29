@@ -4,20 +4,23 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
+from fastapi.responses import JSONResponse
 from supabase import AsyncClient
 
 from src.agents.queue import QueueProducer, get_queue_producer
 from src.agents.service import trigger_agents
+from src.chat.commands import SLASH_COMMANDS, parse_slash_command
 from src.chat.schemas import (
     FileAccessUrlOut,
     MessageCreate,
     MessageOut,
+    SlashCommandOut,
+    SlashCommandResultOut,
     UploadedFileCreate,
     UploadedFileOut,
     UploadUrlOut,
     UploadUrlRequest,
 )
-from src.chat.relevance import classify_message_for_agent_trigger
 from src.chat.delete_service import delete_uploaded_file
 from src.chat.service import (
     create_signed_file_access_url,
@@ -28,6 +31,7 @@ from src.chat.service import (
     list_uploaded_files,
     promote_uploaded_file_to_ai_context,
 )
+from src.exceptions import BadRequest
 from src.models import DataEnvelope
 from src.projects.dependencies import get_project_context
 from src.supabase_client import get_supabase_admin
@@ -40,7 +44,7 @@ UploadUrlRequestDep = Annotated[UploadUrlRequest, Depends()]
 
 @router.post(
     "/{project_id}/messages",
-    response_model=DataEnvelope[MessageOut],
+    response_model=DataEnvelope[MessageOut | SlashCommandResultOut],
     status_code=status.HTTP_201_CREATED,
 )
 async def create_message_endpoint(
@@ -49,7 +53,30 @@ async def create_message_endpoint(
     project_context: Annotated[dict, Depends(get_project_context)],
     supabase: Annotated[AsyncClient, Depends(get_supabase_admin)],
     queue_producer: Annotated[QueueProducer, Depends(get_queue_producer)],
-) -> DataEnvelope[MessageOut]:
+) -> DataEnvelope[MessageOut | SlashCommandResultOut] | JSONResponse:
+    slash_command = parse_slash_command(payload.content)
+    if slash_command:
+        command_name, args = slash_command
+        command = SLASH_COMMANDS.get(command_name)
+        if command is None:
+            raise BadRequest(
+                message=f"Unknown slash command '/{command_name}'.",
+                detail={"available_commands": sorted(SLASH_COMMANDS.keys())},
+            )
+        result = await command.handler(
+            supabase=supabase,
+            queue_producer=queue_producer,
+            project_id=str(project_id),
+            session_id=project_context["session_id"],
+            args=args,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=DataEnvelope(
+                data=SlashCommandResultOut.model_validate(result)
+            ).model_dump(mode="json"),
+        )
+
     message = await create_message(
         supabase,
         project_id=str(project_id),
@@ -57,19 +84,24 @@ async def create_message_endpoint(
         content=payload.content,
         attachments=[attachment.model_dump(mode="json") for attachment in payload.attachments],
     )
-    should_trigger = False
-    if payload.content.strip():
-        should_trigger, _reason = classify_message_for_agent_trigger(payload.content)
-    if should_trigger:
-        await trigger_agents(
-            supabase,
-            queue_producer,
-            project_id=str(project_id),
-            triggered_by=project_context["session_id"],
-            message_ids=[message["id"]],
-            debounce=True,
-        )
     return DataEnvelope(data=MessageOut.model_validate(message))
+
+
+@router.get("/{project_id}/commands", response_model=DataEnvelope[list[SlashCommandOut]])
+async def list_commands_endpoint(
+    project_id: UUID,
+    _: Annotated[dict, Depends(get_project_context)],
+) -> DataEnvelope[list[SlashCommandOut]]:
+    del project_id
+    commands = [
+        SlashCommandOut(
+            name=command.name,
+            description=command.description,
+            usage=command.usage,
+        )
+        for command in SLASH_COMMANDS.values()
+    ]
+    return DataEnvelope(data=commands)
 
 
 @router.get("/{project_id}/messages", response_model=DataEnvelope[list[MessageOut]])

@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     summary_message_threshold: int = Field(default=15, alias="SUMMARY_MESSAGE_THRESHOLD")
     llm_rate_limit_rpm: int = Field(default=15, alias="LLM_RATE_LIMIT_RPM")
     context_warning_tokens: int = Field(default=100000, alias="CONTEXT_WARNING_TOKENS")
+    context_memory_limit: int = Field(default=10, alias="CONTEXT_MEMORY_LIMIT")
+    context_summary_limit: int = Field(default=5, alias="CONTEXT_SUMMARY_LIMIT")
 
 
 @lru_cache

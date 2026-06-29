@@ -64,6 +64,7 @@ export interface ProjectAiActivity {
 }
 
 const projectAiActivityQueryKey = (projectId: string) => ['project-ai-activity', projectId] as const;
+const ACTIVE_POLL_INTERVAL_MS = 3000;
 
 async function fetchProjectAiActivity(projectId: string): Promise<ProjectAiActivity> {
   const currentSessionId = sessionId.get();
@@ -80,12 +81,16 @@ async function fetchProjectAiActivity(projectId: string): Promise<ProjectAiActiv
   };
 }
 
+export function getProjectAiActivityRefetchInterval(): number {
+  return ACTIVE_POLL_INTERVAL_MS;
+}
+
 export function useProjectAiActivity(projectId: string) {
   return useQuery({
     queryKey: projectAiActivityQueryKey(projectId),
     queryFn: () => fetchProjectAiActivity(projectId),
     enabled: Boolean(projectId),
-    refetchInterval: 3000,
+    refetchInterval: getProjectAiActivityRefetchInterval,
   });
 }
 

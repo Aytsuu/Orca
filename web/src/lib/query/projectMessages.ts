@@ -4,7 +4,12 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { getSupabaseBrowserClient } from '../supabase/browser';
 import { defaultProjectRepository } from '../../stores/project/repository';
 import { sessionId } from '../../stores/project/session';
-import type { ApiProjectMessage, ProjectMessage, ProjectMessageAttachment } from '../../stores/project/types';
+import type {
+  ApiProjectMessage,
+  ProjectMessage,
+  ProjectMessageAttachment,
+  ProjectSendMessageResult,
+} from '../../stores/project/types';
 
 interface ProjectMessagesRealtimePayload {
   new: ApiProjectMessage;
@@ -73,6 +78,16 @@ export function useProjectMessages(projectId: string) {
   return query;
 }
 
+export function useProjectCommands(projectId: string) {
+  return useQuery({
+    queryKey: ['project-commands', projectId],
+    queryFn: () => defaultProjectRepository.fetchProjectCommands(projectId, sessionId.get()),
+    enabled: Boolean(projectId),
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: Number.POSITIVE_INFINITY,
+  });
+}
+
 export function useSendProjectMessage(projectId: string) {
   const queryClient = useQueryClient();
 
@@ -80,6 +95,9 @@ export function useSendProjectMessage(projectId: string) {
     mutationFn: (payload: { content: string; attachments?: ProjectMessageAttachment[] }) =>
       defaultProjectRepository.createProjectMessage(projectId, payload, sessionId.get()),
     onMutate: async (payload: { content: string; attachments?: ProjectMessageAttachment[] }) => {
+      if (isSlashCommandInput(payload.content)) {
+        return { previousMessages: undefined, optimisticId: undefined };
+      }
       await queryClient.cancelQueries({ queryKey: ['project-messages', projectId] });
       const previousMessages = queryClient.getQueryData<ProjectMessage[]>(['project-messages', projectId]);
       const newMessage = buildOptimisticProjectMessage(
@@ -95,19 +113,26 @@ export function useSendProjectMessage(projectId: string) {
       return { previousMessages, optimisticId: newMessage.id };
     },
     onError: (err, variables, context) => {
-      queryClient.setQueryData(['project-messages', projectId], context?.previousMessages);
+      if (context?.previousMessages) {
+        queryClient.setQueryData(['project-messages', projectId], context.previousMessages);
+      }
     },
-    onSuccess: (data, variables, context) => {
+    onSuccess: (data: ProjectSendMessageResult, variables, context) => {
+      if (data.kind === 'ephemeral' || !context?.optimisticId) {
+        return;
+      }
       queryClient.setQueryData<ProjectMessage[]>(
         ['project-messages', projectId],
         (old) => {
-          if (!old) return [data];
-          return replaceOptimisticProjectMessage(old, context.optimisticId, data);
+          if (!old) return [data.message];
+          return replaceOptimisticProjectMessage(old, context.optimisticId, data.message);
         }
       );
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ['project-messages', projectId] });
+    onSettled: (data) => {
+      if (data?.kind !== 'ephemeral') {
+        void queryClient.invalidateQueries({ queryKey: ['project-messages', projectId] });
+      }
     },
   });
 }
@@ -161,6 +186,108 @@ export function mergeIncomingProjectMessage(
   }
 
   return [...messages, incoming];
+}
+
+export function isSlashCommandInput(content: string): boolean {
+  return content.trimStart().startsWith('/');
+}
+
+export function buildEphemeralProjectMessage(
+  projectId: string,
+  sessionId: string,
+  commandText: string,
+  content: string,
+  now: Date = new Date()
+): ProjectMessage {
+  return {
+    id: `ephemeral:${Math.random().toString(36).slice(2, 9)}`,
+    projectId,
+    sessionId,
+    content,
+    attachments: [],
+    createdAt: now.toISOString(),
+    isEphemeral: true,
+    ephemeralLabel: 'Only visible to you',
+    commandName: commandText.replace(/^\s*\//, '').split(/\s+/, 1)[0] || 'command',
+  };
+}
+
+export function mergeRenderedProjectMessages(
+  persistedMessages: ProjectMessage[],
+  ephemeralMessages: ProjectMessage[]
+): ProjectMessage[] {
+  return [...persistedMessages, ...ephemeralMessages].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+}
+
+export function buildEphemeralMessageStorageKey(projectId: string, currentSessionId: string): string {
+  return `orca:project:${projectId}:session:${currentSessionId}:ephemeral-messages`;
+}
+
+export function serializeEphemeralProjectMessages(messages: ProjectMessage[]): string {
+  return JSON.stringify(
+    messages.filter((message) => message.isEphemeral && !message.isOptimistic).map((message) => ({
+      id: message.id,
+      projectId: message.projectId,
+      sessionId: message.sessionId,
+      content: message.content,
+      attachments: message.attachments,
+      createdAt: message.createdAt,
+      isEphemeral: true,
+      ephemeralLabel: message.ephemeralLabel,
+      commandName: message.commandName,
+    }))
+  );
+}
+
+export function parseEphemeralProjectMessages(serialized: string | null): ProjectMessage[] {
+  if (!serialized) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(serialized) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.flatMap((item) => {
+      if (!item || typeof item !== 'object') {
+        return [];
+      }
+
+      const candidate = item as Record<string, unknown>;
+      if (
+        typeof candidate.id !== 'string' ||
+        typeof candidate.projectId !== 'string' ||
+        typeof candidate.sessionId !== 'string' ||
+        typeof candidate.content !== 'string' ||
+        typeof candidate.createdAt !== 'string'
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          id: candidate.id,
+          projectId: candidate.projectId,
+          sessionId: candidate.sessionId,
+          content: candidate.content,
+          attachments: Array.isArray(candidate.attachments)
+            ? (candidate.attachments as ProjectMessageAttachment[])
+            : [],
+          createdAt: candidate.createdAt,
+          isEphemeral: true,
+          ephemeralLabel:
+            typeof candidate.ephemeralLabel === 'string' ? candidate.ephemeralLabel : 'Only visible to you',
+          commandName: typeof candidate.commandName === 'string' ? candidate.commandName : undefined,
+        },
+      ];
+    });
+  } catch {
+    return [];
+  }
 }
 
 export function subscribeToProjectMessagesRealtime(

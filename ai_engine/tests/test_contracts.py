@@ -98,3 +98,16 @@ def test_partition_safety_violations_ignores_confidence_wording_false_positives(
 
     assert len(ignored) == 2
     assert blocking == ["No remove action exists without explicit user intent."]
+
+
+def test_partition_safety_violations_ignores_identifier_only_entries() -> None:
+    ignored, blocking = partition_safety_violations(
+        [
+            "plan-title-update-1",
+            "plan-description-add-1",
+            "No remove action exists without explicit user intent.",
+        ]
+    )
+
+    assert ignored == ["plan-title-update-1", "plan-description-add-1"]
+    assert blocking == ["No remove action exists without explicit user intent."]

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any
 
 from src.agents.base import AgentStep, StepResult
@@ -76,22 +75,41 @@ def _build_reasoning_context(
     *,
     monitor_output: MonitorOutput | None = None,
     analyzer_output: Any | None = None,
+    include_messages: bool = True,
 ) -> dict:
-    payload = {
-        "context": {
-            "current_plan": _strip_non_citation_ids(context.current_plan),
-            "new_messages": _serialize_prompt_messages(context.new_messages),
-            "memory": _strip_non_citation_ids(context.memory),
-            "summaries": _strip_non_citation_ids(context.summaries),
-            "files": _strip_non_citation_ids(context.files),
-            "warnings": list(context.warnings),
-        }
+    prompt_context = {
+        "current_plan": _strip_non_citation_ids(context.current_plan),
+        "memory": _strip_non_citation_ids(context.memory),
+        "summaries": _strip_non_citation_ids(context.summaries),
+        "files": _strip_non_citation_ids(context.files),
+        "warnings": list(context.warnings),
     }
+    if include_messages:
+        prompt_context["new_messages"] = _serialize_prompt_messages(context.new_messages)
+    payload = {"context": prompt_context}
     if monitor_output is not None:
         payload["monitor"] = monitor_output.model_dump(mode="json")
     if analyzer_output is not None and hasattr(analyzer_output, "model_dump"):
         payload["analyzer"] = analyzer_output.model_dump(mode="json")
     return payload
+
+
+def _build_monitor_context(context: AssembledContext) -> dict[str, Any]:
+    current_plan = None
+    if context.current_plan:
+        current_plan = _strip_non_citation_ids(
+            {
+                "title": context.current_plan.get("title"),
+                "description": context.current_plan.get("description"),
+                "phases": context.current_plan.get("phases", []),
+            }
+        )
+    return {
+        "current_plan": current_plan,
+        "new_messages": _serialize_prompt_messages(context.new_messages),
+        "memory": _strip_non_citation_ids(context.memory),
+        "summaries": _strip_non_citation_ids(context.summaries),
+    }
 
 
 def is_question_only_monitor_output(output: MonitorOutput) -> bool:
@@ -125,7 +143,7 @@ class MonitorStep(AgentStep):
     ) -> StepResult:
         del prior_results
         output = await self._llm_client.generate_json(
-            MONITOR_PROMPT.format(context=asdict(context)),
+            MONITOR_PROMPT.format(context=_build_monitor_context(context)),
             MonitorOutput,
             model=self._settings.llm_fast_model,
             temperature=0.0,
@@ -180,6 +198,7 @@ class AnalyzerStep(AgentStep):
                 context=_build_reasoning_context(
                     context,
                     monitor_output=monitor_output,
+                    include_messages=False,
                 )
             ),
             AnalyzerOutput,
@@ -277,6 +296,7 @@ class PlannerStep(AgentStep):
                     context,
                     monitor_output=prior_results[0].output,
                     analyzer_output=prior_results[1].output,
+                    include_messages=False,
                 )
             ),
             PlannerOutput,

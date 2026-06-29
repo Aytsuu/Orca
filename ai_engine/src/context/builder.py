@@ -42,8 +42,15 @@ class ContextBuilder:
     ) -> AssembledContext:
         current_plan = await self._get_current_plan(project_id)
         new_messages = await self._get_messages(project_id, message_ids)
-        memory = await self._retrieval_strategy.retrieve(project_id, new_messages, limit=20)
-        summaries = await self._get_summaries(project_id, limit=10)
+        memory = await self._retrieval_strategy.retrieve(
+            project_id,
+            new_messages,
+            limit=self._settings.context_memory_limit,
+        )
+        summaries = await self._get_summaries(
+            project_id,
+            limit=self._settings.context_summary_limit,
+        )
         files = await self._get_files(project_id, file_ids or [])
 
         assembled = {
@@ -81,16 +88,18 @@ class ContextBuilder:
         return rows[0] if rows else None
 
     async def _get_messages(self, project_id: str, message_ids: list[str]) -> list[dict[str, Any]]:
+        if not message_ids:
+            return []
+
         rows = (
             await self._supabase.table("chat_message")
             .select("*")
             .eq("project_id", project_id)
+            .in_("id", message_ids)
             .order("created_at")
             .execute()
         ).data
-        requested_ids = set(message_ids)
-        filtered = [row for row in rows if row["id"] in requested_ids]
-        return filtered[-50:]
+        return rows[-50:]
 
     async def _get_summaries(self, project_id: str, limit: int) -> list[dict[str, Any]]:
         rows = (

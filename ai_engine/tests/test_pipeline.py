@@ -614,7 +614,9 @@ async def test_pipeline_allows_analyzer_and_planner_to_cite_ids_from_supplied_co
 
 
 @pytest.mark.asyncio
-async def test_pipeline_sanitizes_analyzer_and_planner_prompt_payload_ids(fake_supabase) -> None:
+async def test_pipeline_sanitizes_analyzer_and_planner_prompt_payload_ids_without_raw_messages(
+    fake_supabase,
+) -> None:
     project = fake_supabase.insert_row("project", {"name": "Alpha"})
     prior_message = fake_supabase.insert_row(
         "chat_message",
@@ -733,6 +735,8 @@ async def test_pipeline_sanitizes_analyzer_and_planner_prompt_payload_ids(fake_s
     for prompt in (analyzer_prompt, planner_prompt):
         assert prior_message["id"] in prompt
         assert new_message["id"] in prompt
+        assert prior_message["content"] not in prompt
+        assert new_message["content"] not in prompt
         assert prior_message["created_at"] not in prompt
         assert new_message["created_at"] not in prompt
         assert memory_row["id"] not in prompt
@@ -743,6 +747,7 @@ async def test_pipeline_sanitizes_analyzer_and_planner_prompt_payload_ids(fake_s
         assert run["id"] not in prompt
         assert "phase-row-id" not in prompt
         assert "task-row-id" not in prompt
+        assert "new_messages" not in prompt
     assert "treat missing task descriptions and missing acceptance criteria as real planning gaps" in analyzer_prompt
     assert 'Treat task descriptions and acceptance_criteria as expected outputs' in planner_prompt
     assert 'leave those fields empty rather than inventing detail' in planner_prompt
@@ -1498,6 +1503,135 @@ async def test_pipeline_ignores_confidence_wording_only_safety_false_positive(
 
 
 @pytest.mark.asyncio
+async def test_pipeline_ignores_identifier_only_safety_false_positive(
+    fake_supabase,
+) -> None:
+    project = fake_supabase.insert_row("project", {"name": "Alpha"})
+    message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Add a title, description, objectives, and launch phases.",
+        },
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [message["id"]],
+        },
+    )
+    llm = FakeJsonLlmClient(
+        responses=[
+            MonitorOutput(
+                requirements=[
+                    {
+                        "kind": "requirement",
+                        "content": "Add a title and description",
+                        "source_message_ids": [message["id"]],
+                        "excerpt": "Add a title and description",
+                        "confidence": "medium",
+                    }
+                ],
+                tasks=[
+                    {
+                        "kind": "task",
+                        "content": "Add launch phases",
+                        "source_message_ids": [message["id"]],
+                        "excerpt": "Add launch phases",
+                        "confidence": "medium",
+                    }
+                ],
+            ),
+            AnalyzerOutput(
+                gaps=[
+                    {
+                        "title": "Core plan fields missing",
+                        "detail": "The plan still needs a title, description, objectives, and phases.",
+                        "severity": "major",
+                        "source_message_ids": [message["id"]],
+                    }
+                ]
+            ),
+            {
+                "changes": [
+                    {
+                        "id": "plan-title-update-1",
+                        "section": "title",
+                        "action": "update",
+                        "content": "Launch Plan",
+                        "justification": "The user asked for a title.",
+                        "source_message_ids": [message["id"]],
+                        "confidence": "medium",
+                    },
+                    {
+                        "id": "plan-description-add-1",
+                        "section": "description",
+                        "action": "update",
+                        "content": "Plan for launch preparation and delivery.",
+                        "justification": "The user asked for a description.",
+                        "source_message_ids": [message["id"]],
+                        "confidence": "medium",
+                    },
+                    {
+                        "id": "plan-objectives-add-1",
+                        "section": "objectives",
+                        "action": "add",
+                        "content": [{"value": "Prepare for launch"}],
+                        "justification": "The user asked for objectives.",
+                        "source_message_ids": [message["id"]],
+                        "confidence": "medium",
+                    },
+                    {
+                        "id": "plan-phases-add-1",
+                        "section": "phases",
+                        "action": "add",
+                        "content": [{"title": "Launch", "description": "Prepare launch work."}],
+                        "justification": "The user asked for launch phases.",
+                        "source_message_ids": [message["id"]],
+                        "confidence": "medium",
+                    },
+                ],
+                "summary": "Add core plan structure.",
+            },
+            {
+                "safe": False,
+                "violations": [
+                    "plan-title-update-1",
+                    "plan-description-add-1",
+                    "plan-objectives-add-1",
+                    "plan-phases-add-1",
+                ],
+            },
+        ]
+    )
+
+    results = await run_project_pipeline(
+        fake_supabase,
+        run["id"],
+        llm_client=llm,
+        safety_client=llm,
+    )
+
+    assert [result.agent for result in results] == ["monitor", "analyzer", "planner"]
+    proposal = fake_supabase.tables["plan_proposal"][0]
+    assert proposal["status"] == "pending"
+    planner_artifact = next(
+        row for row in fake_supabase.tables["agent_artifact"] if row["agent"] == "planner"
+    )
+    assert planner_artifact["payload"]["safety"]["effective_safe"] is True
+    assert planner_artifact["payload"]["safety"]["ignored_violations"] == [
+        "plan-title-update-1",
+        "plan-description-add-1",
+        "plan-objectives-add-1",
+        "plan-phases-add-1",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_updates_agent_statuses(fake_supabase) -> None:
     project = fake_supabase.insert_row("project", {"name": "Alpha"})
     for agent in ("monitor", "analyzer", "planner", "updater"):
@@ -1531,6 +1665,176 @@ async def test_pipeline_updates_agent_statuses(fake_supabase) -> None:
     assert statuses["analyzer"] == "completed"
     assert statuses["planner"] == "completed"
     assert statuses["updater"] == "queued"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_updates_project_ai_cursor_to_latest_processed_message(fake_supabase) -> None:
+    project = fake_supabase.insert_row(
+        "project",
+        {"name": "Alpha", "last_processed_message_at": None},
+    )
+    older_message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Assign QA owner",
+            "created_at": "2026-06-29T10:00:00+00:00",
+        },
+    )
+    latest_message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Add release checklist task",
+            "created_at": "2026-06-29T11:00:00+00:00",
+        },
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [older_message["id"], latest_message["id"]],
+        },
+    )
+    llm = FakeJsonLlmClient(responses=[MonitorOutput(summary_candidate="brief summary")])
+
+    await run_project_pipeline(fake_supabase, run["id"], llm_client=llm, safety_client=llm)
+
+    assert fake_supabase.tables["project"][0]["last_processed_message_at"] == latest_message["created_at"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_leaves_project_ai_cursor_unchanged_for_empty_run(fake_supabase) -> None:
+    project = fake_supabase.insert_row(
+        "project",
+        {"name": "Alpha", "last_processed_message_at": "2026-06-29T10:00:00+00:00"},
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [],
+        },
+    )
+    llm = FakeJsonLlmClient(responses=[])
+
+    await run_project_pipeline(fake_supabase, run["id"], llm_client=llm, safety_client=llm)
+
+    assert fake_supabase.tables["project"][0]["last_processed_message_at"] == "2026-06-29T10:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_completes_when_project_ai_cursor_update_fails_late(
+    fake_supabase,
+    monkeypatch,
+) -> None:
+    project = fake_supabase.insert_row(
+        "project",
+        {"name": "Alpha", "last_processed_message_at": None},
+    )
+    message = fake_supabase.insert_row(
+        "chat_message",
+        {
+            "project_id": project["id"],
+            "session_id": "alpha",
+            "content": "Assign QA owner before launch",
+            "created_at": "2026-06-29T11:00:00+00:00",
+        },
+    )
+    run = fake_supabase.insert_row(
+        "agent_run",
+        {
+            "project_id": project["id"],
+            "triggered_by": "alpha",
+            "status": "queued",
+            "new_message_ids": [message["id"]],
+        },
+    )
+    llm = FakeJsonLlmClient(
+        responses=[
+            MonitorOutput(
+                tasks=[
+                    {
+                        "kind": "task",
+                        "content": "Assign QA owner before launch",
+                        "source_message_ids": [message["id"]],
+                        "excerpt": "Assign QA owner before launch",
+                        "confidence": "medium",
+                    }
+                ],
+                summary_candidate="Assign QA owner before launch.",
+            ),
+            AnalyzerOutput(
+                gaps=[
+                    {
+                        "title": "Owner missing",
+                        "detail": "The plan still needs a QA owner.",
+                        "severity": "major",
+                        "source_message_ids": [message["id"]],
+                    }
+                ]
+            ),
+            {
+                "changes": [
+                    {
+                        "id": "chg-1",
+                        "section": "tasks",
+                        "action": "add",
+                        "content": [{"title": "Assign QA owner before launch"}],
+                        "justification": "The latest message explicitly asks for it.",
+                        "source_message_ids": [message["id"]],
+                        "confidence": "high",
+                    }
+                ],
+                "summary": "Assign QA owner before launch.",
+            },
+            {"safe": True, "violations": []},
+        ]
+    )
+
+    from src.pipelines import runner as runner_module
+
+    original_update_project_ai_cursor = runner_module.update_project_ai_cursor
+
+    async def flaky_update_project_ai_cursor(supabase, *, project_id: str, last_processed_message_at: str):
+        del supabase, project_id, last_processed_message_at
+        raise RuntimeError("column project.last_processed_message_at does not exist")
+
+    monkeypatch.setattr(
+        runner_module,
+        "update_project_ai_cursor",
+        flaky_update_project_ai_cursor,
+    )
+
+    try:
+        results = await run_project_pipeline(
+            fake_supabase,
+            run["id"],
+            llm_client=llm,
+            safety_client=llm,
+        )
+    finally:
+        monkeypatch.setattr(
+            runner_module,
+            "update_project_ai_cursor",
+            original_update_project_ai_cursor,
+        )
+
+    assert [result.agent for result in results] == ["monitor", "analyzer", "planner"]
+    assert fake_supabase.tables["plan_proposal"][0]["status"] == "pending"
+    assert fake_supabase.tables["agent_run"][0]["status"] == "completed"
+    warning_artifact = fake_supabase.tables["agent_artifact"][-1]
+    assert warning_artifact["agent"] == "planner"
+    assert warning_artifact["payload"] == {
+        "warning": "project_ai_cursor_update_failed",
+        "detail": "column project.last_processed_message_at does not exist",
+    }
 
 
 class BusyLockManager:

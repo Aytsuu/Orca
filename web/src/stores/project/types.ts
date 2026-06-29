@@ -33,6 +33,9 @@ export interface ProjectMessage {
   attachments: ProjectMessageAttachment[];
   createdAt: string;
   isOptimistic?: boolean;
+  isEphemeral?: boolean;
+  ephemeralLabel?: string;
+  commandName?: string;
 }
 
 export interface ProjectFile {
@@ -92,6 +95,31 @@ export interface ApiProjectMessage {
   content: string;
   attachments?: ApiProjectMessageAttachment[];
   created_at: string;
+}
+
+export interface ProjectCommand {
+  name: string;
+  description: string;
+  usage: string;
+}
+
+export interface ApiProjectCommand {
+  name: string;
+  description: string;
+  usage: string;
+}
+
+export interface ApiSlashCommandResult {
+  command: string;
+  args: string;
+  ephemeral: boolean;
+  message: string;
+  result: Record<string, unknown>;
+}
+
+export interface ProjectSendMessageResult {
+  kind: 'message' | 'ephemeral';
+  message: ProjectMessage;
 }
 
 export interface ApiProjectMessageAttachment {

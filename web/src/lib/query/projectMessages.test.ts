@@ -2,9 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ProjectMessage } from '../../stores/project/types';
 import {
+  buildEphemeralMessageStorageKey,
   buildOptimisticProjectMessage,
+  buildEphemeralProjectMessage,
+  isSlashCommandInput,
   mergeIncomingProjectMessage,
+  mergeRenderedProjectMessages,
+  parseEphemeralProjectMessages,
   replaceOptimisticProjectMessage,
+  serializeEphemeralProjectMessages,
   subscribeToProjectMessagesRealtime,
 } from './projectMessages';
 
@@ -85,6 +91,116 @@ describe('projectMessages helpers', () => {
     const messages = mergeIncomingProjectMessage([incoming], incoming);
 
     expect(messages).toEqual([incoming]);
+  });
+
+  it('detects slash command input from the beginning of the message', () => {
+    expect(isSlashCommandInput('/analyze')).toBe(true);
+    expect(isSlashCommandInput('   /status')).toBe(true);
+    expect(isSlashCommandInput('ship /analyze later')).toBe(false);
+    expect(isSlashCommandInput('')).toBe(false);
+  });
+
+  it('appends ephemeral messages after persisted messages when rendering', () => {
+    const ephemeral = buildEphemeralProjectMessage(
+      'proj_1',
+      'alpha',
+      '/status',
+      'Only visible to you',
+      new Date('2026-06-17T10:00:02Z')
+    );
+    const persisted: ProjectMessage = {
+      id: 'msg_1',
+      projectId: 'proj_1',
+      sessionId: 'alpha',
+      content: 'Ship it',
+      attachments: [],
+      createdAt: '2026-06-17T10:00:01.000Z',
+    };
+
+    expect(mergeRenderedProjectMessages([persisted], [ephemeral])).toEqual([persisted, ephemeral]);
+  });
+
+  it('merges ephemeral and persisted messages in chronological order', () => {
+    const ephemeral = buildEphemeralProjectMessage(
+      'proj_1',
+      'alpha',
+      '/status',
+      'Only visible to you',
+      new Date('2026-06-17T10:00:02Z')
+    );
+    const persistedBefore: ProjectMessage = {
+      id: 'msg_1',
+      projectId: 'proj_1',
+      sessionId: 'alpha',
+      content: 'Before',
+      attachments: [],
+      createdAt: '2026-06-17T10:00:01.000Z',
+    };
+    const persistedAfter: ProjectMessage = {
+      id: 'msg_2',
+      projectId: 'proj_1',
+      sessionId: 'alpha',
+      content: 'After',
+      attachments: [],
+      createdAt: '2026-06-17T10:00:03.000Z',
+    };
+
+    const result = mergeRenderedProjectMessages([persistedBefore, persistedAfter], [ephemeral]);
+    expect(result).toEqual([persistedBefore, ephemeral, persistedAfter]);
+  });
+
+  it('serializes and parses ephemeral messages for reload persistence', () => {
+    const ephemeral = buildEphemeralProjectMessage(
+      'proj_1',
+      'alpha',
+      '/status',
+      'Only visible to you',
+      new Date('2026-06-17T10:00:02Z')
+    );
+    const persisted: ProjectMessage = {
+      id: 'msg_1',
+      projectId: 'proj_1',
+      sessionId: 'alpha',
+      content: 'Ship it',
+      attachments: [],
+      createdAt: '2026-06-17T10:00:01.000Z',
+    };
+
+    const serialized = serializeEphemeralProjectMessages([persisted, ephemeral]);
+
+    expect(parseEphemeralProjectMessages(serialized)).toEqual([ephemeral]);
+  });
+
+  it('does not serialize optimistic ephemeral messages', () => {
+    const optimisticEphemeral: ProjectMessage = {
+      id: 'optimistic-ephemeral:1',
+      projectId: 'proj_1',
+      sessionId: 'alpha',
+      content: 'Executing command...',
+      attachments: [],
+      createdAt: '2026-06-17T10:00:02Z',
+      isEphemeral: true,
+      isOptimistic: true,
+      commandName: 'status',
+    };
+    const completedEphemeral = buildEphemeralProjectMessage(
+      'proj_1',
+      'alpha',
+      '/status',
+      'Completed output',
+      new Date('2026-06-17T10:00:03Z')
+    );
+
+    const serialized = serializeEphemeralProjectMessages([optimisticEphemeral, completedEphemeral]);
+    const parsed = parseEphemeralProjectMessages(serialized);
+
+    expect(parsed).toEqual([completedEphemeral]);
+  });
+
+  it('builds a stable storage key per project and session', () => {
+    expect(buildEphemeralMessageStorageKey('proj_1', 'alpha')).toBe(
+      'orca:project:proj_1:session:alpha:ephemeral-messages'
+    );
   });
 
   it('subscribes to project-specific realtime inserts and merges them into cache', () => {

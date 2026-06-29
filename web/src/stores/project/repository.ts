@@ -4,12 +4,16 @@ import type {
   Project,
   Teammate,
   ProjectMessage,
+  ProjectCommand,
   ProjectMessageAttachment,
+  ProjectSendMessageResult,
   ProjectFile,
   ApiEnvelope,
   ApiProject,
+  ApiProjectCommand,
   ApiProjectMember,
   ApiProjectMessage,
+  ApiSlashCommandResult,
   ApiProjectFile,
   ApiMemberInvitation,
   StructuredPlan,
@@ -24,11 +28,12 @@ import type {
 export interface ProjectRepository {
   fetchProjects(sessionId: string): Promise<Project[]>;
   fetchProjectMessages(projectId: string, sessionId: string): Promise<ProjectMessage[]>;
+  fetchProjectCommands(projectId: string, sessionId: string): Promise<ProjectCommand[]>;
   createProjectMessage(
     projectId: string,
     payload: { content: string; attachments?: ProjectMessageAttachment[] },
     sessionId: string
-  ): Promise<ProjectMessage>;
+  ): Promise<ProjectSendMessageResult>;
   fetchProjectFiles(projectId: string, sessionId: string): Promise<ProjectFile[]>;
   uploadProjectFile(
     projectId: string,
@@ -119,12 +124,24 @@ export class ApiProjectRepository implements ProjectRepository {
     return response.data.map(mapApiProjectMessage);
   }
 
+  async fetchProjectCommands(projectId: string, sessionId: string): Promise<ProjectCommand[]> {
+    const response = await apiFetch<ApiEnvelope<ApiProjectCommand[]>>(
+      `/api/projects/${projectId}/commands`,
+      sessionId
+    );
+    return response.data.map((command) => ({
+      name: command.name,
+      description: command.description,
+      usage: command.usage,
+    }));
+  }
+
   async createProjectMessage(
     projectId: string,
     payload: { content: string; attachments?: ProjectMessageAttachment[] },
     sessionId: string
-  ): Promise<ProjectMessage> {
-    const response = await apiFetch<ApiEnvelope<ApiProjectMessage>>(
+  ): Promise<ProjectSendMessageResult> {
+    const response = await apiFetch<ApiEnvelope<ApiProjectMessage | ApiSlashCommandResult>>(
       `/api/projects/${projectId}/messages`,
       sessionId,
       {
@@ -141,7 +158,17 @@ export class ApiProjectRepository implements ProjectRepository {
         }),
       }
     );
-    return mapApiProjectMessage(response.data);
+    if ('ephemeral' in response.data && response.data.ephemeral) {
+      return {
+        kind: 'ephemeral',
+        message: mapApiSlashCommandResult(projectId, sessionId, response.data),
+      };
+    }
+
+    return {
+      kind: 'message',
+      message: mapApiProjectMessage(response.data),
+    };
   }
 
   async fetchProjectFiles(projectId: string, sessionId: string): Promise<ProjectFile[]> {
@@ -505,6 +532,8 @@ export class ApiProjectRepository implements ProjectRepository {
 export const defaultProjectRepository: ProjectRepository = new ApiProjectRepository();
 
 // Helper Mapping Functions
+const DISPLAY_TIME_ZONE = 'Asia/Manila';
+
 export function formatRelativeTime(isoTimestamp: string): string {
   const timestamp = new Date(isoTimestamp).getTime();
   if (Number.isNaN(timestamp)) return 'Recently';
@@ -519,7 +548,7 @@ export function formatRelativeTime(isoTimestamp: string): string {
   const diffDays = Math.floor(diffHours / 24);
   if (diffDays < 7) return `${diffDays}d ago`;
 
-  return new Date(isoTimestamp).toLocaleDateString();
+  return new Date(isoTimestamp).toLocaleDateString(undefined, { timeZone: DISPLAY_TIME_ZONE });
 }
 
 export function toInitials(value: string): string {
@@ -559,6 +588,24 @@ export function mapApiProjectMessage(message: ApiProjectMessage): ProjectMessage
       sizeBytes: attachment.size_bytes,
     })),
     createdAt: message.created_at,
+  };
+}
+
+export function mapApiSlashCommandResult(
+  projectId: string,
+  sessionId: string,
+  result: ApiSlashCommandResult
+): ProjectMessage {
+  return {
+    id: `ephemeral:${result.command}:${Math.random().toString(36).slice(2, 9)}`,
+    projectId,
+    sessionId,
+    content: result.message,
+    attachments: [],
+    createdAt: new Date().toISOString(),
+    isEphemeral: true,
+    ephemeralLabel: 'Only visible to you',
+    commandName: result.command,
   };
 }
 
@@ -605,7 +652,21 @@ export function formatDisplayDate(value?: string): string {
   if (!value) return 'Today';
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return parsed.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: DISPLAY_TIME_ZONE,
+  });
+}
+
+export function formatDisplayTime(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: DISPLAY_TIME_ZONE,
+  });
 }
 
 export function createEmptyPlan(projectId: string): StructuredPlan {

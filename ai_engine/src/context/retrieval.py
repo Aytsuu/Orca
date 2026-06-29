@@ -48,4 +48,4 @@ class KeywordRetrievalStrategy:
             overlap = len(query_terms & _keywords(row.get("content", "")))
             scored.append((overlap, row))
         scored.sort(key=lambda item: (item[0], item[1].get("updated_at", "")), reverse=True)
-        return [row for score, row in scored if score > 0][:limit] or rows[:limit]
+        return [row for score, row in scored if score > 0][:limit]

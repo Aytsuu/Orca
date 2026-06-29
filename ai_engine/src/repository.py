@@ -256,3 +256,36 @@ async def increment_llm_usage(
         .execute()
     ).data[0]
     return created
+
+
+async def get_project_ai_cursor(
+    supabase: AsyncClient,
+    project_id: str,
+) -> str | None:
+    rows = (
+        await supabase.table("project")
+        .select("last_processed_message_at")
+        .eq("id", project_id)
+        .limit(1)
+        .execute()
+    ).data
+    if not rows:
+        raise ValueError(f"Project {project_id} was not found.")
+    return rows[0].get("last_processed_message_at")
+
+
+async def update_project_ai_cursor(
+    supabase: AsyncClient,
+    *,
+    project_id: str,
+    last_processed_message_at: str,
+) -> str:
+    updated = (
+        await supabase.table("project")
+        .update({"last_processed_message_at": last_processed_message_at})
+        .eq("id", project_id)
+        .execute()
+    ).data
+    if not updated:
+        raise ValueError(f"Project {project_id} was not found.")
+    return str(updated[0]["last_processed_message_at"])

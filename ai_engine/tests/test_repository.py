@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.repository import claim_agent_run, create_plan_proposal
+from src.repository import (
+    claim_agent_run,
+    create_plan_proposal,
+    get_project_ai_cursor,
+    update_project_ai_cursor,
+)
 
 
 @pytest.mark.asyncio
@@ -62,3 +67,22 @@ async def test_create_plan_proposal_appends_to_existing_pending_proposal(fake_su
     assert created["status"] == "pending"
     assert [change["id"] for change in created["changes"]] == ["chg-1", "chg-2"]
     assert len(fake_supabase.tables["plan_proposal"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_project_ai_cursor_reads_and_updates_last_processed_message_at(fake_supabase) -> None:
+    project = fake_supabase.insert_row(
+        "project",
+        {"name": "Alpha", "last_processed_message_at": None},
+    )
+
+    assert await get_project_ai_cursor(fake_supabase, project["id"]) is None
+
+    updated = await update_project_ai_cursor(
+        fake_supabase,
+        project_id=project["id"],
+        last_processed_message_at="2026-06-29T10:00:00+00:00",
+    )
+
+    assert updated == "2026-06-29T10:00:00+00:00"
+    assert await get_project_ai_cursor(fake_supabase, project["id"]) == "2026-06-29T10:00:00+00:00"

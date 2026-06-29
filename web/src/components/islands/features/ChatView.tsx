@@ -39,8 +39,14 @@ import {
   usePromoteAllAiActivity,
 } from '../../../lib/query/projectAiActivity';
 import {
+  buildEphemeralMessageStorageKey,
+  parseEphemeralProjectMessages,
+  serializeEphemeralProjectMessages,
   useProjectMessages,
+  useProjectCommands,
   useSendProjectMessage,
+  isSlashCommandInput,
+  mergeRenderedProjectMessages,
 } from '../../../lib/query/projectMessages';
 import {
   useProjectFiles,
@@ -51,9 +57,10 @@ import {
 } from '../../../lib/query/projectFiles';
 import { QueryProvider } from '../providers/QueryProvider';
 import Modal from '../ui/Modal';
+import SlashCommandPicker from '../ui/SlashCommandPicker';
 import { ShareProjectModal } from './ShareProjectModal';
 import { sessionId } from '../../../stores/project/session';
-import { formatRelativeTime, toInitials } from '../../../stores/project/repository';
+import { formatDisplayTime, formatRelativeTime, toInitials } from '../../../stores/project/repository';
 
 interface ChatViewProps {
   projectId: string;
@@ -88,6 +95,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     isLoading: isMessagesLoading,
     error: messagesError,
   } = useProjectMessages(projectId);
+  const { data: projectCommands, isLoading: isCommandsLoading } = useProjectCommands(projectId);
   const {
     data: projectFiles,
     isLoading: isFilesLoading,
@@ -107,6 +115,24 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
   const currentProject = projectList.find((p) => p.id === projectId);
 
   const [messageText, setMessageText] = useState('');
+  const [ephemeralMessages, setEphemeralMessages] = useState<Array<{
+    id: string;
+    projectId: string;
+    sessionId: string;
+    content: string;
+    attachments: Array<{
+      uploadedFileId: string;
+      filename: string;
+      mimeType: string;
+      storagePath: string;
+      sizeBytes: number;
+    }>;
+    createdAt: string;
+    isEphemeral?: boolean;
+    isOptimistic?: boolean;
+    ephemeralLabel?: string;
+    commandName?: string;
+  }>>([]);
   const [replyToMessage, setReplyToMessage] = useState<{
     id: string;
     senderName: string;
@@ -228,6 +254,32 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     setExpandedSuggestionClusterKeys([]);
   }, [projectId]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const storageKey = buildEphemeralMessageStorageKey(projectId, currentSessionId);
+    setEphemeralMessages(parseEphemeralProjectMessages(window.localStorage.getItem(storageKey)));
+  }, [projectId, currentSessionId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const storageKey = buildEphemeralMessageStorageKey(projectId, currentSessionId);
+    if (ephemeralMessages.length === 0) {
+      window.localStorage.removeItem(storageKey);
+      return;
+    }
+
+    window.localStorage.setItem(
+      storageKey,
+      serializeEphemeralProjectMessages(ephemeralMessages)
+    );
+  }, [ephemeralMessages, projectId, currentSessionId]);
+
   if (isLoading) {
     return (
       <div className="flex-grow flex items-center justify-center text-text-muted select-none">
@@ -248,16 +300,40 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     e.preventDefault();
     const content = messageText.trim();
     if (!content && pendingChatFiles.length === 0) return;
+    if (isSlashCommandInput(content) && pendingChatFiles.length > 0) {
+      addToast('error', 'Slash commands cannot be sent with chat attachments.');
+      return;
+    }
     setMessageText('');
 
+    const isSlashCommand = isSlashCommandInput(content);
     let finalContent = content;
-    if (replyToMessage) {
+    if (replyToMessage && !isSlashCommand) {
       const excerpt = replyToMessage.content.replace(/\*/g, '').split('\n')[0] || 'Shared attachment(s)';
       const truncatedExcerpt = excerpt.length > 60 ? excerpt.slice(0, 57) + '...' : excerpt;
       finalContent = content
         ? `> **Replying to @${replyToMessage.senderName}**: *${truncatedExcerpt}*\n\n${content}`
         : `> **Replying to @${replyToMessage.senderName}**: *${truncatedExcerpt}*`;
       setReplyToMessage(null);
+    }
+
+    let optimisticEphemeralId: string | undefined;
+    if (isSlashCommand) {
+      const commandName = content.replace(/^\s*\//, '').split(/\s+/, 1)[0] || 'command';
+      optimisticEphemeralId = `optimistic-ephemeral:${Math.random().toString(36).slice(2, 9)}`;
+      const optimisticEphemeral = {
+        id: optimisticEphemeralId,
+        projectId,
+        sessionId: currentSessionId,
+        content: 'Executing command...',
+        attachments: [],
+        createdAt: new Date().toISOString(),
+        isEphemeral: true,
+        isOptimistic: true,
+        ephemeralLabel: 'Only visible to you',
+        commandName,
+      };
+      setEphemeralMessages((currentMessages) => [optimisticEphemeral, ...currentMessages]);
     }
 
     try {
@@ -269,7 +345,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
           })
         )
       );
-      await sendMessageMutation.mutateAsync({
+      const sendResult = await sendMessageMutation.mutateAsync({
         content: finalContent,
         attachments: uploadedAttachments.map((file) => ({
           uploadedFileId: file.id,
@@ -279,8 +355,24 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
           sizeBytes: file.sizeBytes,
         })),
       });
+      if (sendResult.kind === 'ephemeral') {
+        if (optimisticEphemeralId) {
+          setEphemeralMessages((currentMessages) =>
+            currentMessages.map((msg) =>
+              msg.id === optimisticEphemeralId ? sendResult.message : msg
+            )
+          );
+        } else {
+          setEphemeralMessages((currentMessages) => [sendResult.message, ...currentMessages]);
+        }
+      }
       setPendingChatFiles([]);
     } catch (sendError) {
+      if (isSlashCommand && optimisticEphemeralId) {
+        setEphemeralMessages((currentMessages) =>
+          currentMessages.filter((msg) => msg.id !== optimisticEphemeralId)
+        );
+      }
       setMessageText(content);
       if (replyToMessage) {
         // Restore reply state if mutation failed
@@ -535,7 +627,7 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
     );
   };
 
-  const renderedMessages = (projectMessages ?? []).map((message) => {
+  const renderedMessages = mergeRenderedProjectMessages(projectMessages ?? [], ephemeralMessages).map((message) => {
     const teammate = detail.teammates.find((member) => member.sessionId === message.sessionId);
     const isCurrentUser = message.sessionId === currentSessionId;
 
@@ -543,14 +635,14 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
       id: message.id,
       senderName: isCurrentUser ? 'You' : teammate?.name ?? message.sessionId,
       senderInitials: isCurrentUser ? 'YO' : teammate?.initials ?? toInitials(message.sessionId),
-      timestamp: new Date(message.createdAt).toLocaleTimeString([], {
-        hour: 'numeric',
-        minute: '2-digit',
-      }),
+      timestamp: formatDisplayTime(message.createdAt),
       content: message.content,
       attachments: message.attachments,
       isCurrentUser,
       isOptimistic: message.isOptimistic,
+      isEphemeral: message.isEphemeral,
+      ephemeralLabel: message.ephemeralLabel,
+      commandName: message.commandName,
     };
   });
 
@@ -714,16 +806,24 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
                     <span className="text-xs font-semibold text-text-muted">{msg.senderName}</span>
                     <span className="text-[10px] text-text-muted font-medium">{msg.timestamp}</span>
                   </div>
-
                   <div className="relative group/msg-content max-w-[85%] w-fit flex flex-col gap-1.5">
                     {/* Message Bubble Container - Only for Text */}
                     {renderMessageText(msg.content, msg.attachments) && (
                       <div
                         className={`rounded-2xl py-2 px-4 text-sm select-text leading-relaxed ${isUser
-                          ? 'bg-primary-muted border border-primary/10 text-text-primary rounded-tr-none'
-                          : 'bg-surface-raised border border-border-subtle text-text-secondary rounded-tl-none'
+                          ? msg.isEphemeral
+                            ? 'bg-background/70 border border-dashed border-border-subtle text-text-secondary italic rounded-tr-none'
+                            : 'bg-primary-muted border border-primary/10 text-text-primary rounded-tr-none'
+                          : msg.isEphemeral
+                            ? 'bg-background/70 border border-dashed border-border-subtle text-text-secondary italic rounded-tl-none'
+                            : 'bg-surface-raised border border-border-subtle text-text-secondary rounded-tl-none'
                           }`}
                       >
+                        {msg.commandName && (
+                          <div className="mb-1 text-[10px] font-semibold not-italic uppercase tracking-[0.14em] text-text-muted">
+                            /{msg.commandName}
+                          </div>
+                        )}
                         {renderBubbleText(msg.content, msg.attachments)}
                       </div>
                     )}
@@ -769,39 +869,41 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
                     )}
 
                     {/* Reply Action Button */}
-                    <div
-                      className={`absolute -top-3 opacity-0 group-hover/msg-content:opacity-100 transition-opacity duration-150 z-20 ${isUser ? 'left-3' : 'right-3'
-                        }`}
-                    >
-                      <div className="relative group/reply-btn">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setReplyToMessage({
-                              id: msg.id,
-                              senderName: msg.senderName,
-                              content: renderMessageText(msg.content, msg.attachments),
-                            });
-                            chatInputRef.current?.focus();
-                          }}
-                          className="flex h-7 w-7 items-center justify-center rounded-full border border-border-subtle bg-surface shadow-sm hover:bg-surface-raised hover:text-primary hover:border-primary/30 hover:scale-110 active:scale-95 transition-all duration-150 cursor-pointer"
-                          aria-label="Reply to this message"
-                        >
-                          <Reply className="w-3.5 h-3.5" />
-                        </button>
+                    {!msg.isEphemeral && (
+                      <div
+                        className={`absolute -top-3 opacity-0 group-hover/msg-content:opacity-100 transition-opacity duration-150 z-20 ${isUser ? 'left-3' : 'right-3'
+                          }`}
+                      >
+                        <div className="relative group/reply-btn">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReplyToMessage({
+                                id: msg.id,
+                                senderName: msg.senderName,
+                                content: renderMessageText(msg.content, msg.attachments),
+                              });
+                              chatInputRef.current?.focus();
+                            }}
+                            className="flex h-7 w-7 items-center justify-center rounded-full border border-border-subtle bg-surface shadow-sm hover:bg-surface-raised hover:text-primary hover:border-primary/30 hover:scale-110 active:scale-95 transition-all duration-150 cursor-pointer"
+                            aria-label="Reply to this message"
+                          >
+                            <Reply className="w-3.5 h-3.5" />
+                          </button>
 
-                        {/* Tooltip */}
-                        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 opacity-0 group-hover/reply-btn:opacity-100 transition-opacity duration-200 pointer-events-none z-30 flex flex-col items-center">
-                          <div className="bg-surface-raised border border-border-subtle text-text-primary text-[10px] px-2.5 py-1 rounded-md shadow-lg font-medium tracking-wide whitespace-nowrap">
-                            Reply to this message
+                          {/* Tooltip */}
+                          <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 opacity-0 group-hover/reply-btn:opacity-100 transition-opacity duration-200 pointer-events-none z-30 flex flex-col items-center">
+                            <div className="bg-surface-raised border border-border-subtle text-text-primary text-[10px] px-2.5 py-1 rounded-md shadow-lg font-medium tracking-wide whitespace-nowrap">
+                              Reply to this message
+                            </div>
+                            <div className="w-1.5 h-1.5 bg-surface-raised border-r border-b border-border-subtle transform rotate-45 -mt-1" />
                           </div>
-                          <div className="w-1.5 h-1.5 bg-surface-raised border-r border-b border-border-subtle transform rotate-45 -mt-1" />
                         </div>
                       </div>
-                    </div>
+                    )}
                   </div>
 
-                  {isUser && (msg.isOptimistic || msg.id === lastUserMessageId) && (
+                  {isUser && (msg.isOptimistic || (!msg.isEphemeral && msg.id === lastUserMessageId)) && (
                     <div className="mt-0.5 flex justify-end items-center text-text-muted select-none">
                       {msg.isOptimistic ? (
                         <span className="flex items-center gap-1" title="Sending...">
@@ -828,6 +930,16 @@ const ChatViewInner: React.FC<ChatViewProps> = ({ projectId }) => {
           onSubmit={handleSend}
           className="p-6 border-t border-border-subtle bg-surface flex flex-col shrink-0"
         >
+          <SlashCommandPicker
+            commands={projectCommands || []}
+            query={messageText}
+            isVisible={isSlashCommandInput(messageText)}
+            isLoading={isCommandsLoading}
+            onSelect={(command) => {
+              setMessageText(`/${command.name} `);
+              chatInputRef.current?.focus();
+            }}
+          />
           {replyToMessage && (
             <div className="mb-3 flex items-center justify-between rounded-lg bg-surface-raised border border-border-subtle px-4 py-2 text-xs text-text-secondary animate-fade-in select-none">
               <div className="flex flex-col gap-0.5 min-w-0">

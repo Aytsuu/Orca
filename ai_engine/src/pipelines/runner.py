@@ -39,6 +39,7 @@ from src.repository import (
     create_conversation_summary,
     create_memory_items,
     create_plan_proposal,
+    update_project_ai_cursor,
     get_agent_run,
     get_llm_usage,
     increment_llm_usage,
@@ -53,6 +54,7 @@ async def _skip_pipeline_as_non_meaningful(
     run_id: str,
     project_id: str,
     reason: str,
+    last_processed_message_at: str | None = None,
     extra_payload: dict[str, object] | None = None,
 ) -> list[StepResult]:
     payload: dict[str, object] = {"skipped": True, "reason": reason}
@@ -72,8 +74,44 @@ async def _skip_pipeline_as_non_meaningful(
             agent=agent_name,
             status="completed",
         )
+    await _persist_project_ai_cursor_if_possible(
+        supabase,
+        run_id=run_id,
+        project_id=project_id,
+        agent="monitor",
+        last_processed_message_at=last_processed_message_at,
+    )
     await set_run_status(supabase, run_id, status="completed")
     return []
+
+
+async def _persist_project_ai_cursor_if_possible(
+    supabase,
+    *,
+    run_id: str,
+    project_id: str,
+    agent: str,
+    last_processed_message_at: str | None,
+) -> None:
+    if not last_processed_message_at:
+        return
+    try:
+        await update_project_ai_cursor(
+            supabase,
+            project_id=project_id,
+            last_processed_message_at=last_processed_message_at,
+        )
+    except Exception as exc:
+        await create_agent_artifact(
+            supabase,
+            run_id=run_id,
+            project_id=project_id,
+            agent=agent,
+            payload={
+                "warning": "project_ai_cursor_update_failed",
+                "detail": str(exc),
+            },
+        )
 
 
 @lru_cache
@@ -358,6 +396,9 @@ async def run_project_pipeline(
                 run_id=run_id,
                 project_id=project_id,
                 reason="no_meaningful_messages",
+                last_processed_message_at=(
+                    context.new_messages[-1]["created_at"] if context.new_messages else None
+                ),
                 extra_payload={"message_count": len(context.new_messages)},
             )
         if not meaningful_messages and ambiguous_messages:
@@ -373,6 +414,9 @@ async def run_project_pipeline(
                     run_id=run_id,
                     project_id=project_id,
                     reason="relevance_gate_filtered_messages",
+                    last_processed_message_at=(
+                        context.new_messages[-1]["created_at"] if context.new_messages else None
+                    ),
                     extra_payload={"relevance_gate": relevance.model_dump(mode="json")},
                 )
 
@@ -502,6 +546,15 @@ async def run_project_pipeline(
                 project_id=project_id,
                 changes=planner_result.artifacts["changes"],
             )
+        await _persist_project_ai_cursor_if_possible(
+            supabase,
+            run_id=run_id,
+            project_id=project_id,
+            agent=results[-1].agent if results else "monitor",
+            last_processed_message_at=(
+                context.new_messages[-1]["created_at"] if context.new_messages else None
+            ),
+        )
         await set_run_status(supabase, run_id, status="completed")
         return results
     except EngineError as exc:
